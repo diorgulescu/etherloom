@@ -401,8 +401,8 @@ npm run tauri dev</code></pre>
               <tr>
                 <td><strong>macOS Version</strong></td>
                 <td>macOS 13 (Ventura)</td>
-                <td>macOS 14 (Sonoma) / 15+ (Sequoia)</td>
-                <td>Unprivileged Apple <code>Hypervisor.framework</code> (<code>-accel hvf</code>) + multi-arch <code>TCG</code></td>
+                <td>macOS 14+ (Sonoma / Sequoia / Tahoe / 27+)</td>
+                <td>Unprivileged Apple <code>Hypervisor.framework</code> (<code>-accel hvf</code>) + multi-arch <code>TCG</code> (for browser-downloaded unsigned <code>.dmg</code> builds, clear Safari quarantine once via <code>xattr -dr com.apple.quarantine /Applications/Etherloom.app</code>)</td>
               </tr>
               <tr>
                 <td><strong>CPU</strong></td>

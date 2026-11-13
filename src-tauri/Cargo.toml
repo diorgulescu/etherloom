@@ -1,6 +1,6 @@
 [package]
 name = "etherloom"
-version = "0.5.0"
+version = "0.5.1"
 description = "macOS-native zero-root network orchestration and learning studio powered by QEMU + Hypervisor.framework"
 authors = [
   "Dragoş Iorgulescu <32508790+diorgulescu@users.noreply.github.com>",

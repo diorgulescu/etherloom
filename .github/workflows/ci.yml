@@ -24,18 +24,20 @@ jobs:
           test -x scripts/prepare-library.sh
           test -x scripts/smoke-test-wire.sh
           test -x scripts/bump-version.sh
+          test -x scripts/allow-macos-app.sh
           test -x .githooks/pre-commit
-          bash -n scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh scripts/bump-version.sh .githooks/pre-commit
+          bash -n scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh scripts/bump-version.sh scripts/allow-macos-app.sh .githooks/pre-commit
           ./scripts/prepare_library.sh --help >/dev/null
           ./scripts/smoke-test-wire.sh --help >/dev/null
           ./scripts/bump-version.sh --help >/dev/null
+          ./scripts/allow-macos-app.sh --help >/dev/null
 
       - name: Run ShellCheck (error severity)
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
             brew install shellcheck
           fi
-          shellcheck --severity=error scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh scripts/bump-version.sh .githooks/pre-commit
+          shellcheck --severity=error scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh scripts/bump-version.sh scripts/allow-macos-app.sh .githooks/pre-commit
 
   frontend-build:
     name: Frontend TypeScript & Vite Build

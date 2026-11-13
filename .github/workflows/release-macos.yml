@@ -59,29 +59,44 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -z "${APPLE_CERTIFICATE:-}" ] && [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            # Explicit ad-hoc signing ("-") satisfies Apple Silicon (amfid) Mach-O linker checks
+            export APPLE_SIGNING_IDENTITY="-"
           fi
           npx tauri build --target ${{ matrix.target }}
 
       - name: Package GPLv3-compliant release archives & SHA256 checksums
         shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+          APP_BUNDLE="$BUNDLE_DIR/macos/Etherloom.app"
           DIST_OUT="release-artifacts-${{ matrix.arch }}"
           mkdir -p "$DIST_OUT"
+
+          # Ensure ad-hoc signature is intact when building without an Apple Developer ID cert
+          if [ -z "${APPLE_CERTIFICATE:-}" ] && [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            codesign --force --deep --sign - "$APP_BUNDLE"
+          fi
+          codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
           # Copy DMG installer
           DMG_SRC="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' | head -n 1)"
           cp "$DMG_SRC" "$DIST_OUT/Etherloom_${VERSION}_macos_${{ matrix.arch }}.dmg"
 
           # Package .app bundle alongside LICENSE, CREDITS.md, and helper scripts
+          # (COPYFILE_DISABLE=1 prevents macOS AppleDouble ._* resource fork files)
           STAGE_DIR="$(mktemp -d)"
-          cp -R "$BUNDLE_DIR/macos/Etherloom.app" "$STAGE_DIR/"
+          cp -R "$APP_BUNDLE" "$STAGE_DIR/"
           cp LICENSE CREDITS.md README.md ARCHITECTURE.md "$STAGE_DIR/"
           cp -R scripts "$STAGE_DIR/scripts"
-          tar -C "$STAGE_DIR" -czf "$DIST_OUT/Etherloom_${VERSION}_macos_${{ matrix.arch }}.app.tar.gz" \
+          xattr -cr "$STAGE_DIR" 2>/dev/null || true
+          codesign --verify --deep --strict "$STAGE_DIR/Etherloom.app"
+          COPYFILE_DISABLE=1 tar -C "$STAGE_DIR" -czf "$DIST_OUT/Etherloom_${VERSION}_macos_${{ matrix.arch }}.app.tar.gz" \
             Etherloom.app LICENSE CREDITS.md README.md ARCHITECTURE.md scripts
           rm -rf "$STAGE_DIR"
 
@@ -104,4 +119,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            ### macOS First-Launch Note (Apple Silicon M1–M4 & Intel)
+            Etherloom release builds are open-source and ad-hoc signed without an Apple Developer ID notarization ticket. When downloaded via **Safari** or Chrome on macOS 15–27+, Gatekeeper attaches `com.apple.quarantine` and may report *"“Etherloom” is damaged and can't be opened"*.
+
+            After dragging **`Etherloom.app`** to **`/Applications`**, run once in Terminal:
+            ```bash
+            xattr -dr com.apple.quarantine /Applications/Etherloom.app
+            ```
           files: release-artifacts-${{ matrix.arch }}/*

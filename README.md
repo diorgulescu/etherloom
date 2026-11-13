@@ -197,7 +197,7 @@ Instructors can author custom labs by placing `<lab-id>/lab.toml` + `guide.md` i
 
 | Component | Minimum | Recommended | Notes |
 | :--- | :--- | :--- | :--- |
-| **Operating System** | **macOS 13** (Ventura) | **macOS 14** (Sonoma) / **macOS 15+** (Sequoia) | Uses Apple `Hypervisor.framework` (`-accel hvf`) in unprivileged userspace |
+| **Operating System** | **macOS 13** (Ventura) | **macOS 14+** (Sonoma / Sequoia / Tahoe / macOS 27+) | Uses Apple `Hypervisor.framework` (`-accel hvf`) in unprivileged userspace |
 | **Processor (CPU)** | Apple Silicon (`M1`+) or Intel `x86_64` (`VT-x`) | Apple `M1 Pro` / `M2` / `M3` / `M4` (8+ cores) | Native `HVF` when guest arch matches host (`aarch64` on M-series, `x86_64` on Intel); multi-threaded `TCG` (`thread=multi`) for cross-arch guests |
 | **Memory (RAM)** | **8 GB** | **16 GB+** | Lightweight labs use `32 MB` (FreeDOS), `128 MB` (OpenWrt), `256 MB` (Alpine / MikroTik CHR), and `512 MB` (OpenBSD / FreeBSD); `16 GB+` recommended for multi-router topologies or `x86_64` firewalls (`OPNsense` / `VyOS`) |
 | **Internal Disk Space** | **500 MB** free | **2 GB+** free | Stores `~/Library/Application Support/Etherloom/settings.toml`, the local `tcpflowy` `python-env/` venv, and ephemeral `/tmp/etherloom/` Unix sockets & FIFO pipes |
@@ -210,9 +210,19 @@ Instructors can author custom labs by placing `<lab-id>/lab.toml` + `guide.md` i
 
 ## Prerequisites & Installation (macOS)
 
-Etherloom runs on **macOS 13+** on both **Apple Silicon** (`M1` / `M2` / `M3` / `M4`) and **Intel** Macs.
+Etherloom runs on **macOS 13+** (including **macOS 15–27+**) on both **Apple Silicon** (`M1` / `M2` / `M3` / `M4`) and **Intel** Macs.
 
-### 1. Host Runtime Packages (Homebrew)
+### 1. Pre-Built macOS Release (`.dmg` / `.app`) & Gatekeeper Note
+
+Download the latest Apple Silicon (`arm64`) or Intel (`x64`) `.dmg` from [**GitHub Releases**](https://github.com/diorgulescu/etherloom/releases) and drag **`Etherloom.app`** into **`/Applications`**.
+
+> **macOS Gatekeeper Note (Safari / Chrome Downloads on macOS 15–27+)**: Open-source release builds are ad-hoc code-signed (`Signature=adhoc`) without a paid Apple Developer ID notarization ticket. When downloaded in a browser, macOS attaches `com.apple.quarantine` and may display *"“Etherloom” is damaged and can't be opened"*. Run once in Terminal to clear quarantine:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/Etherloom.app
+> ```
+> *(Or run `./scripts/allow-macos-app.sh /Applications/Etherloom.app` from the repository or `.app.tar.gz` archive.)*
+
+### 2. Host Runtime Packages (Homebrew)
 
 ```bash
 # Required: Multi-architecture QEMU (aarch64, x86_64, i386, riscv64) + EDK2 UEFI firmware + qemu-img
@@ -227,7 +237,7 @@ brew install python uv
 
 > **Tip**: Click the **Env Doctor** badge in Etherloom's top toolbar anytime to verify all 6 host dependencies (`qemu-system-aarch64`, multi-arch `qemu-system-x86_64`/`i386`/`riscv64`, `qemu-img`, `edk2` UEFI firmware, `Wireshark`, and `python3`/`uv`).
 
-### 2. Build & Run From Source
+### 3. Build & Run From Source
 
 Ensure **Rust** (`1.77+` via [`rustup`](https://rustup.rs/)), **Node.js** (`20+` LTS), and **Xcode Command Line Tools** (`xcode-select --install`) are installed:
 
@@ -245,11 +255,11 @@ npm run tauri dev
 npm run tauri build
 ```
 
-### 3. Automated Verification & Test Suite
+### 4. Automated Verification & Test Suite
 
 ```bash
 # Validate shell scripts
-bash -n scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh
+bash -n scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh scripts/bump-version.sh scripts/allow-macos-app.sh
 
 # Type-check React 19 + TypeScript and build production Vite bundle
 npm run build
@@ -259,7 +269,7 @@ cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-### 4. Versioning & Automatic Revision Bumping
+### 5. Versioning & Automatic Revision Bumping
 
 Etherloom tracks a single semantic version (`MAJOR.MINOR.PATCH`) in [`VERSION`](VERSION), synchronized across `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` via [`scripts/bump-version.sh`](scripts/bump-version.sh):
 
