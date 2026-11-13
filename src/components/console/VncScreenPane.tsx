@@ -163,7 +163,7 @@ export function VncScreenPane({
         rfb.scaleViewport = scaleToFit;
         rfb.focusOnClick = true;
         rfb.clipViewport = false;
-        rfb.background = "#09090b";
+        rfb.background = "#090E18";
 
         rfb.addEventListener("connect", () => {
           if (!cancelled) {
@@ -233,12 +233,12 @@ export function VncScreenPane({
 
   return (
     <div
-      className={`h-full w-full flex flex-col bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden ${
+      className={`h-full w-full flex flex-col bg-[#090E18] rounded-lg border border-[rgba(34,211,238,0.16)] overflow-hidden ${
         visible ? "" : "hidden"
       }`}
     >
       {/* Top Graphical Toolbar */}
-      <div className="h-7 px-2.5 bg-zinc-900/95 border-b border-zinc-800 flex items-center justify-between gap-2 text-[11px] shrink-0">
+      <div className="h-7 px-2.5 bg-[#111827] border-b border-[rgba(34,211,238,0.14)] flex items-center justify-between gap-2 text-[11px] shrink-0">
         <div className="flex items-center gap-2 min-w-0 font-mono text-zinc-400">
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
@@ -361,7 +361,7 @@ export function VncScreenPane({
       )}
 
       {/* Main Graphical Viewport */}
-      <div className="relative flex-1 min-h-0 w-full bg-zinc-950 flex items-center justify-center overflow-hidden">
+      <div className="relative flex-1 min-h-0 w-full bg-[#090E18] flex items-center justify-center overflow-hidden">
         {displayMode === "vnc" && (
           <div
             ref={screenHostRef}

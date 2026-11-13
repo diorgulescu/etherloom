@@ -2014,7 +2014,7 @@ export function App() {
     "~/Library/Application Support/Etherloom/Library/projects";
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900 dark:bg-[#0D1321] dark:text-slate-100">
       <TopToolbar
         projectName={projectName}
         bundlePath={bundlePath}
@@ -2187,14 +2187,14 @@ export function App() {
         <div
           className={`fixed bottom-10 right-4 z-50 max-w-md rounded-xl border px-3.5 py-2.5 shadow-xl backdrop-blur-md flex items-center gap-2.5 text-xs ${
             toast.kind === "ok"
-              ? "bg-white/95 dark:bg-zinc-900/95 border-emerald-500/35 text-slate-800 dark:text-zinc-100"
-              : "bg-white/95 dark:bg-zinc-900/95 border-rose-500/40 text-slate-800 dark:text-zinc-100"
+              ? "bg-white/95 dark:bg-[#111827]/95 border-[#10B981]/40 text-slate-800 dark:text-slate-100"
+              : "bg-white/95 dark:bg-[#111827]/95 border-[#F43F5E]/45 text-slate-800 dark:text-slate-100"
           }`}
         >
           {toast.kind === "ok" ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
           ) : (
-            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <AlertCircle className="w-4 h-4 text-[#F43F5E] shrink-0" />
           )}
           <span className="flex-1 leading-snug">{toast.text}</span>
           {toast.actionLabel && toast.onAction && (
@@ -2204,7 +2204,7 @@ export function App() {
                 toast.onAction?.();
                 setToast(null);
               }}
-              className="shrink-0 px-2.5 py-1 rounded-md bg-sky-600 hover:bg-sky-500 text-white font-medium"
+              className="shrink-0 px-2.5 py-1 rounded-md bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] font-semibold"
             >
               {toast.actionLabel}
             </button>
@@ -2212,7 +2212,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setToast(null)}
-            className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200"
+            className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
           >
             <X className="w-3.5 h-3.5" />
           </button>

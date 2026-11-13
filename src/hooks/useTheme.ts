@@ -12,12 +12,12 @@ function getSystemDark(): boolean {
 
 export function useTheme() {
   const [preference, setPreference] = useState<ThemePreference>(() => {
-    if (typeof window === "undefined") return "system";
+    if (typeof window === "undefined") return "dark";
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved === "light" || saved === "dark" || saved === "system") {
       return saved;
     }
-    return "system";
+    return "dark";
   });
 
   const [systemDark, setSystemDark] = useState<boolean>(getSystemDark);

@@ -104,7 +104,7 @@ export function VmConsoleTabContent({
 
         {/* Instant Top-Right Dual-Console Switcher */}
         <div
-          className="flex items-center bg-slate-100 dark:bg-zinc-800/90 p-0.5 rounded-lg border border-slate-200/80 dark:border-zinc-700/80"
+          className="flex items-center bg-slate-100 dark:bg-[#162032] p-0.5 rounded-lg border border-slate-200/80 dark:border-[rgba(34,211,238,0.16)]"
           role="tablist"
           aria-label="Console view switcher"
         >
@@ -116,12 +116,12 @@ export function VmConsoleTabContent({
             title="Serial Console (ttyAMA0 / com0 / ttyu0)"
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
               mode === "serial"
-                ? "bg-white dark:bg-zinc-950 text-sky-600 dark:text-sky-300 shadow-xs"
-                : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                ? "bg-white dark:bg-[#090E18] text-cyan-700 dark:text-[#22D3EE] shadow-xs"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            <span>Serial Console ({serialDev})</span>
+            <span className="font-mono">Serial ({serialDev})</span>
           </button>
 
           <button
@@ -132,8 +132,8 @@ export function VmConsoleTabContent({
             title="UEFI / Graphical Framebuffer Screen (@novnc/novnc or Cocoa)"
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
               mode === "display"
-                ? "bg-white dark:bg-zinc-950 text-indigo-600 dark:text-indigo-300 shadow-xs"
-                : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                ? "bg-white dark:bg-[#090E18] text-indigo-700 dark:text-[#818CF8] shadow-xs"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
           >
             <Monitor className="w-3.5 h-3.5" />

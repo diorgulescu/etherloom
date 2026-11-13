@@ -38,7 +38,7 @@ export function VolumeDisconnectedBanner({
           type="button"
           onClick={onRetry}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white/90 hover:bg-white dark:bg-zinc-900/90 dark:hover:bg-zinc-800 border border-amber-500/35 text-amber-900 dark:text-amber-200 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white/90 hover:bg-white dark:bg-[#162032] dark:hover:bg-[#1E2B42] border border-amber-500/35 text-amber-900 dark:text-amber-200 disabled:opacity-50 transition-colors"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${busy ? "animate-spin" : ""}`} />
           <span>Retry Detection</span>
@@ -48,7 +48,7 @@ export function VolumeDisconnectedBanner({
           type="button"
           onClick={onSelectDifferentFolder}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white/90 hover:bg-white dark:bg-zinc-900/90 dark:hover:bg-zinc-800 border border-amber-500/35 text-amber-900 dark:text-amber-200 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white/90 hover:bg-white dark:bg-[#162032] dark:hover:bg-[#1E2B42] border border-amber-500/35 text-amber-900 dark:text-amber-200 disabled:opacity-50 transition-colors"
         >
           <FolderSearch className="w-3.5 h-3.5" />
           <span>Select Different Folder…</span>

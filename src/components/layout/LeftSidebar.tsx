@@ -80,21 +80,18 @@ function getAccentClasses(
   kind: CatalogComponent["kind"],
   guestFamily: GuestFamily | null
 ): string {
-  if (kind === "l2_switch") {
-    return "bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/25";
-  }
-  if (kind === "l1_hub") {
-    return "bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/25";
+  if (kind === "l2_switch" || kind === "l1_hub") {
+    return "bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE] border-cyan-400/30";
   }
   switch (guestFamily) {
     case "openbsd":
-      return "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25";
+      return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/30";
     case "freebsd":
-      return "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25";
+      return "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-400/30";
     case "netbsd":
-      return "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/25";
+      return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/30";
     default:
-      return "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/25";
+      return "bg-emerald-500/15 text-emerald-700 dark:text-[#34D399] border-emerald-400/30";
   }
 }
 
@@ -143,13 +140,13 @@ export function LeftSidebar({
   };
 
   return (
-    <aside className="w-72 shrink-0 border-r border-slate-200/80 dark:border-zinc-800/90 bg-slate-50/90 dark:bg-zinc-900/60 backdrop-blur-sm flex flex-col h-full select-none">
+    <aside className="w-72 shrink-0 border-r border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/90 dark:bg-[#111827]/88 backdrop-blur-md flex flex-col h-full select-none">
       {/* Search Box + OS Library Downloader + Custom VM Wizard CTA */}
-      <div className="p-3 space-y-2 border-b border-slate-200/70 dark:border-zinc-800/80">
+      <div className="p-3 space-y-2 border-b border-slate-200/70 dark:border-[rgba(34,211,238,0.12)]">
         <button
           type="button"
           onClick={onOpenStorageLibraryModal}
-          className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5"
+          className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-[#0891B2] via-[#06B6D4] to-[#6366F1] hover:brightness-110 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5"
         >
           <HardDriveDownload className="w-3.5 h-3.5 shrink-0" />
           <span>+ Get More OS Images (15)</span>
@@ -158,20 +155,20 @@ export function LeftSidebar({
         <button
           type="button"
           onClick={onOpenCustomVmWizard}
-          className="w-full py-1.5 px-3 rounded-lg bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-200 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
+          className="w-full py-1.5 px-3 rounded-lg bg-white hover:bg-slate-100 dark:bg-[#162032] dark:hover:bg-[#1E2B42] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] dark:hover:border-[rgba(34,211,238,0.42)] text-slate-700 dark:text-slate-200 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
         >
-          <Disc className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+          <Disc className="w-3.5 h-3.5 shrink-0 text-[#F59E0B]" />
           <span>New Custom VM / Install ISO</span>
         </button>
 
         <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter switches, templates, OS…"
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-[#22D3EE]/60 focus:ring-2 focus:ring-[#22D3EE]/25"
           />
         </div>
       </div>
@@ -182,11 +179,11 @@ export function LeftSidebar({
         {fabricNodes.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-2 px-1">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-cyan-700 dark:text-[#22D3EE]">
                 Userspace Fabric
               </h2>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500">
-                Drag or Click
+              <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                Drag / Click
               </span>
             </div>
             <div className="space-y-1.5">
@@ -208,9 +205,9 @@ export function LeftSidebar({
                         onAddComponent(item);
                       }
                     }}
-                    className="w-full text-left group p-2.5 rounded-lg bg-white dark:bg-zinc-900/90 hover:bg-slate-100/90 dark:hover:bg-zinc-800/90 border border-slate-200/80 dark:border-zinc-800 cursor-grab active:cursor-grabbing transition-all flex items-start gap-2 shadow-2xs"
+                    className="w-full text-left group p-2.5 rounded-lg bg-white dark:bg-[#162032] hover:bg-slate-50 dark:hover:bg-[#1E2B42] border border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] dark:hover:border-[rgba(34,211,238,0.45)] cursor-grab active:cursor-grabbing transition-all flex items-start gap-2 shadow-2xs"
                   >
-                    <GripVertical className="w-3.5 h-3.5 text-slate-300 dark:text-zinc-600 mt-2 shrink-0" />
+                    <GripVertical className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 mt-2 shrink-0" />
                     <div
                       className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 ${getAccentClasses(
                         item.kind,
@@ -221,21 +218,21 @@ export function LeftSidebar({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100 truncate">
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
                           {item.name}
                         </span>
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] font-medium text-cyan-600 dark:text-[#22D3EE]">
                           <Plus className="w-3 h-3" /> Add
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate mt-0.5">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         {item.subtitle}
                       </p>
                       <div className="flex items-center gap-1.5 mt-1.5">
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/20">
                           p1..p{item.defaultPorts}
                         </span>
-                        <span className="text-[10px] text-slate-400 dark:text-zinc-500">
+                        <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
                           {item.defaultPorts} ports
                         </span>
                       </div>
@@ -251,11 +248,11 @@ export function LeftSidebar({
         {filteredTemplates.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-2 px-1">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-[#34D399] flex items-center gap-1">
                 <Sparkles className="w-3 h-3" />
                 <span>Registered Templates</span>
               </h2>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500">
+              <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
                 CoW Instant
               </span>
             </div>
@@ -268,6 +265,7 @@ export function LeftSidebar({
                   tpl.osProfileId,
                   tpl.defaultNicModel
                 );
+                const isNative = (tpl.arch ?? "aarch64") === "aarch64";
                 return (
                   <div
                     key={tpl.id}
@@ -284,9 +282,9 @@ export function LeftSidebar({
                         onAddFromTemplate(tpl);
                       }
                     }}
-                    className="w-full text-left group p-2.5 rounded-lg bg-white dark:bg-zinc-900/90 hover:bg-emerald-50/50 dark:hover:bg-zinc-800/90 border border-emerald-500/25 dark:border-emerald-500/25 cursor-grab active:cursor-grabbing transition-all flex items-start gap-2 shadow-2xs"
+                    className="w-full text-left group p-2.5 rounded-lg bg-white dark:bg-[#162032] hover:bg-emerald-50/40 dark:hover:bg-[#1E2B42] border border-emerald-500/25 dark:border-emerald-400/25 dark:hover:border-[#34D399]/55 cursor-grab active:cursor-grabbing transition-all flex items-start gap-2 shadow-2xs"
                   >
-                    <GripVertical className="w-3.5 h-3.5 text-slate-300 dark:text-zinc-600 mt-2 shrink-0" />
+                    <GripVertical className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 mt-2 shrink-0" />
                     <div
                       className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 ${getAccentClasses(
                         "vm",
@@ -297,22 +295,31 @@ export function LeftSidebar({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100 truncate">
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
                           {tpl.name}
                         </span>
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 dark:text-[#34D399]">
                           <Plus className="w-3 h-3" /> Add
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate mt-0.5">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         {tpl.description || tpl.filename}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                      <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/12 text-emerald-700 dark:text-[#34D399] border border-emerald-500/25">
                           {nicPrefix}0..1
                         </span>
-                        <span className="text-[10px] text-slate-400 dark:text-zinc-500">
-                          {formatByteSize(tpl.actualSizeBytes)} RO
+                        <span
+                          className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded border ${
+                            isNative
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-[#34D399] border-emerald-500/20"
+                              : "bg-indigo-500/12 text-indigo-700 dark:text-[#818CF8] border-indigo-400/25"
+                          }`}
+                        >
+                          {isNative ? "ARM64" : tpl.arch}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                          {formatByteSize(tpl.actualSizeBytes)}
                         </span>
                       </div>
                     </div>
@@ -327,16 +334,17 @@ export function LeftSidebar({
         {guestNodes.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-2 px-1">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Guest OS Profiles
               </h2>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500">
-                ARM64 HVF • x86
+              <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                HVF • TCG
               </span>
             </div>
             <div className="space-y-1.5">
               {guestNodes.map((item) => {
                 const Icon = getComponentIcon(item);
+                const isNative = (item.arch ?? "aarch64") === "aarch64";
                 return (
                   <div
                     key={item.id}
@@ -353,9 +361,9 @@ export function LeftSidebar({
                         onAddComponent(item);
                       }
                     }}
-                    className="w-full text-left group p-2.5 rounded-lg bg-white dark:bg-zinc-900/90 hover:bg-slate-100/90 dark:hover:bg-zinc-800/90 border border-slate-200/80 dark:border-zinc-800 cursor-grab active:cursor-grabbing transition-all flex items-start gap-2 shadow-2xs"
+                    className="w-full text-left group p-2.5 rounded-lg bg-white dark:bg-[#162032] hover:bg-slate-50 dark:hover:bg-[#1E2B42] border border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] dark:hover:border-[rgba(34,211,238,0.45)] cursor-grab active:cursor-grabbing transition-all flex items-start gap-2 shadow-2xs"
                   >
-                    <GripVertical className="w-3.5 h-3.5 text-slate-300 dark:text-zinc-600 mt-2 shrink-0" />
+                    <GripVertical className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 mt-2 shrink-0" />
                     <div
                       className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 ${getAccentClasses(
                         item.kind,
@@ -366,22 +374,28 @@ export function LeftSidebar({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100 truncate">
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
                           {item.name}
                         </span>
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 text-[10px] font-medium text-cyan-600 dark:text-[#22D3EE]">
                           <Plus className="w-3 h-3" /> Add
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate mt-0.5">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         {item.subtitle}
                       </p>
                       <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#090E18] text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800">
                           {item.nicPrefix}0..{item.defaultPorts - 1}
                         </span>
-                        <span className="text-[10px] text-slate-400 dark:text-zinc-500">
-                          {item.defaultVcpus} vCPU • {item.defaultMemoryMb} MB
+                        <span
+                          className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded border ${
+                            isNative
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-[#34D399] border-emerald-500/25"
+                              : "bg-indigo-500/12 text-indigo-700 dark:text-[#818CF8] border-indigo-400/25"
+                          }`}
+                        >
+                          {isNative ? "ARM64 HVF" : `${item.arch} TCG`}
                         </span>
                       </div>
                     </div>
@@ -398,20 +412,20 @@ export function LeftSidebar({
         type="button"
         onClick={onOpenStorageLibraryModal}
         title="Click to manage OS Library & External SSD Storage"
-        className="w-full text-left p-3 border-t border-slate-200/80 dark:border-zinc-800/90 bg-slate-100/60 hover:bg-slate-200/60 dark:bg-zinc-950/40 dark:hover:bg-zinc-900/70 transition-colors"
+        className="w-full text-left p-3 border-t border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-100/60 hover:bg-slate-200/60 dark:bg-[#090E18]/65 dark:hover:bg-[#162032] transition-colors"
       >
-        <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-zinc-300">
+        <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-200">
           <span className="inline-flex items-center gap-1.5">
-            <HardDrive className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+            <HardDrive className="w-3.5 h-3.5 text-[#22D3EE] shrink-0" />
             <span>OS Library &amp; Storage</span>
           </span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-[#34D399] border border-emerald-500/25">
             {baseTemplates.length} Ready
           </span>
         </div>
         <p
           title={templatesDir}
-          className="mt-1 text-[10px] font-mono text-slate-500 dark:text-zinc-400 truncate"
+          className="mt-1 text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate"
         >
           {templatesDir}
         </p>

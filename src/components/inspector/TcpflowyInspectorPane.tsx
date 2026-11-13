@@ -32,6 +32,7 @@ import type {
   TcpflowyInstallProgress,
 } from "../../types/studio";
 import { formatBytesCompact } from "../layout/StatusBar";
+import { EtherloomBackdropOrnament, SignalWaveformIcon } from "../brand";
 
 type FlowSortKey = "stream" | "packets" | "bytes" | "duration" | "anomalies";
 type DetailTab = "timeline" | "payload" | "report";
@@ -54,31 +55,52 @@ interface TcpflowyInspectorPaneProps {
 function handshakeBadgeStyle(state: string): string {
   const upper = state.toUpperCase();
   if (upper.includes("COMPLETE") || upper.includes("ESTABLISHED")) {
-    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30";
+    return "bg-emerald-500/15 text-emerald-700 dark:text-[#34D399] border-emerald-500/35";
   }
   if (upper.includes("RESET") || upper.includes("RST")) {
-    return "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30";
+    return "bg-rose-500/15 text-rose-700 dark:text-[#F43F5E] border-rose-500/40";
   }
   if (upper.includes("UNANSWERED") || upper.includes("NO_ACK")) {
-    return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30";
+    return "bg-amber-500/15 text-amber-700 dark:text-[#F59E0B] border-amber-500/40";
   }
-  return "bg-slate-500/15 text-slate-700 dark:text-zinc-300 border-slate-400/30";
+  return "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30";
 }
 
 function tcpFlagPillStyle(flags: string[]): string {
   if (flags.includes("RST")) {
-    return "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40";
+    return "bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border-rose-500/45";
   }
   if (flags.includes("SYN")) {
-    return "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40";
-  }
-  if (flags.includes("FIN")) {
-    return "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40";
+    return "bg-cyan-500/20 text-cyan-700 dark:text-[#22D3EE] border-cyan-400/45";
   }
   if (flags.includes("PSH")) {
-    return "bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/40";
+    return "bg-emerald-500/20 text-emerald-700 dark:text-[#34D399] border-emerald-500/45";
   }
-  return "bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700";
+  if (flags.includes("FIN")) {
+    return "bg-amber-500/20 text-amber-700 dark:text-[#F59E0B] border-amber-500/45";
+  }
+  return "bg-slate-200/80 dark:bg-[#162032] text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700";
+}
+
+function ladderArrowColor(seg: {
+  flags: string[];
+  isRetransmission: boolean;
+  isOutOfOrder: boolean;
+  isZeroWindow: boolean;
+}): string {
+  if (seg.flags.includes("RST") || seg.isRetransmission || seg.isZeroWindow) {
+    return "text-rose-600 dark:text-[#F43F5E]";
+  }
+  if (seg.isOutOfOrder || seg.flags.includes("FIN")) {
+    return "text-amber-600 dark:text-[#F59E0B]";
+  }
+  if (seg.flags.includes("SYN")) {
+    return "text-cyan-600 dark:text-[#22D3EE]";
+  }
+  if (seg.flags.includes("PSH")) {
+    return "text-emerald-600 dark:text-[#10B981]";
+  }
+  return "text-indigo-600 dark:text-[#818CF8]";
 }
 
 export function TcpflowyInspectorPane({
@@ -279,14 +301,14 @@ export function TcpflowyInspectorPane({
   return (
     <div className="h-full flex flex-col gap-2 min-h-0">
       {/* Top Capture & Dissector Control Bar */}
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 px-2.5 py-1.5">
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] px-2.5 py-1.5">
         <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
-          <FileSearch className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          <FileSearch className="w-3.5 h-3.5 text-[#818CF8] shrink-0" />
           <select
             aria-label="Select .pcap capture file"
             value={selectedPcapPath ?? ""}
             onChange={(e) => onSelectPcap(e.target.value || null)}
-            className="max-w-[340px] min-w-[190px] px-2 py-1 rounded-md text-xs font-mono bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/35"
+            className="max-w-[340px] min-w-[190px] px-2 py-1 rounded-md text-xs font-mono bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.20)] text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#6366F1]/40"
           >
             <option value="">
               {captures.length === 0 && externalPcaps.length === 0
@@ -498,31 +520,43 @@ export function TcpflowyInspectorPane({
 
       {/* Main Split View or Empty State */}
       {!report ? (
-        <div className="flex-1 min-h-0 rounded-lg bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800 p-4 flex flex-col items-center justify-center text-center gap-2">
-          <Sparkles className="w-6 h-6 text-indigo-500/80" />
-          <div className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
-            Visual TCP Flow &amp; Stream Dissector (Powered by{" "}
-            <code className="font-mono">tcpflowy</code>)
+        <div className="relative flex-1 min-h-0 rounded-lg bg-slate-50/80 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] p-4 flex flex-col items-center justify-center text-center gap-2 overflow-hidden">
+          <EtherloomBackdropOrnament
+            opacityClassName="opacity-20"
+            className="absolute inset-0"
+          />
+          <div className="relative flex flex-col items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-[#6366F1]/35 flex items-center justify-center text-[#22D3EE]">
+              <SignalWaveformIcon animated className="w-5 h-3.5" />
+            </div>
+            <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+              Visual TCP Flow &amp; Stream Dissector (Powered by{" "}
+              <code className="font-mono text-[#818CF8]">tcpflowy</code>)
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xl">
+              Click any wire on the topology canvas to{" "}
+              <strong className="text-slate-700 dark:text-slate-200">
+                Record .pcap
+              </strong>{" "}
+              and hit{" "}
+              <strong className="text-indigo-600 dark:text-[#818CF8]">
+                Stop &amp; Dissect with tcpflowy
+              </strong>
+              , or choose an existing <code className="font-mono">.pcap</code>{" "}
+              above to inspect TCP conversations,{" "}
+              <code className="font-mono text-[#22D3EE]">SYN</code> /{" "}
+              <code className="font-mono text-[#34D399]">PSH-ACK</code> /{" "}
+              <code className="font-mono text-[#F43F5E]">RST</code> sequence
+              ladders, DPI entropy, and reconstructed stream payloads.
+            </p>
           </div>
-          <p className="text-[11px] text-slate-500 dark:text-zinc-400 max-w-xl">
-            Click any wire on the topology canvas to{" "}
-            <strong>Record .pcap</strong> and hit{" "}
-            <strong>Stop &amp; Dissect with tcpflowy</strong>, or choose an
-            existing <code className="font-mono">.pcap</code> above to inspect
-            TCP conversations, interactive <code className="font-mono">SYN</code>
-            /<code className="font-mono">ACK</code>/
-            <code className="font-mono">PSH</code>/
-            <code className="font-mono">FIN</code> sequence ladders, DPI
-            entropy/TLS/HTTP metadata, reconstructed stream payloads, and
-            Suricata/Wireshark signatures.
-          </p>
         </div>
       ) : (
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-2.5 overflow-hidden">
           {/* LEFT PANE: Conversations / TCP Flows Table */}
-          <div className="lg:col-span-5 min-h-0 rounded-lg bg-white dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 flex flex-col overflow-hidden">
+          <div className="lg:col-span-5 min-h-0 rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] flex flex-col overflow-hidden">
             {/* Summary + Search & Sort Header */}
-            <div className="p-2 border-b border-slate-200/80 dark:border-zinc-800 space-y-1.5 shrink-0 bg-slate-50/70 dark:bg-zinc-900/60">
+            <div className="p-2 border-b border-slate-200/80 dark:border-slate-800 space-y-1.5 shrink-0 bg-slate-50/70 dark:bg-[#111827]">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="font-semibold text-slate-800 dark:text-zinc-100">
                   TCP Conversations ({filteredFlows.length}
@@ -647,9 +681,9 @@ export function TcpflowyInspectorPane({
           </div>
 
           {/* RIGHT PANE: Visual Sequence Ladder + Stream Payload + Raw Report */}
-          <div className="lg:col-span-7 min-h-0 rounded-lg bg-white dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 flex flex-col overflow-hidden">
+          <div className="lg:col-span-7 min-h-0 rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] flex flex-col overflow-hidden">
             {/* Sub-Tabs Header */}
-            <div className="px-2.5 py-1.5 border-b border-slate-200/80 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/60 flex items-center justify-between gap-2 shrink-0">
+            <div className="px-2.5 py-1.5 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-[#111827] flex items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-1">
                 {(
                   [
@@ -723,31 +757,31 @@ export function TcpflowyInspectorPane({
                 ) : (
                   <>
                     {/* Endpoint Column Headers */}
-                    <div className="px-3 py-1.5 border-b border-slate-200/70 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/40 grid grid-cols-12 items-center text-[11px] font-mono shrink-0">
+                    <div className="px-3 py-1.5 border-b border-slate-200/70 dark:border-slate-800/80 bg-slate-50/50 dark:bg-[#162032]/75 grid grid-cols-12 items-center text-[11px] font-mono shrink-0">
                       <div className="col-span-2 text-[10px] text-slate-400">
                         Δ Time
                       </div>
-                      <div className="col-span-5 font-semibold text-sky-700 dark:text-sky-300 truncate">
+                      <div className="col-span-5 font-semibold text-cyan-700 dark:text-[#22D3EE] truncate">
                         Client {selectedFlow.src_ip}:{selectedFlow.src_port}
                       </div>
-                      <div className="col-span-5 text-right font-semibold text-indigo-700 dark:text-indigo-300 truncate">
+                      <div className="col-span-5 text-right font-semibold text-indigo-700 dark:text-[#818CF8] truncate">
                         Server {selectedFlow.dst_ip}:{selectedFlow.dst_port}
                       </div>
                     </div>
 
                     {/* Segment Ladder Rows */}
-                    <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100 dark:divide-zinc-800/60">
+                    <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60">
                       {selectedFlow.segments.map((seg) => {
                         const isC2S = seg.direction === "C->S";
                         return (
                           <div
                             key={seg.frameNumber}
-                            className="px-3 py-1.5 grid grid-cols-12 items-center gap-2 text-[11px] hover:bg-slate-50/90 dark:hover:bg-zinc-900/50"
+                            className="px-3 py-1.5 grid grid-cols-12 items-center gap-2 text-[11px] hover:bg-slate-50/90 dark:hover:bg-[#162032]/55"
                           >
                             {/* Frame # & Relative Time */}
-                            <div className="col-span-2 font-mono text-[10px] text-slate-500 dark:text-zinc-400 leading-tight">
+                            <div className="col-span-2 font-mono text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
                               <div>+{seg.relTimeMs.toFixed(2)}ms</div>
-                              <div className="text-[9.5px] text-slate-400 dark:text-zinc-500">
+                              <div className="text-[9.5px] text-slate-400 dark:text-slate-500">
                                 #{seg.frameNumber}
                               </div>
                             </div>
@@ -764,39 +798,37 @@ export function TcpflowyInspectorPane({
                                 </span>
 
                                 <span
-                                  className={`font-mono text-[11px] font-bold ${
-                                    isC2S
-                                      ? "text-sky-600 dark:text-sky-400"
-                                      : "text-indigo-600 dark:text-indigo-400"
-                                  }`}
+                                  className={`font-mono text-[11px] font-bold ${ladderArrowColor(
+                                    seg
+                                  )}`}
                                 >
                                   {isC2S ? "───────▶" : "◀───────"}
                                 </span>
 
-                                <span className="font-mono text-[10px] text-slate-700 dark:text-zinc-300">
+                                <span className="font-mono text-[10px] text-slate-700 dark:text-slate-300">
                                   Seq={seg.seq} Ack={seg.ack} Len=
                                   {seg.payloadLen} Win={seg.window}
                                 </span>
 
                                 {seg.isRetransmission && (
-                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-700 dark:text-rose-300 text-[9.5px] font-mono font-semibold">
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border border-rose-500/40 text-[9.5px] font-mono font-semibold">
                                     RETRANS
                                   </span>
                                 )}
                                 {seg.isOutOfOrder && (
-                                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[9.5px] font-mono font-semibold">
-                                    OUT-OF-ORDER
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-[#F59E0B] border border-amber-500/40 text-[9.5px] font-mono font-semibold">
+                                    DUP-ACK / OOO
                                   </span>
                                 )}
                                 {seg.isZeroWindow && (
-                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-700 dark:text-rose-300 text-[9.5px] font-mono font-semibold">
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border border-rose-500/40 text-[9.5px] font-mono font-semibold">
                                     ZERO-WIN
                                   </span>
                                 )}
                               </div>
 
                               {seg.preview && (
-                                <div className="font-mono text-[10px] text-slate-500 dark:text-zinc-400 truncate pl-1">
+                                <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400 truncate pl-1">
                                   {seg.preview}
                                 </div>
                               )}
@@ -938,13 +970,13 @@ export function TcpflowyInspectorPane({
                             return (
                               <div
                                 key={idx}
-                                className={`rounded-md border p-2.5 font-mono text-[11px] ${
+                                className={`rounded-md border p-2.5 font-mono text-[11px] bg-slate-50 dark:bg-[#090E18] ${
                                   isC2S
-                                    ? "bg-sky-500/[0.06] border-sky-500/25 text-sky-950 dark:text-sky-200"
-                                    : "bg-indigo-500/[0.06] border-indigo-500/25 text-indigo-950 dark:text-indigo-200"
+                                    ? "border-cyan-500/35 text-cyan-950 dark:text-[#67E8F9]"
+                                    : "border-[#6366F1]/45 text-indigo-950 dark:text-[#A5B4FC]"
                                 }`}
                               >
-                                <div className="text-[10px] font-semibold opacity-75 mb-1">
+                                <div className="text-[10px] font-semibold opacity-85 mb-1">
                                   {isC2S
                                     ? `Client → Server (${turn.bytes} bytes)`
                                     : `Server → Client (${turn.bytes} bytes)`}

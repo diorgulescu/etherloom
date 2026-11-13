@@ -1,13 +1,20 @@
-# Etherloom
+<div align="center">
+  <img src="artwork/banner.png" alt="Etherloom — Woven Virtual Networking & Packet Flow Studio for macOS" width="100%" />
 
-**Open-source, zero-root macOS network orchestration, packet-capture, and multi-OS learning studio** built for Apple Silicon (`aarch64`) and Intel Macs.
+  <p>
+    <strong>Open-source, zero-root macOS network orchestration, packet-capture, and multi-OS learning studio</strong><br />
+    built for Apple Silicon (<code>aarch64</code>) and Intel Macs.
+  </p>
 
-[![CI — Tests & Verification](https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml/badge.svg)](https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml)
-[![Build macOS Deliverables](https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml/badge.svg)](https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS%2013%2B%20(Apple%20Silicon%20%26%20Intel)-0f172a.svg)](#system-requirements)
-[![Hypervisor: Apple HVF + Multi-Arch TCG](https://img.shields.io/badge/QEMU-ARM64%20HVF%20%2B%20x86__64%2Fi386%2FRISC--V-0284c7.svg)](#supported-15-os-catalog--multi-architecture-matrix)
-[![Privilege: Zero Root](https://img.shields.io/badge/Privilege-Zero%20Root%20%2F%20No%20sudo-059669.svg)](#zero-root-architecture)
+  <p>
+    <a href="https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml"><img src="https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml/badge.svg" alt="CI — Tests & Verification" /></a>
+    <a href="https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml"><img src="https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml/badge.svg" alt="Build macOS Deliverables" /></a>
+    <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
+    <a href="#system-requirements"><img src="https://img.shields.io/badge/Platform-macOS%2013%2B%20(Apple%20Silicon%20%26%20Intel)-0f172a.svg" alt="Platform: macOS" /></a>
+    <a href="#supported-15-os-catalog--multi-architecture-matrix"><img src="https://img.shields.io/badge/QEMU-ARM64%20HVF%20%2B%20x86__64%2Fi386%2FRISC--V-0284c7.svg" alt="Hypervisor: Apple HVF + Multi-Arch TCG" /></a>
+    <a href="#zero-root-architecture"><img src="https://img.shields.io/badge/Privilege-Zero%20Root%20%2F%20No%20sudo-059669.svg" alt="Privilege: Zero Root" /></a>
+  </p>
+</div>
 
 **Etherloom** lets students, network engineers, security researchers, and educators design multi-OS virtual networks across **15 curated operating systems** (**Linux**, **BSDs**, **Enterprise Routers & Firewalls**, **Plan 9 / Illumos**, and **Retro FreeDOS + mTCP**) alongside built-in **IEEE 802.1D L2 Switches** and **L1 Hubs**, inject live link impairments, stream wiretaps directly into **Wireshark**, and visually dissect TCP flows inside the app using [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) — all in **100% unprivileged userspace** with zero kernel extensions, zero `vmnet` helper daemons, and zero `sudo` prompts.
 
@@ -26,6 +33,7 @@
   - **Live Wireshark Stream**: Creates a `/tmp/etherloom/tap_<link>.pcap` named FIFO pipe (`mkfifo`) and launches `Wireshark.app` for live zero-root packet inspection.
   - **Record `.pcap` & Dissect**: Writes microsecond-accurate `LINKTYPE_ETHERNET` `.pcap` files into `<project>.etherloom/captures/` and dissects them in-app via `tcpflowy` — rendering interactive **TCP Packet Ladder Diagrams** (3-way handshakes, retransmissions, out-of-order segments, zero-window probes), **Reconstructed ASCII/Hex Streams**, **SPLT Timing & Entropy Profiles**, and **Auto-Synthesized Suricata / Wireshark / BPF Signatures**.
 - **Interactive Networking Academy**: 8 built-in, multi-OS guided labs spanning Alpine Linux, OpenBSD, OpenWrt, MikroTik RouterOS CHR v7, and 32-bit FreeDOS (`mTCP`) — complete with declarative `lab.toml` blueprints, 1-click OS Library prerequisite handoffs, step-by-step Markdown drawers, wire highlights, and **Send to Serial** command blocks.
+- **"Woven Patchbay" macOS Dark-Mode Studio UI**: Deep slate-navy topology canvas (`#0D1321`), translucent frosted-glass panels, patchbay VM/Switch cards with hollow **Ring-Jack** port handles and live traffic halos, multi-layer animated **"Loom" cables** with floating ECG waveform tap badges, a bespoke `xterm.js` ANSI dark palette, and color-coded `tcpflowy` sequence/handshake traces.
 
 ---
 
@@ -33,8 +41,8 @@
 
 ```mermaid
 flowchart TB
-  subgraph UI["React 19 + TypeScript Studio UI"]
-    Canvas["@xyflow/react Topology Canvas\nArch Badges • Dynamic NIC Labels • Animated Wires"]
+  subgraph UI["React 19 + TypeScript Woven Patchbay UI"]
+    Canvas["@xyflow/react Patchbay Canvas\nRing-Jack Ports • Loom Cables • ECG Tap Badges"]
     LibModal["Storage & 15-OS Library Manager\nOn-Demand Downloader • External SSD Telemetry"]
     Dock["Multi-Tab Console & Inspector Dock\nxterm.js Serial • noVNC Screen • tcpflowy UI"]
     AcademyUI["Interactive Academy Drawer\n8 Multi-OS Labs • Send-to-Serial"]

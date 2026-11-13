@@ -75,24 +75,24 @@ export function NewProjectModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl overflow-hidden"
+        className="w-full max-w-md rounded-2xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-[rgba(34,211,238,0.22)] shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/70 dark:bg-[#0D1321]/90 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FilePlus2 className="w-4 h-4 text-sky-500" />
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
+            <FilePlus2 className="w-4 h-4 text-[#22D3EE]" />
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               New Etherloom Project
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
           >
             <X className="w-4 h-4" />
           </button>
@@ -100,13 +100,13 @@ export function NewProjectModal({
 
         <div className="p-5 space-y-3.5">
           {error && (
-            <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
+            <div className="rounded-lg bg-[#F43F5E]/10 border border-[#F43F5E]/30 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
               {error}
             </div>
           )}
 
           <label className="block space-y-1">
-            <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
               Project Name
             </span>
             <input
@@ -114,12 +114,12 @@ export function NewProjectModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Campus Dual-Stack Lab"
-              className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+              className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-900 dark:text-slate-100"
             />
           </label>
 
           <div className="space-y-1">
-            <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
               Location
             </span>
             <div className="flex items-center gap-2">
@@ -127,24 +127,24 @@ export function NewProjectModal({
                 type="text"
                 value={parentDir}
                 onChange={(e) => setParentDir(e.target.value)}
-                className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-900 dark:text-slate-100"
               />
               <button
                 type="button"
                 onClick={() => void handleBrowseFolder()}
-                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-xs font-medium hover:bg-slate-100 dark:hover:bg-zinc-800"
+                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-[rgba(34,211,238,0.20)] dark:bg-[#162032] text-xs font-medium hover:bg-slate-100 dark:hover:bg-[#1E2B42]"
               >
-                <FolderOpen className="w-3.5 h-3.5 text-sky-500" />
+                <FolderOpen className="w-3.5 h-3.5 text-[#22D3EE]" />
                 <span>Choose…</span>
               </button>
             </div>
-            <p className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 truncate pt-0.5">
+            <p className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate pt-0.5">
               Bundle: {bundlePreview}
             </p>
           </div>
 
           <label className="block space-y-1">
-            <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
               Lab Notes (Optional)
             </span>
             <input
@@ -152,16 +152,16 @@ export function NewProjectModal({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="OSPFv2/v3 + pf firewall topology"
-              className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+              className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-900 dark:text-slate-100"
             />
           </label>
         </div>
 
-        <div className="px-5 py-3 border-t border-slate-200 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-950/60 flex justify-end gap-2">
+        <div className="px-5 py-3 border-t border-slate-200 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/80 dark:bg-[#090E18]/90 flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-zinc-300 hover:bg-slate-200/70 dark:hover:bg-zinc-800"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-[#1E2B42]"
           >
             Cancel
           </button>
@@ -169,7 +169,7 @@ export function NewProjectModal({
             type="button"
             disabled={busy}
             onClick={() => void handleCreate()}
-            className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-xs font-semibold"
+            className="px-4 py-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-40 text-[#090E18] text-xs font-semibold transition-colors"
           >
             {busy ? "Creating…" : "Create .etherloom Project"}
           </button>

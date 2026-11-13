@@ -51,6 +51,7 @@ import type {
   VmInstanceInfo,
 } from "../../types/studio";
 import { formatByteSize } from "../../utils/topology";
+import { EtherloomBackdropOrnament, EtherloomMark } from "../brand";
 
 type FilterTabId =
   | "all"
@@ -440,13 +441,13 @@ export function StorageLibraryModal({
   const categoryAccent = (category: OsCatalogEntryDto["category"]) => {
     switch (category) {
       case "Linux":
-        return "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30";
+        return "bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border-[#22D3EE]/35";
       case "BSD Family":
-        return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30";
+        return "bg-[#F59E0B]/15 text-amber-700 dark:text-[#F59E0B] border-[#F59E0B]/35";
       case "Routers & Firewalls":
-        return "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30";
+        return "bg-[#6366F1]/15 text-indigo-700 dark:text-[#818CF8] border-[#6366F1]/35";
       case "Research, UNIX & Retro":
-        return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30";
+        return "bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border-[#10B981]/35";
     }
   };
 
@@ -465,58 +466,67 @@ export function StorageLibraryModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 dark:bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5"
+      className="fixed inset-0 z-50 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="storage-library-title"
     >
       <div
-        className="w-full max-w-6xl max-h-[92vh] rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col overflow-hidden"
+        className="w-full max-w-6xl max-h-[92vh] rounded-2xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-[rgba(34,211,238,0.22)] shadow-2xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
-        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-zinc-800 bg-gradient-to-r from-sky-500/[0.08] via-indigo-500/[0.05] to-emerald-500/[0.05] flex items-center justify-between gap-4 shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
-              <HardDrive className="w-5 h-5" />
+        {/* Modal Header with Woven Circuit Ornament */}
+        <div className="relative px-5 py-3.5 border-b border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-gradient-to-r from-cyan-500/[0.08] via-indigo-500/[0.05] to-emerald-500/[0.05] dark:from-[#0D1321] dark:via-[#111827] dark:to-[#0D1321] flex items-center justify-between gap-4 shrink-0 overflow-hidden">
+          <EtherloomBackdropOrnament
+            rasterVariant="ornament"
+            opacityClassName="opacity-20"
+            className="hidden dark:block absolute inset-0"
+          />
+          <div className="relative z-10 flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-[#090E18] border border-[#22D3EE]/35 text-[#22D3EE] flex items-center justify-center shadow-sm shrink-0">
+              <EtherloomMark size={28} />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
+                <HardDrive className="w-4 h-4 text-[#22D3EE] shrink-0" />
                 <h2
                   id="storage-library-title"
-                  className="text-sm font-bold text-slate-900 dark:text-zinc-100"
+                  className="text-sm font-bold text-slate-900 dark:text-slate-100"
                 >
                   Storage &amp; OS Library Manager
                 </h2>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border border-[#10B981]/30">
                   {readyCount} / {entries.length || 15} Ready on Disk
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-zinc-400 truncate mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                 Download, import, or delete curated ARM64 HVF &amp; x86/Retro OS
                 images directly on your internal drive or external SSD (zero{" "}
-                <code className="font-mono">/tmp</code> bloat).
+                <code className="font-mono text-cyan-700 dark:text-[#22D3EE]">
+                  /tmp
+                </code>{" "}
+                bloat).
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="relative z-10 flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => void refreshCatalog()}
               title="Rescan templates/ and isos/ directories"
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-[#1E2B42]"
             >
               <RefreshCw
-                className={`w-4 h-4 ${loadingEntries ? "animate-spin" : ""}`}
+                className={`w-4 h-4 ${loadingEntries ? "animate-spin text-[#22D3EE]" : ""}`}
               />
             </button>
             <button
               type="button"
               onClick={onClose}
               aria-label="Close Storage & OS Library Manager"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-[#1E2B42]"
             >
               <X className="w-4 h-4" />
             </button>
@@ -524,16 +534,16 @@ export function StorageLibraryModal({
         </div>
 
         {/* Top Section: Active Storage Locations & Live Drive Telemetry */}
-        <div className="px-5 py-3 border-b border-slate-200/80 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-950/50 space-y-3 shrink-0">
+        <div className="px-5 py-3 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/80 dark:bg-[#0D1321]/85 space-y-3 shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   Active Heavy Media Storage
                 </span>
 
                 {storageState?.status.state === "volumeDisconnected" ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#F59E0B]/15 text-amber-700 dark:text-amber-300 border border-[#F59E0B]/35">
                     <AlertTriangle className="w-3 h-3" />
                     <span>
                       External Drive Unplugged (
@@ -541,7 +551,7 @@ export function StorageLibraryModal({
                     </span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border border-[#10B981]/30">
                     <CheckCircle2 className="w-3 h-3" />
                     <span>
                       {activeTelemetry?.isExternalVolume
@@ -552,14 +562,14 @@ export function StorageLibraryModal({
                 )}
 
                 {activeTelemetry && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 uppercase">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200/80 dark:bg-[#090E18] dark:border dark:border-[rgba(34,211,238,0.16)] text-slate-700 dark:text-[#22D3EE] uppercase">
                     {activeTelemetry.filesystemType}
                   </span>
                 )}
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <code className="text-xs font-mono text-slate-800 dark:text-zinc-200 truncate">
+                <code className="text-xs font-mono text-slate-800 dark:text-slate-200 truncate">
                   {storageState?.config.storageRoot ??
                     "~/Library/Application Support/Etherloom/Library"}
                 </code>
@@ -570,20 +580,20 @@ export function StorageLibraryModal({
             <div className="flex flex-wrap items-center gap-2.5">
               {activeTelemetry && totalBytes > 0 && (
                 <div className="w-48 space-y-1">
-                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-600 dark:text-zinc-300">
+                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-600 dark:text-slate-300">
                     <span>{formatByteSize(freeBytes)} free</span>
-                    <span className="text-slate-400 dark:text-zinc-500">
+                    <span className="text-slate-400 dark:text-slate-500">
                       / {formatByteSize(totalBytes)}
                     </span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-1.5 rounded-full bg-slate-200 dark:bg-[#090E18] overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${
                         usedPercent > 90
-                          ? "bg-rose-500"
+                          ? "bg-[#F43F5E]"
                           : usedPercent > 75
-                          ? "bg-amber-500"
-                          : "bg-sky-500"
+                          ? "bg-[#F59E0B]"
+                          : "bg-gradient-to-r from-[#22D3EE] to-[#10B981]"
                       }`}
                       style={{ width: `${usedPercent}%` }}
                     />
@@ -604,7 +614,7 @@ export function StorageLibraryModal({
                     <button
                       type="button"
                       onClick={() => void onFallbackInternal()}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-200"
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-[rgba(34,211,238,0.20)] text-xs font-medium text-slate-700 dark:text-slate-200"
                     >
                       Use Internal Disk
                     </button>
@@ -614,7 +624,7 @@ export function StorageLibraryModal({
                 <button
                   type="button"
                   onClick={() => void handleBrowseStorageRoot()}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium shadow-2xs"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] text-xs font-semibold shadow-2xs transition-colors"
                 >
                   <FolderOpen className="w-3.5 h-3.5" />
                   <span>Change…</span>
@@ -628,7 +638,7 @@ export function StorageLibraryModal({
                       storageState?.config.storageRoot;
                     if (target) void revealInFinder(target);
                   }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-200"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-[rgba(34,211,238,0.18)] bg-white dark:bg-[#162032] hover:bg-slate-100 dark:hover:bg-[#1E2B42] text-xs font-medium text-slate-700 dark:text-slate-200"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Reveal in Finder</span>
@@ -640,8 +650,8 @@ export function StorageLibraryModal({
                   title="Configure folder overrides or migrate existing templates to an external SSD"
                   className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     storageEditorOpen
-                      ? "border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-                      : "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-300"
+                      ? "border-[#22D3EE] bg-[#22D3EE]/12 text-cyan-700 dark:text-[#22D3EE]"
+                      : "border-slate-200 dark:border-[rgba(34,211,238,0.18)] bg-white dark:bg-[#162032] text-slate-600 dark:text-slate-300 dark:hover:bg-[#1E2B42]"
                   }`}
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -652,7 +662,7 @@ export function StorageLibraryModal({
           </div>
 
           {activeTelemetry?.advisoryTip && (
-            <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 px-3 py-1.5 text-[11px] text-amber-800 dark:text-amber-300 flex items-center gap-2">
+            <div className="rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/25 px-3 py-1.5 text-[11px] text-amber-800 dark:text-amber-300 flex items-center gap-2">
               <Info className="w-3.5 h-3.5 shrink-0" />
               <span>{activeTelemetry.advisoryTip}</span>
             </div>
@@ -660,12 +670,12 @@ export function StorageLibraryModal({
 
           {/* Expandable Storage Root, Folder Overrides & Live Migration Panel */}
           {storageEditorOpen && (
-            <div className="rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+            <div className="rounded-xl bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.20)] p-3.5 space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <label className="block space-y-1">
-                  <span className="text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                  <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
                     Storage Root Directory (e.g.{" "}
-                    <code className="font-mono">
+                    <code className="font-mono text-cyan-700 dark:text-[#22D3EE]">
                       /Volumes/ExternalSSD/Etherloom
                     </code>
                     )
@@ -675,12 +685,12 @@ export function StorageLibraryModal({
                       type="text"
                       value={storageRootDraft}
                       onChange={(e) => setStorageRootDraft(e.target.value)}
-                      className="flex-1 px-2.5 py-1.5 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                      className="flex-1 px-2.5 py-1.5 text-xs font-mono rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
                     />
                     <button
                       type="button"
                       onClick={() => void handleBrowseStorageRoot()}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-xs font-medium"
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-[#0D1321] dark:hover:bg-[#1E2B42] dark:border dark:border-[rgba(34,211,238,0.18)] text-xs font-medium text-slate-700 dark:text-slate-200"
                     >
                       Browse…
                     </button>
@@ -688,7 +698,7 @@ export function StorageLibraryModal({
                 </label>
 
                 <div className="space-y-1">
-                  <span className="text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                  <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
                     When Changing Storage Location
                   </span>
                   <div className="grid grid-cols-2 gap-2">
@@ -697,8 +707,8 @@ export function StorageLibraryModal({
                       onClick={() => setMigrationMode("move_existing_data")}
                       className={`px-2.5 py-1.5 rounded-lg border text-left text-[11px] ${
                         migrationMode === "move_existing_data"
-                          ? "border-sky-500 bg-sky-500/10 font-semibold text-sky-700 dark:text-sky-300"
-                          : "border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400"
+                          ? "border-[#22D3EE] bg-[#22D3EE]/12 font-semibold text-cyan-700 dark:text-[#22D3EE]"
+                          : "border-slate-200 dark:border-[rgba(34,211,238,0.16)] text-slate-600 dark:text-slate-400"
                       }`}
                     >
                       Migrate Existing Data
@@ -708,8 +718,8 @@ export function StorageLibraryModal({
                       onClick={() => setMigrationMode("switch_only")}
                       className={`px-2.5 py-1.5 rounded-lg border text-left text-[11px] ${
                         migrationMode === "switch_only"
-                          ? "border-sky-500 bg-sky-500/10 font-semibold text-sky-700 dark:text-sky-300"
-                          : "border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400"
+                          ? "border-[#22D3EE] bg-[#22D3EE]/12 font-semibold text-cyan-700 dark:text-[#22D3EE]"
+                          : "border-slate-200 dark:border-[rgba(34,211,238,0.16)] text-slate-600 dark:text-slate-400"
                       }`}
                     >
                       Switch Path Only
@@ -722,7 +732,7 @@ export function StorageLibraryModal({
                 <button
                   type="button"
                   onClick={() => setOverridesExpanded((v) => !v)}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-600 dark:text-sky-400 hover:underline"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-600 dark:text-[#22D3EE] hover:underline"
                 >
                   {overridesExpanded ? (
                     <ChevronUp className="w-3.5 h-3.5" />
@@ -737,7 +747,7 @@ export function StorageLibraryModal({
                 {overridesExpanded && (
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2.5">
                     <label className="block space-y-1">
-                      <span className="text-[10px] font-mono text-slate-500">
+                      <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
                         templates/ Override (Optional)
                       </span>
                       <input
@@ -745,11 +755,11 @@ export function StorageLibraryModal({
                         value={templatesOverride}
                         onChange={(e) => setTemplatesOverride(e.target.value)}
                         placeholder={`${storageRootDraft}/templates`}
-                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
                       />
                     </label>
                     <label className="block space-y-1">
-                      <span className="text-[10px] font-mono text-slate-500">
+                      <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
                         isos/ Override (Optional)
                       </span>
                       <input
@@ -757,11 +767,11 @@ export function StorageLibraryModal({
                         value={isosOverride}
                         onChange={(e) => setIsosOverride(e.target.value)}
                         placeholder={`${storageRootDraft}/isos`}
-                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
                       />
                     </label>
                     <label className="block space-y-1">
-                      <span className="text-[10px] font-mono text-slate-500">
+                      <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
                         projects/ Override (Optional)
                       </span>
                       <input
@@ -769,7 +779,7 @@ export function StorageLibraryModal({
                         value={workspacesOverride}
                         onChange={(e) => setWorkspacesOverride(e.target.value)}
                         placeholder={`${storageRootDraft}/projects`}
-                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
                       />
                     </label>
                   </div>
@@ -778,15 +788,15 @@ export function StorageLibraryModal({
 
               {migrationProgress && (
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-mono text-sky-600 dark:text-sky-400">
+                  <div className="flex justify-between text-[11px] font-mono text-cyan-600 dark:text-[#22D3EE]">
                     <span>
                       {migrationProgress.phase}: {migrationProgress.currentFile}
                     </span>
                     <span>{Math.round(migrationProgress.percent)}%</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-1.5 rounded-full bg-slate-200 dark:bg-[#090E18] overflow-hidden">
                     <div
-                      className="h-full bg-sky-500 transition-all"
+                      className="h-full bg-[#22D3EE] transition-all"
                       style={{ width: `${migrationProgress.percent}%` }}
                     />
                   </div>
@@ -795,14 +805,14 @@ export function StorageLibraryModal({
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 {migrationMode === "move_existing_data" ? (
-                  <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-zinc-400">
+                  <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400">
                     <input
                       type="checkbox"
                       checked={deleteSourceAfterVerify}
                       onChange={(e) =>
                         setDeleteSourceAfterVerify(e.target.checked)
                       }
-                      className="rounded"
+                      className="rounded accent-cyan-500"
                     />
                     <span>
                       Remove old source files after byte-size verification
@@ -816,7 +826,7 @@ export function StorageLibraryModal({
                   <button
                     type="button"
                     onClick={() => setStorageEditorOpen(false)}
-                    className="px-3 py-1 rounded-lg text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                    className="px-3 py-1 rounded-lg text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-[#1E2B42]"
                   >
                     Cancel
                   </button>
@@ -824,7 +834,7 @@ export function StorageLibraryModal({
                     type="button"
                     disabled={applyingStorage}
                     onClick={() => void handleSaveStorageChanges()}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#090E18] text-xs font-semibold"
                   >
                     {applyingStorage && (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -838,7 +848,7 @@ export function StorageLibraryModal({
         </div>
 
         {/* Category / Architecture Filter Bar + Search */}
-        <div className="px-5 py-2.5 border-b border-slate-200/80 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+        <div className="px-5 py-2.5 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-white dark:bg-[#111827] flex flex-wrap items-center justify-between gap-2.5 shrink-0">
           <div className="flex items-center gap-1 flex-wrap">
             {(
               [
@@ -860,8 +870,8 @@ export function StorageLibraryModal({
                   onClick={() => setFilterTab(tab.id)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                     active
-                      ? "bg-sky-600 border-sky-600 text-white shadow-2xs"
-                      : "bg-slate-100/80 hover:bg-slate-200/70 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 border-slate-200/80 dark:border-zinc-700/70 text-slate-600 dark:text-zinc-300"
+                      ? "bg-[#06B6D4] border-[#22D3EE] text-[#090E18] font-semibold shadow-2xs"
+                      : "bg-slate-100/80 hover:bg-slate-200/70 dark:bg-[#162032] dark:hover:bg-[#1E2B42] border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] text-slate-600 dark:text-slate-300"
                   }`}
                 >
                   {tab.label}
@@ -877,20 +887,22 @@ export function StorageLibraryModal({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search 15 OSes, NICs, protocols…"
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#22D3EE]/35"
             />
           </div>
         </div>
 
         {/* Academy Lab Prerequisite Filter Banner (when deep-linked from AcademyModal) */}
         {focusedCatalogIds && focusedCatalogIds.length > 0 && (
-          <div className="mx-5 mt-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+          <div className="mx-5 mt-3 rounded-xl bg-[#6366F1]/10 border border-[#6366F1]/35 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
             <div className="flex items-center gap-2 text-xs text-indigo-900 dark:text-indigo-200">
-              <Sparkles className="w-4 h-4 text-indigo-500 shrink-0" />
+              <Sparkles className="w-4 h-4 text-[#818CF8] shrink-0" />
               <span>
                 Filtered to required OS image(s) for{" "}
                 <strong>{focusedLabTitle ?? "Selected Academy Lab"}</strong> (
-                <code className="font-mono">{focusedCatalogIds.join(", ")}</code>
+                <code className="font-mono text-[#22D3EE]">
+                  {focusedCatalogIds.join(", ")}
+                </code>
                 ).
               </span>
             </div>
@@ -899,7 +911,7 @@ export function StorageLibraryModal({
                 <button
                   type="button"
                   onClick={onReturnToAcademy}
-                  className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+                  className="px-2.5 py-1 rounded-lg bg-[#6366F1] hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
                 >
                   Back to Academy
                 </button>
@@ -908,7 +920,7 @@ export function StorageLibraryModal({
                 <button
                   type="button"
                   onClick={onClearFocusedCatalogIds}
-                  className="px-2.5 py-1 rounded-lg border border-indigo-500/35 text-xs font-medium text-indigo-700 dark:text-indigo-200 hover:bg-indigo-500/15 transition-colors"
+                  className="px-2.5 py-1 rounded-lg border border-[#6366F1]/35 text-xs font-medium text-indigo-700 dark:text-indigo-200 hover:bg-[#6366F1]/15 transition-colors"
                 >
                   Show All 15 OSes
                 </button>
@@ -919,7 +931,7 @@ export function StorageLibraryModal({
 
         {/* Confirm Delete Modal Overlay when saved `.etherloom` projects reference an image */}
         {confirmDeleteEntry && (
-          <div className="mx-5 mt-3 rounded-xl bg-rose-500/10 border border-rose-500/35 p-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="mx-5 mt-3 rounded-xl bg-[#F43F5E]/10 border border-[#F43F5E]/35 p-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
             <div className="space-y-1 max-w-3xl">
               <div className="text-xs font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -932,7 +944,7 @@ export function StorageLibraryModal({
               <p className="text-[11px] font-mono text-rose-800/90 dark:text-rose-200/90">
                 {confirmDeleteEntry.referencingProjects.join(", ")}
               </p>
-              <p className="text-[11px] text-slate-600 dark:text-zinc-400">
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
                 Deleting a Read-Only Golden Template will prevent Copy-on-Write
                 overlays in those projects from booting until re-downloaded.
               </p>
@@ -941,14 +953,14 @@ export function StorageLibraryModal({
               <button
                 type="button"
                 onClick={() => setConfirmDeleteEntry(null)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-700 dark:text-slate-200"
               >
                 Keep Image
               </button>
               <button
                 type="button"
                 onClick={() => void handleRequestDelete(confirmDeleteEntry, true)}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#F43F5E] hover:bg-rose-500 text-white"
               >
                 Delete Anyway
               </button>
@@ -957,7 +969,7 @@ export function StorageLibraryModal({
         )}
 
         {/* Scrollable 15-OS Catalog Grid */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-5 bg-white dark:bg-[#0D1321]/65">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {filteredEntries.map((entry) => {
               const prog = progressById[entry.id];
@@ -979,10 +991,10 @@ export function StorageLibraryModal({
                   key={entry.id}
                   className={`rounded-xl border p-4 flex flex-col justify-between gap-3 transition-all ${
                     isReady
-                      ? "bg-emerald-500/[0.03] dark:bg-emerald-500/[0.04] border-emerald-500/35"
+                      ? "bg-emerald-500/[0.03] dark:bg-[#162032] dark:hover:bg-[#1E2B42]/90 border-[#10B981]/35 dark:border-[#10B981]/40"
                       : isInstallerReady
-                      ? "bg-amber-500/[0.03] dark:bg-amber-500/[0.04] border-amber-500/35"
-                      : "bg-slate-50/60 dark:bg-zinc-950/60 border-slate-200 dark:border-zinc-800"
+                      ? "bg-amber-500/[0.03] dark:bg-[#162032] dark:hover:bg-[#1E2B42]/90 border-[#F59E0B]/35"
+                      : "bg-slate-50/60 dark:bg-[#162032] dark:hover:bg-[#1E2B42]/85 border-slate-200 dark:border-[rgba(34,211,238,0.16)] dark:hover:border-[rgba(34,211,238,0.38)]"
                   }`}
                 >
                   <div className="space-y-2.5">
@@ -998,10 +1010,10 @@ export function StorageLibraryModal({
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100">
+                            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                               {entry.name}
                             </h3>
-                            <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
+                            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                               {entry.version}
                             </span>
                           </div>
@@ -1009,13 +1021,13 @@ export function StorageLibraryModal({
                             <span
                               className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
                                 archInfo.native
-                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25"
-                                  : "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/25"
+                                  ? "bg-[#10B981]/12 text-emerald-700 dark:text-[#34D399] border-[#10B981]/30"
+                                  : "bg-[#6366F1]/12 text-indigo-700 dark:text-[#818CF8] border-[#6366F1]/30"
                               }`}
                             >
                               {archInfo.text}
                             </span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-[#090E18] dark:border dark:border-slate-700/70 text-slate-600 dark:text-slate-300">
                               {entry.category}
                             </span>
                           </div>
@@ -1024,9 +1036,9 @@ export function StorageLibraryModal({
 
                       {/* Availability Pill */}
                       {isReady ? (
-                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border border-[#10B981]/35">
                           <CheckCircle2 className="w-3 h-3" />
-                          <span>
+                          <span className="font-mono">
                             Ready
                             {entry.templateSizeBytes
                               ? ` • ${formatByteSize(entry.templateSizeBytes)}`
@@ -1034,53 +1046,53 @@ export function StorageLibraryModal({
                           </span>
                         </span>
                       ) : isInstallerReady ? (
-                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#F59E0B]/15 text-amber-700 dark:text-amber-300 border border-[#F59E0B]/35">
                           <Sparkles className="w-3 h-3" />
                           <span>Installer Ready</span>
                         </span>
                       ) : isDownloading ? (
-                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border border-[#22D3EE]/35">
                           <Loader2 className="w-3 h-3 animate-spin" />
                           <span>{prog?.stage ?? "Downloading"}</span>
                         </span>
                       ) : (
-                        <span className="shrink-0 text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-200/70 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">
+                        <span className="shrink-0 text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-200/70 dark:bg-[#090E18] dark:border dark:border-[rgba(34,211,238,0.14)] text-slate-500 dark:text-slate-400">
                           ~{entry.estimatedDownloadMb} MB
                         </span>
                       )}
                     </div>
 
                     {/* Description */}
-                    <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                       {entry.summary}
                     </p>
 
                     {/* Hardware & Credentials Spec Grid */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[11px]">
-                      <div className="px-2 py-1 rounded bg-white/80 dark:bg-zinc-900/80 border border-slate-200/70 dark:border-zinc-800 truncate">
-                        <span className="text-slate-400 dark:text-zinc-500">
+                      <div className="px-2 py-1 rounded bg-white/80 dark:bg-[#090E18] border border-slate-200/70 dark:border-[rgba(34,211,238,0.14)] truncate">
+                        <span className="text-slate-400 dark:text-slate-500">
                           NIC:{" "}
                         </span>
-                        <code className="font-mono text-slate-800 dark:text-zinc-200">
+                        <code className="font-mono text-slate-800 dark:text-[#22D3EE]">
                           {entry.nicNamingHint}
                         </code>
                       </div>
-                      <div className="px-2 py-1 rounded bg-white/80 dark:bg-zinc-900/80 border border-slate-200/70 dark:border-zinc-800 truncate">
-                        <span className="text-slate-400 dark:text-zinc-500">
+                      <div className="px-2 py-1 rounded bg-white/80 dark:bg-[#090E18] border border-slate-200/70 dark:border-[rgba(34,211,238,0.14)] truncate">
+                        <span className="text-slate-400 dark:text-slate-500">
                           HW:{" "}
                         </span>
-                        <code className="font-mono text-slate-800 dark:text-zinc-200">
+                        <code className="font-mono text-slate-800 dark:text-slate-200">
                           {entry.defaultCpus}c • {entry.defaultRamMb}M •{" "}
                           {entry.firmware.toUpperCase()}
                         </code>
                       </div>
-                      <div className="col-span-2 sm:col-span-1 px-2 py-1 rounded bg-white/80 dark:bg-zinc-900/80 border border-slate-200/70 dark:border-zinc-800 truncate">
-                        <span className="text-slate-400 dark:text-zinc-500">
+                      <div className="col-span-2 sm:col-span-1 px-2 py-1 rounded bg-white/80 dark:bg-[#090E18] border border-slate-200/70 dark:border-[rgba(34,211,238,0.14)] truncate">
+                        <span className="text-slate-400 dark:text-slate-500">
                           Login:{" "}
                         </span>
                         <span
                           title={entry.defaultCredentials}
-                          className="font-mono text-slate-800 dark:text-zinc-200"
+                          className="font-mono text-slate-800 dark:text-slate-200"
                         >
                           {entry.defaultCredentials}
                         </span>
@@ -1097,7 +1109,7 @@ export function StorageLibraryModal({
                             [entry.id]: !prev[entry.id],
                           }))
                         }
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-600 dark:text-sky-400 hover:underline"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-600 dark:text-[#22D3EE] hover:underline"
                       >
                         {tipsOpen ? (
                           <ChevronUp className="w-3.5 h-3.5" />
@@ -1111,7 +1123,7 @@ export function StorageLibraryModal({
                       </button>
 
                       {tipsOpen && (
-                        <div className="mt-2 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 p-2.5 space-y-1.5 text-[11px] text-slate-600 dark:text-zinc-300">
+                        <div className="mt-2 rounded-lg bg-white dark:bg-[#090E18] border border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] p-2.5 space-y-1.5 text-[11px] text-slate-600 dark:text-slate-300">
                           <ul className="list-disc pl-4 space-y-1">
                             {entry.quirksAndTips.map((tip, idx) => (
                               <li key={idx} className="leading-snug">
@@ -1119,10 +1131,16 @@ export function StorageLibraryModal({
                               </li>
                             ))}
                           </ul>
-                          <div className="pt-1 flex items-center justify-between text-[10px] text-slate-400 dark:text-zinc-500 border-t border-slate-100 dark:border-zinc-800">
+                          <div className="pt-1 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-800">
                             <span>
-                              Driver: <code>{entry.nicModel}</code> • Disk:{" "}
-                              <code>{entry.diskBus}</code>
+                              Driver:{" "}
+                              <code className="font-mono text-[#22D3EE]">
+                                {entry.nicModel}
+                              </code>{" "}
+                              • Disk:{" "}
+                              <code className="font-mono text-[#34D399]">
+                                {entry.diskBus}
+                              </code>
                             </span>
                             <span className="font-mono truncate max-w-[230px]">
                               {entry.officialSiteUrl}
@@ -1135,12 +1153,12 @@ export function StorageLibraryModal({
 
                   {/* Live Download Progress Bar */}
                   {isDownloading && prog && (
-                    <div className="rounded-lg bg-sky-500/10 border border-sky-500/25 p-2.5 space-y-1.5">
+                    <div className="rounded-lg bg-[#22D3EE]/10 border border-[#22D3EE]/30 p-2.5 space-y-1.5">
                       <div className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="text-sky-800 dark:text-sky-200 font-medium truncate">
+                        <span className="text-cyan-800 dark:text-[#22D3EE] font-medium truncate">
                           {prog.message}
                         </span>
-                        <span className="font-mono text-sky-700 dark:text-sky-300 shrink-0">
+                        <span className="font-mono text-cyan-700 dark:text-cyan-300 shrink-0">
                           {formatByteSize(prog.bytesDownloaded)}
                           {prog.totalBytes
                             ? ` / ${formatByteSize(prog.totalBytes)}`
@@ -1148,9 +1166,9 @@ export function StorageLibraryModal({
                           ({Math.round(prog.percent)}%)
                         </span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-sky-950/15 dark:bg-sky-200/15 overflow-hidden">
+                      <div className="h-1.5 rounded-full bg-cyan-950/20 dark:bg-[#090E18] overflow-hidden">
                         <div
-                          className="h-full bg-sky-500 transition-all duration-200"
+                          className="h-full bg-gradient-to-r from-[#22D3EE] to-[#10B981] transition-all duration-200"
                           style={{
                             width: `${Math.max(2, Math.min(100, prog.percent))}%`,
                           }}
@@ -1172,12 +1190,12 @@ export function StorageLibraryModal({
                           }))
                         }
                         placeholder="https://mirror.example.org/os-image.qcow2.xz"
-                        className="flex-1 px-2.5 py-1 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        className="flex-1 px-2.5 py-1 text-xs font-mono rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
                       />
                       <button
                         type="button"
                         onClick={() => void handleStartDownload(entry)}
-                        className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold"
+                        className="px-2.5 py-1 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] text-xs font-semibold"
                       >
                         Fetch URL
                       </button>
@@ -1185,12 +1203,12 @@ export function StorageLibraryModal({
                   )}
 
                   {/* Card Footer Action Bar */}
-                  <div className="pt-2 border-t border-slate-200/70 dark:border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
+                  <div className="pt-2 border-t border-slate-200/70 dark:border-[rgba(34,211,238,0.14)] flex flex-wrap items-center justify-between gap-2">
                     {isDownloading ? (
                       <button
                         type="button"
                         onClick={() => void handleCancelDownload(entry.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F43F5E] hover:bg-rose-500 text-white text-xs font-semibold"
                       >
                         <X className="w-3.5 h-3.5" />
                         <span>Cancel Download</span>
@@ -1203,7 +1221,7 @@ export function StorageLibraryModal({
                             onAddCatalogOsNode(entry);
                             onClose();
                           }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#10B981] hover:bg-emerald-400 text-[#090E18] text-xs font-semibold shadow-2xs transition-colors"
                         >
                           <Plus className="w-3.5 h-3.5" />
                           <span>Add Node to Canvas</span>
@@ -1217,7 +1235,7 @@ export function StorageLibraryModal({
                                 void revealInFinder(entry.templatePath!)
                               }
                               title="Reveal Golden Template in Finder"
-                              className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300"
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-[rgba(34,211,238,0.18)] hover:bg-slate-100 dark:hover:bg-[#0D1321] text-slate-600 dark:text-slate-300"
                             >
                               <FolderOpen className="w-3.5 h-3.5" />
                             </button>
@@ -1228,7 +1246,7 @@ export function StorageLibraryModal({
                               disabled={isBusy}
                               onClick={() => void handleStartDownload(entry)}
                               title="Re-download fresh upstream image"
-                              className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300"
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-[rgba(34,211,238,0.18)] hover:bg-slate-100 dark:hover:bg-[#0D1321] text-slate-600 dark:text-slate-300"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
                             </button>
@@ -1238,7 +1256,7 @@ export function StorageLibraryModal({
                             disabled={isBusy}
                             onClick={() => void handleRequestDelete(entry, false)}
                             title="Delete Golden Template from disk"
-                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 text-xs font-medium"
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[#F43F5E]/30 text-rose-600 dark:text-rose-400 hover:bg-[#F43F5E]/10 text-xs font-medium"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                             <span>Delete</span>
@@ -1267,7 +1285,7 @@ export function StorageLibraryModal({
                             disabled={isBusy}
                             onClick={() => void handleImportLocal(entry)}
                             title="Import pre-built .qcow2 or alternate ISO"
-                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs text-slate-700 dark:text-zinc-200"
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-[rgba(34,211,238,0.18)] hover:bg-slate-100 dark:hover:bg-[#0D1321] text-xs text-slate-700 dark:text-slate-200"
                           >
                             <Upload className="w-3.5 h-3.5" />
                             <span>Import Disk</span>
@@ -1279,7 +1297,7 @@ export function StorageLibraryModal({
                                 void revealInFinder(entry.installerPath!)
                               }
                               title="Reveal installer in Finder"
-                              className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300"
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-[rgba(34,211,238,0.18)] hover:bg-slate-100 dark:hover:bg-[#0D1321] text-slate-600 dark:text-slate-300"
                             >
                               <FolderOpen className="w-3.5 h-3.5" />
                             </button>
@@ -1289,7 +1307,7 @@ export function StorageLibraryModal({
                             disabled={isBusy}
                             onClick={() => void handleRequestDelete(entry, false)}
                             title="Delete downloaded installer"
-                            className="p-1.5 rounded-lg border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+                            className="p-1.5 rounded-lg border border-[#F43F5E]/30 text-rose-600 dark:text-rose-400 hover:bg-[#F43F5E]/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1304,7 +1322,7 @@ export function StorageLibraryModal({
                               type="button"
                               disabled={isBusy}
                               onClick={() => void handleStartDownload(entry)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#090E18] text-xs font-semibold shadow-2xs transition-colors"
                             >
                               <Download className="w-3.5 h-3.5" />
                               <span>
@@ -1321,8 +1339,8 @@ export function StorageLibraryModal({
                             onClick={() => void handleImportLocal(entry)}
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
                               entry.deliveryKind === "local_import_only"
-                                ? "bg-sky-600 hover:bg-sky-500 border-sky-600 text-white font-semibold"
-                                : "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200"
+                                ? "bg-[#06B6D4] hover:bg-[#22D3EE] border-[#22D3EE] text-[#090E18] font-semibold"
+                                : "border-slate-200 dark:border-[rgba(34,211,238,0.18)] bg-white dark:bg-[#0D1321] hover:bg-slate-100 dark:hover:bg-[#1E2B42] text-slate-700 dark:text-slate-200"
                             }`}
                           >
                             {isBusy ? (
@@ -1342,7 +1360,7 @@ export function StorageLibraryModal({
                               [entry.id]: !prev[entry.id],
                             }))
                           }
-                          className="text-[11px] text-slate-500 hover:text-sky-600 dark:text-zinc-400 dark:hover:text-sky-400"
+                          className="text-[11px] text-slate-500 hover:text-cyan-600 dark:text-slate-400 dark:hover:text-[#22D3EE]"
                         >
                           {mirrorOpen ? "Hide URL" : "Custom URL…"}
                         </button>
@@ -1356,18 +1374,21 @@ export function StorageLibraryModal({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-2.5 border-t border-slate-200 dark:border-zinc-800 bg-slate-50/90 dark:bg-zinc-950/70 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-zinc-400 shrink-0">
+        <div className="px-5 py-2.5 border-t border-slate-200 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/90 dark:bg-[#090E18]/90 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
           <div className="flex items-center gap-2">
-            <Layers className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <Layers className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
             <span>
-              All Golden Templates are marked Read-Only (<code className="font-mono">0444</code>) — topology nodes boot instant Copy-on-Write{" "}
-              <code className="font-mono">.qcow2</code> overlays taking only a few MB.
+              All Golden Templates are marked Read-Only (
+              <code className="font-mono text-[#22D3EE]">0444</code>) — topology
+              nodes boot instant Copy-on-Write{" "}
+              <code className="font-mono text-[#22D3EE]">.qcow2</code> overlays
+              taking only a few MB.
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="px-3.5 py-1 rounded-lg bg-slate-200/80 hover:bg-slate-300/70 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-100 font-medium text-xs"
+            className="px-3.5 py-1 rounded-lg bg-slate-200/80 hover:bg-slate-300/70 dark:bg-[#162032] dark:hover:bg-[#1E2B42] dark:border dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100 font-medium text-xs"
           >
             Done
           </button>

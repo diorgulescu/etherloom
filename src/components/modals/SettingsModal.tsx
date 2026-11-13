@@ -11,8 +11,8 @@ import {
   Lock,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   SlidersHorizontal,
-  Waves,
   X,
 } from "lucide-react";
 import {
@@ -32,6 +32,12 @@ import type {
   UpdateStorageRequest,
 } from "../../types/studio";
 import { formatBytesCompact } from "../layout/StatusBar";
+import {
+  EtherloomBackdropOrnament,
+  EtherloomMark,
+  EtherloomWordmark,
+  SignalWaveformIcon,
+} from "../brand";
 
 export type SettingsSectionId = "storage" | "tcpflowy" | "general";
 
@@ -234,21 +240,21 @@ export function SettingsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 dark:bg-black/65 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="etherloom-settings-title"
     >
-      <div className="w-full max-w-3xl max-h-[88vh] rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-3xl max-h-[88vh] rounded-2xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-[rgba(34,211,238,0.22)] shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-3.5 border-b border-slate-200/80 dark:border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="w-4 h-4 text-sky-500" />
+        <div className="px-5 py-3.5 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/70 dark:bg-[#0D1321]/90 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <EtherloomMark size={24} />
             <h2
               id="etherloom-settings-title"
-              className="text-sm font-semibold text-slate-900 dark:text-zinc-100"
+              className="text-sm font-semibold text-slate-900 dark:text-slate-100"
             >
-              Etherloom Settings
+              Etherloom Settings &amp; About
             </h2>
           </div>
           <button
@@ -256,7 +262,7 @@ export function SettingsModal({
             onClick={onClose}
             disabled={submitting}
             aria-label="Close settings"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-50"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-[#1E2B42] disabled:opacity-50"
           >
             <X className="w-4 h-4" />
           </button>
@@ -264,14 +270,14 @@ export function SettingsModal({
 
         {/* Body with left sidebar */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          <nav className="w-48 shrink-0 border-r border-slate-200/80 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-950/40 p-2.5 space-y-1">
+          <nav className="w-48 shrink-0 border-r border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/80 dark:bg-[#0D1321]/85 p-2.5 space-y-1">
             <button
               type="button"
               onClick={() => setActiveSection("storage")}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                 activeSection === "storage"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
-                  : "text-slate-600 hover:bg-slate-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800/70"
+                  ? "bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border border-[#22D3EE]/30"
+                  : "text-slate-600 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-[#1E2B42]"
               }`}
             >
               <HardDrive className="w-3.5 h-3.5" />
@@ -283,11 +289,11 @@ export function SettingsModal({
               onClick={() => setActiveSection("tcpflowy")}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                 activeSection === "tcpflowy"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
-                  : "text-slate-600 hover:bg-slate-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800/70"
+                  ? "bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border border-[#22D3EE]/30"
+                  : "text-slate-600 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-[#1E2B42]"
               }`}
             >
-              <Waves className="w-3.5 h-3.5" />
+              <SignalWaveformIcon className="w-3.5 h-3" />
               <span>tcpflowy &amp; Capture</span>
             </button>
 
@@ -296,24 +302,24 @@ export function SettingsModal({
               onClick={() => setActiveSection("general")}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                 activeSection === "general"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
-                  : "text-slate-600 hover:bg-slate-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800/70"
+                  ? "bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border border-[#22D3EE]/30"
+                  : "text-slate-600 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-[#1E2B42]"
               }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>Appearance</span>
+              <span>Appearance &amp; About</span>
             </button>
           </nav>
 
           {/* Right Pane */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-white dark:bg-[#111827]">
             {activeSection === "storage" && storageState && (
               <>
                 {/* Disconnected Warning Card inside Modal */}
                 {storageState.status.state === "volumeDisconnected" && (
-                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 space-y-2">
+                  <div className="rounded-xl border border-[#F59E0B]/40 bg-[#F59E0B]/10 p-3.5 space-y-2">
                     <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 dark:text-amber-200">
-                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                      <AlertTriangle className="w-4 h-4 text-[#F59E0B] shrink-0" />
                       <span>
                         Volume &ldquo;{storageState.status.volumeName}&rdquo; is
                         Currently Unmounted
@@ -330,7 +336,7 @@ export function SettingsModal({
                       <button
                         type="button"
                         onClick={() => void onRetryDetection()}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white dark:bg-zinc-900 border border-amber-500/30 text-amber-800 dark:text-amber-200"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white dark:bg-[#162032] border border-[#F59E0B]/30 text-amber-800 dark:text-amber-200"
                       >
                         <RefreshCw className="w-3 h-3" />
                         Retry Detection
@@ -349,36 +355,36 @@ export function SettingsModal({
 
                 {/* Volume Capacity & Filesystem Telemetry Card */}
                 {activeTelemetry && (
-                  <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-950/60 p-4 space-y-2.5">
+                  <div className="rounded-xl border border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/80 dark:bg-[#162032] p-4 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <HardDrive className="w-4 h-4 text-sky-500" />
-                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
+                        <HardDrive className="w-4 h-4 text-[#22D3EE]" />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
                           {activeTelemetry.isExternalVolume
                             ? "External Volume Telemetry"
                             : "Storage Volume Telemetry"}
                         </span>
-                        <span className="uppercase text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
+                        <span className="uppercase text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-[#090E18] dark:border dark:border-[rgba(34,211,238,0.16)] text-slate-700 dark:text-[#22D3EE]">
                           {activeTelemetry.filesystemType}
                         </span>
                       </div>
-                      <span className="text-xs font-mono font-medium text-emerald-700 dark:text-emerald-400">
+                      <span className="text-xs font-mono font-medium text-emerald-700 dark:text-[#34D399]">
                         {formatBytesCompact(activeTelemetry.freeBytes)} free of{" "}
                         {formatBytesCompact(activeTelemetry.totalBytes)}
                       </span>
                     </div>
 
-                    <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
+                    <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-[#090E18] overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all"
+                        className="h-full bg-gradient-to-r from-[#22D3EE] via-[#6366F1] to-[#10B981] transition-all"
                         style={{ width: `${usedPercent.toFixed(1)}%` }}
                       />
                     </div>
 
                     {/* Non-blocking ExFAT sparse qcow2 tip */}
                     {activeTelemetry.advisoryTip && (
-                      <div className="flex items-start gap-2 pt-1 text-[11px] text-sky-700 dark:text-sky-300 bg-sky-500/10 border border-sky-500/25 rounded-lg px-3 py-2">
-                        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-500" />
+                      <div className="flex items-start gap-2 pt-1 text-[11px] text-cyan-700 dark:text-cyan-300 bg-[#22D3EE]/10 border border-[#22D3EE]/25 rounded-lg px-3 py-2">
+                        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#22D3EE]" />
                         <span>{activeTelemetry.advisoryTip}</span>
                       </div>
                     )}
@@ -386,7 +392,7 @@ export function SettingsModal({
                 )}
 
                 {previewError && (
-                  <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200">
+                  <div className="rounded-lg border border-[#F59E0B]/35 bg-[#F59E0B]/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200">
                     {previewError}
                   </div>
                 )}
@@ -394,20 +400,24 @@ export function SettingsModal({
                 {/* Primary storage_root Folder Picker */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
-                      Primary Media Library Root (<code className="font-mono">storage_root</code>)
+                    <label className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      Primary Media Library Root (
+                      <code className="font-mono text-cyan-700 dark:text-[#22D3EE]">
+                        storage_root
+                      </code>
+                      )
                     </label>
                     <button
                       type="button"
                       onClick={() =>
                         setStorageRoot(storageState.defaultStorageRoot)
                       }
-                      className="text-[11px] text-sky-600 dark:text-sky-400 hover:underline"
+                      className="text-[11px] text-cyan-600 dark:text-[#22D3EE] hover:underline"
                     >
                       Use Default Internal Path
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Stores heavy VM base templates, installer ISOs/IMGs, and new{" "}
                     <code className="font-mono">*.etherloom</code> lab workspaces
                     (supports external <code className="font-mono">/Volumes/...</code>{" "}
@@ -418,7 +428,7 @@ export function SettingsModal({
                       type="text"
                       value={storageRoot}
                       onChange={(e) => setStorageRoot(e.target.value)}
-                      className="flex-1 px-3 py-1.5 rounded-lg text-xs font-mono bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                      className="flex-1 px-3 py-1.5 rounded-lg text-xs font-mono bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#22D3EE]/35"
                     />
                     <button
                       type="button"
@@ -429,7 +439,7 @@ export function SettingsModal({
                           setStorageRoot
                         )
                       }
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 transition-colors shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-[#162032] dark:hover:bg-[#1E2B42] dark:border dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-200 transition-colors shrink-0"
                     >
                       <FolderOpen className="w-3.5 h-3.5" />
                       <span>Browse…</span>
@@ -438,22 +448,22 @@ export function SettingsModal({
                 </div>
 
                 {/* Optional Independent Overrides */}
-                <div className="border border-slate-200/80 dark:border-zinc-800 rounded-xl p-3.5 space-y-3">
+                <div className="border border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] dark:bg-[#162032]/70 rounded-xl p-3.5 space-y-3">
                   <button
                     type="button"
                     onClick={() => setShowAdvancedOverrides((v) => !v)}
                     className="w-full flex items-center justify-between text-left"
                   >
-                    <span className="text-xs font-semibold text-slate-700 dark:text-zinc-200">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                       Optional Independent Folder Overrides
                     </span>
-                    <span className="text-[11px] text-sky-600 dark:text-sky-400">
+                    <span className="text-[11px] text-cyan-600 dark:text-[#22D3EE]">
                       {showAdvancedOverrides ? "Hide" : "Customize"}
                     </span>
                   </button>
 
                   {showAdvancedOverrides && (
-                    <div className="space-y-2.5 pt-1 border-t border-slate-100 dark:border-zinc-800">
+                    <div className="space-y-2.5 pt-1 border-t border-slate-100 dark:border-[rgba(34,211,238,0.14)]">
                       {(
                         [
                           {
@@ -477,7 +487,7 @@ export function SettingsModal({
                         ] as const
                       ).map((row) => (
                         <div key={row.label} className="space-y-1">
-                          <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
                             {row.label}
                           </label>
                           <div className="flex items-center gap-2">
@@ -486,7 +496,7 @@ export function SettingsModal({
                               value={row.value}
                               onChange={(e) => row.setter(e.target.value)}
                               placeholder={`Default: ${row.placeholder}`}
-                              className="flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-mono bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-600"
+                              className="flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-mono bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                             />
                             <button
                               type="button"
@@ -497,7 +507,7 @@ export function SettingsModal({
                                   row.setter
                                 )
                               }
-                              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200"
+                              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-100 hover:bg-slate-200 dark:bg-[#0D1321] dark:hover:bg-[#1E2B42] dark:border dark:border-[rgba(34,211,238,0.18)] text-slate-700 dark:text-slate-200"
                             >
                               Browse…
                             </button>
@@ -510,9 +520,9 @@ export function SettingsModal({
 
                 {/* Migration Mode Options when Path Changed */}
                 {hasChanges && (
-                  <div className="rounded-xl border border-sky-500/35 bg-sky-500/[0.06] p-4 space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-zinc-100">
-                      <ArrowRightLeft className="w-4 h-4 text-sky-500" />
+                  <div className="rounded-xl border border-[#22D3EE]/35 bg-[#22D3EE]/[0.06] p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
+                      <ArrowRightLeft className="w-4 h-4 text-[#22D3EE]" />
                       <span>How should Etherloom apply the new storage location?</span>
                     </div>
 
@@ -522,14 +532,14 @@ export function SettingsModal({
                         onClick={() => setMode("switch_only")}
                         className={`text-left p-3 rounded-lg border transition-all ${
                           mode === "switch_only"
-                            ? "bg-white dark:bg-zinc-900 border-sky-500 ring-2 ring-sky-500/25"
-                            : "bg-white/60 dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-800"
+                            ? "bg-white dark:bg-[#162032] border-[#22D3EE] ring-2 ring-[#22D3EE]/25"
+                            : "bg-white/60 dark:bg-[#0D1321]/60 border-slate-200 dark:border-[rgba(34,211,238,0.16)]"
                         }`}
                       >
-                        <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                        <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                           1. Switch Path Only
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                           Point immediately to the chosen folder and auto-discover
                           existing <code className="font-mono">.qcow2</code>{" "}
                           templates and <code className="font-mono">.iso/.img</code>{" "}
@@ -542,14 +552,14 @@ export function SettingsModal({
                         onClick={() => setMode("move_existing_data")}
                         className={`text-left p-3 rounded-lg border transition-all ${
                           mode === "move_existing_data"
-                            ? "bg-white dark:bg-zinc-900 border-sky-500 ring-2 ring-sky-500/25"
-                            : "bg-white/60 dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-800"
+                            ? "bg-white dark:bg-[#162032] border-[#22D3EE] ring-2 ring-[#22D3EE]/25"
+                            : "bg-white/60 dark:bg-[#0D1321]/60 border-slate-200 dark:border-[rgba(34,211,238,0.16)]"
                         }`}
                       >
-                        <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                        <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                           2. Move Existing Library Data
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                           Copy existing templates &amp; ISOs to the new drive with
                           live progress, verify file sizes, and update{" "}
                           <code className="font-mono">settings.toml</code>.
@@ -558,12 +568,12 @@ export function SettingsModal({
                     </div>
 
                     {mode === "move_existing_data" && (
-                      <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 pt-1 cursor-pointer">
+                      <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 pt-1 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={deleteSource}
                           onChange={(e) => setDeleteSource(e.target.checked)}
-                          className="rounded accent-sky-500"
+                          className="rounded accent-cyan-500"
                         />
                         <span>
                           Clean up old source files after byte-size verification
@@ -576,12 +586,12 @@ export function SettingsModal({
 
                 {/* Live Migration Progress Bar */}
                 {submitting && migrationProgress && (
-                  <div className="rounded-xl border border-indigo-500/35 bg-indigo-500/10 p-3.5 space-y-2">
+                  <div className="rounded-xl border border-[#6366F1]/35 bg-[#6366F1]/10 p-3.5 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-medium text-indigo-900 dark:text-indigo-200 truncate">
                         Migrating: {migrationProgress.currentFile}
                       </span>
-                      <span className="font-mono text-[11px] text-indigo-700 dark:text-indigo-300 shrink-0">
+                      <span className="font-mono text-[11px] text-indigo-700 dark:text-[#818CF8] shrink-0">
                         {migrationProgress.filesCompleted}/
                         {migrationProgress.totalFiles} files •{" "}
                         {formatBytesCompact(migrationProgress.bytesCopied)} /{" "}
@@ -589,9 +599,9 @@ export function SettingsModal({
                         {migrationProgress.percent.toFixed(0)}%)
                       </span>
                     </div>
-                    <div className="w-full h-2 rounded-full bg-indigo-950/20 dark:bg-zinc-800 overflow-hidden">
+                    <div className="w-full h-2 rounded-full bg-indigo-950/20 dark:bg-[#090E18] overflow-hidden">
                       <div
-                        className="h-full bg-indigo-500 transition-all"
+                        className="h-full bg-[#6366F1] transition-all"
                         style={{
                           width: `${migrationProgress.percent.toFixed(1)}%`,
                         }}
@@ -601,29 +611,29 @@ export function SettingsModal({
                 )}
 
                 {feedbackError && (
-                  <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
+                  <div className="rounded-lg border border-[#F43F5E]/35 bg-[#F43F5E]/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-300">
                     {feedbackError}
                   </div>
                 )}
 
                 {feedbackSuccess && (
-                  <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <div className="rounded-lg border border-[#10B981]/35 bg-[#10B981]/10 px-3.5 py-2.5 text-xs text-emerald-700 dark:text-[#34D399] flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-[#10B981]" />
                     <span>{feedbackSuccess}</span>
                   </div>
                 )}
 
                 {/* Fixed Internal Local Runtime Paths Info Card */}
-                <div className="rounded-xl border border-slate-200/80 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-950/40 p-3.5 space-y-1.5 text-[11px]">
-                  <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-zinc-300">
-                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                <div className="rounded-xl border border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/60 dark:bg-[#090E18] p-3.5 space-y-1.5 text-[11px]">
+                  <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
+                    <Lock className="w-3.5 h-3.5 text-[#22D3EE]" />
                     <span>Internal Runtime State (Always Kept on Local SSD)</span>
                   </div>
-                  <p className="text-slate-500 dark:text-zinc-400">
+                  <p className="text-slate-500 dark:text-slate-400">
                     Kept local to guarantee POSIX symlink &amp; Unix domain socket
                     compatibility even when media resides on ExFAT drives:
                   </p>
-                  <div className="font-mono text-[10px] text-slate-600 dark:text-zinc-400 space-y-0.5 pt-1">
+                  <div className="font-mono text-[10px] text-slate-600 dark:text-slate-400 space-y-0.5 pt-1">
                     <div>Config: {storageState.settingsFile}</div>
                     <div>tcpflowy venv: {storageState.pythonEnvDir}</div>
                     <div>QEMU sockets &amp; FIFOs: {storageState.runtimeSocketsDir}</div>
@@ -634,12 +644,15 @@ export function SettingsModal({
 
             {activeSection === "tcpflowy" && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-950/60 p-4 space-y-3">
+                <div className="rounded-xl border border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/80 dark:bg-[#162032] p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <Waves className="w-4 h-4 text-indigo-500" />
-                      <span className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
-                        Managed <code className="font-mono">tcpflowy</code>{" "}
+                      <SignalWaveformIcon className="w-4 h-3.5 text-[#22D3EE]" />
+                      <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                        Managed{" "}
+                        <code className="font-mono text-cyan-700 dark:text-[#22D3EE]">
+                          tcpflowy
+                        </code>{" "}
                         Python Dissector Environment
                       </span>
                     </div>
@@ -647,8 +660,8 @@ export function SettingsModal({
                       <span
                         className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
                           tcpflowyStatus.state === "ready"
-                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
-                            : "bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-500/30"
+                            ? "bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border-[#10B981]/30"
+                            : "bg-[#F59E0B]/15 text-amber-800 dark:text-amber-200 border-[#F59E0B]/30"
                         }`}
                       >
                         {tcpflowyStatus.state === "ready"
@@ -661,13 +674,13 @@ export function SettingsModal({
                   </div>
 
                   {tcpflowyStatus && (
-                    <p className="text-[11px] text-slate-600 dark:text-zinc-400">
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
                       {tcpflowyStatus.message}
                     </p>
                   )}
 
                   {tcpflowyStatus && (
-                    <div className="font-mono text-[10.5px] text-slate-600 dark:text-zinc-400 space-y-1 pt-1 border-t border-slate-200/70 dark:border-zinc-800">
+                    <div className="font-mono text-[10.5px] text-slate-600 dark:text-slate-400 space-y-1 pt-1 border-t border-slate-200/70 dark:border-[rgba(34,211,238,0.14)]">
                       <div>Managed venv: {tcpflowyStatus.venvDir}</div>
                       <div>
                         Python binary:{" "}
@@ -689,7 +702,7 @@ export function SettingsModal({
                         setTcpflowyFeedback(null);
                         void onInstallTcpflowy();
                       }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#6366F1] hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
                     >
                       {installingTcpflowy ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -708,18 +721,18 @@ export function SettingsModal({
                   </div>
 
                   {installingTcpflowy && tcpflowyProgress && (
-                    <div className="rounded-lg border border-indigo-500/35 bg-indigo-500/10 p-3 space-y-1.5">
+                    <div className="rounded-lg border border-[#6366F1]/35 bg-[#6366F1]/10 p-3 space-y-1.5">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-medium text-indigo-900 dark:text-indigo-200">
                           {tcpflowyProgress.message}
                         </span>
-                        <span className="font-mono text-[11px] text-indigo-700 dark:text-indigo-300">
+                        <span className="font-mono text-[11px] text-indigo-700 dark:text-[#818CF8]">
                           {tcpflowyProgress.percent}%
                         </span>
                       </div>
-                      <div className="w-full h-1.5 rounded-full bg-indigo-950/20 dark:bg-zinc-800 overflow-hidden">
+                      <div className="w-full h-1.5 rounded-full bg-indigo-950/20 dark:bg-[#090E18] overflow-hidden">
                         <div
-                          className="h-full bg-indigo-500 transition-all"
+                          className="h-full bg-[#6366F1] transition-all"
                           style={{ width: `${tcpflowyProgress.percent}%` }}
                         />
                       </div>
@@ -728,10 +741,13 @@ export function SettingsModal({
                 </div>
 
                 {/* Local tcpflowy Git Repository Override for Development */}
-                <div className="rounded-xl border border-slate-200 dark:border-zinc-800 p-4 space-y-2.5">
+                <div className="rounded-xl border border-slate-200 dark:border-[rgba(34,211,238,0.16)] dark:bg-[#162032] p-4 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
-                      Local <code className="font-mono">tcpflowy</code>{" "}
+                    <label className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      Local{" "}
+                      <code className="font-mono text-cyan-700 dark:text-[#22D3EE]">
+                        tcpflowy
+                      </code>{" "}
                       Repository Override (Development)
                     </label>
                     {localRepoDraft && (
@@ -768,7 +784,7 @@ export function SettingsModal({
                     )}
                   </div>
 
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Optional: point directly to a local{" "}
                     <code className="font-mono">tcpflowy</code> checkout
                     containing <code className="font-mono">tcpflowy.py</code>{" "}
@@ -782,7 +798,7 @@ export function SettingsModal({
                       value={localRepoDraft}
                       onChange={(e) => setLocalRepoDraft(e.target.value)}
                       placeholder="/path/to/local/tcpflowy"
-                      className="flex-1 px-3 py-1.5 rounded-lg text-xs font-mono bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-600"
+                      className="flex-1 px-3 py-1.5 rounded-lg text-xs font-mono bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                     />
                     <button
                       type="button"
@@ -793,7 +809,7 @@ export function SettingsModal({
                           setLocalRepoDraft
                         )
                       }
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-[#0D1321] dark:hover:bg-[#1E2B42] dark:border dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-200 shrink-0"
                     >
                       <FolderOpen className="w-3.5 h-3.5" />
                       <span>Browse…</span>
@@ -825,7 +841,7 @@ export function SettingsModal({
                           setRepoSaving(false);
                         }
                       }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white shrink-0"
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-50 text-[#090E18] shrink-0"
                     >
                       {repoSaving ? "Saving…" : "Apply"}
                     </button>
@@ -835,8 +851,8 @@ export function SettingsModal({
                     <div
                       className={`rounded-lg border px-3 py-2 text-xs ${
                         tcpflowyFeedback.kind === "ok"
-                          ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : "border-rose-500/35 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                          ? "border-[#10B981]/35 bg-[#10B981]/10 text-emerald-700 dark:text-[#34D399]"
+                          : "border-[#F43F5E]/35 bg-[#F43F5E]/10 text-rose-700 dark:text-rose-300"
                       }`}
                     >
                       {tcpflowyFeedback.text}
@@ -847,31 +863,68 @@ export function SettingsModal({
             )}
 
             {activeSection === "general" && (
-              <div className="space-y-3">
-                <h3 className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
-                  Studio Theme
-                </h3>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {(
-                    [
-                      { id: "system", title: "System Automatic" },
-                      { id: "light", title: "Light Mode" },
-                      { id: "dark", title: "Dark Mode" },
-                    ] as const
-                  ).map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => onChangeTheme(opt.id)}
-                      className={`p-3 rounded-xl border text-xs font-medium transition-all ${
-                        themePreference === opt.id
-                          ? "border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-                          : "border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300"
-                      }`}
-                    >
-                      {opt.title}
-                    </button>
-                  ))}
+              <div className="space-y-5">
+                <div className="space-y-2.5">
+                  <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                    Studio Theme
+                  </h3>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {(
+                      [
+                        { id: "dark", title: "Woven Dark (Default)" },
+                        { id: "system", title: "System Automatic" },
+                        { id: "light", title: "Light Mode" },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => onChangeTheme(opt.id)}
+                        className={`p-3 rounded-xl border text-xs font-medium transition-all ${
+                          themePreference === opt.id
+                            ? "border-[#22D3EE] bg-[#22D3EE]/12 text-cyan-700 dark:text-[#22D3EE] shadow-2xs"
+                            : "border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/70 dark:bg-[#162032] text-slate-700 dark:text-slate-300 hover:dark:bg-[#1E2B42]"
+                        }`}
+                      >
+                        {opt.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* About Etherloom & Official Brand Artwork Card */}
+                <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-[rgba(34,211,238,0.22)] bg-[#0D1321] text-slate-100 p-5 space-y-3 shadow-loom-card">
+                  <EtherloomBackdropOrnament
+                    rasterVariant="banner"
+                    opacityClassName="opacity-30"
+                    className="absolute inset-0"
+                  />
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 pointer-events-none bg-gradient-to-r from-[#090E18]/85 via-[#0D1321]/70 to-[#090E18]/85"
+                  />
+
+                  <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+                    <EtherloomWordmark
+                      preferRaster
+                      markSize={40}
+                      textClassName="text-base font-bold tracking-tight !text-white"
+                      subtitle="macOS Virtual Networking Lab & Flow Studio"
+                    />
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono bg-[#10B981]/15 text-[#34D399] border border-[#10B981]/35">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>GNU GPLv3+</span>
+                    </span>
+                  </div>
+
+                  <p className="relative z-10 text-xs text-slate-300 leading-relaxed">
+                    Native Rust + Tauri v2 + React Flow virtual patchbay studio
+                    weaving QEMU Apple <code className="font-mono text-[#34D399]">Hypervisor.framework</code>{" "}
+                    &amp; multi-arch TCG guests over a zero-root userspace L2/UDP
+                    packet fabric, with 1-click Wireshark named-pipe wiretaps and
+                    visual TCP stream dissection via{" "}
+                    <code className="font-mono text-[#22D3EE]">tcpflowy</code>.
+                  </p>
                 </div>
               </div>
             )}
@@ -879,17 +932,17 @@ export function SettingsModal({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-200/80 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/50 flex items-center justify-between">
-          <span className="text-[11px] text-slate-500 dark:text-zinc-400">
-            Portable <code className="font-mono">qcow2</code> overlays auto-rebase
-            when templates move.
+        <div className="px-5 py-3 border-t border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/70 dark:bg-[#090E18]/90 flex items-center justify-between">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            Portable <code className="font-mono text-[#22D3EE]">qcow2</code>{" "}
+            overlays auto-rebase when templates move.
           </span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-zinc-300 hover:bg-slate-200/70 dark:hover:bg-zinc-800"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-[#1E2B42]"
             >
               Close
             </button>
@@ -898,7 +951,7 @@ export function SettingsModal({
                 type="button"
                 onClick={() => void handleSave()}
                 disabled={!hasChanges || submitting || Boolean(previewError)}
-                className="px-4 py-1.5 rounded-lg text-xs font-medium bg-sky-600 hover:bg-sky-500 disabled:opacity-45 text-white transition-colors"
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-[#06B6D4] hover:bg-[#22D3EE] disabled:opacity-45 text-[#090E18] transition-colors"
               >
                 {submitting
                   ? "Applying…"

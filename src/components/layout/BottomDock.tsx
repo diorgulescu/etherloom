@@ -1,5 +1,4 @@
 import {
-  Activity,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -14,9 +13,9 @@ import {
   Sliders,
   Sparkles,
   Terminal,
-  Waves,
   X,
 } from "lucide-react";
+import { SignalWaveformIcon } from "../brand";
 import type {
   CaptureFileInfo,
   ConsoleTabSession,
@@ -113,17 +112,17 @@ export function BottomDock({
   const containerClass = floating
     ? open
       ? expanded
-        ? "fixed inset-5 rounded-2xl border border-slate-300 dark:border-zinc-700 bg-white/98 dark:bg-zinc-900/98 backdrop-blur-xl shadow-2xl flex flex-col z-40"
-        : "fixed bottom-10 right-4 w-[min(920px,94vw)] h-[min(540px,72vh)] rounded-2xl border border-slate-300 dark:border-zinc-700 bg-white/98 dark:bg-zinc-900/98 backdrop-blur-xl shadow-2xl flex flex-col z-40"
+        ? "fixed inset-5 rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white/98 dark:bg-[#111827]/96 backdrop-blur-xl shadow-2xl flex flex-col z-40"
+        : "fixed bottom-10 right-4 w-[min(920px,94vw)] h-[min(540px,72vh)] rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white/98 dark:bg-[#111827]/96 backdrop-blur-xl shadow-2xl flex flex-col z-40"
       : "hidden"
     : `${
         !open ? "h-9" : expanded ? "h-[72vh]" : "h-72"
-      } shrink-0 border-t border-slate-200/90 dark:border-zinc-800/90 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md flex flex-col transition-[height] duration-200 z-10`;
+      } shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white/95 dark:bg-[#111827]/92 backdrop-blur-md flex flex-col transition-[height] duration-200 z-10`;
 
   const workspaceBody = (
     <section className={containerClass}>
       {/* Multi-Tab Header Bar */}
-      <div className="h-9 px-2.5 border-b border-slate-200/70 dark:border-zinc-800/80 flex items-center justify-between gap-2 shrink-0">
+      <div className="h-9 px-2.5 border-b border-slate-200/70 dark:border-[rgba(34,211,238,0.12)] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto min-w-0 py-0.5">
           {/* Open Per-VM Dual-Console Tabs */}
           {consoleTabs.map((tab) => {
@@ -139,8 +138,8 @@ export function BottomDock({
                 key={tab.nodeId}
                 className={`group inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-md text-xs font-medium whitespace-nowrap border transition-colors ${
                   isActive
-                    ? "bg-sky-500/15 border-sky-500/35 text-sky-700 dark:text-sky-300"
-                    : "border-transparent text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-800/70"
+                    ? "bg-cyan-500/12 border-[#22D3EE]/40 text-cyan-800 dark:text-[#22D3EE]"
+                    : "border-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-[#162032]"
                 }`}
               >
                 <button
@@ -154,10 +153,10 @@ export function BottomDock({
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
                       st === "running"
-                        ? "bg-emerald-500"
+                        ? "bg-[#10B981]"
                         : st === "booting"
-                        ? "bg-amber-400 animate-pulse"
-                        : "bg-slate-400 dark:bg-zinc-600"
+                        ? "bg-[#F59E0B] animate-pulse"
+                        : "bg-slate-400 dark:bg-slate-600"
                     }`}
                   />
                   <ModeIcon className="w-3 h-3 opacity-80" />
@@ -171,7 +170,7 @@ export function BottomDock({
                     onCloseVmTab(tab.nodeId);
                   }}
                   title={`Close ${vm.data.label} console tab`}
-                  className="p-0.5 rounded hover:bg-slate-200/80 dark:hover:bg-zinc-700 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
+                  className="p-0.5 rounded hover:bg-slate-200/80 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -191,7 +190,7 @@ export function BottomDock({
                     onOpenVmTab(e.target.value);
                   }
                 }}
-                className="pl-6 pr-2 py-1 rounded-md text-[11px] bg-slate-100/80 hover:bg-slate-200/70 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 border border-slate-200/70 dark:border-zinc-700/70 cursor-pointer focus:outline-none"
+                className="pl-6 pr-2 py-1 rounded-md text-[11px] bg-slate-100/80 hover:bg-slate-200/70 dark:bg-[#162032] dark:hover:bg-[#1E2B42] text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-[rgba(34,211,238,0.16)] cursor-pointer focus:outline-none"
               >
                 <option value="">Console…</option>
                 {unopenedVms.map((vm) => (
@@ -203,7 +202,7 @@ export function BottomDock({
             </div>
           )}
 
-          <span className="mx-1 h-4 w-px bg-slate-200 dark:bg-zinc-800 shrink-0" />
+          <span className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-800 shrink-0" />
 
           {/* Studio Link & Flow Inspector Tabs */}
           <button
@@ -212,10 +211,10 @@ export function BottomDock({
               onSelectTab("link");
               if (!open) onToggleOpen();
             }}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap border transition-colors ${
               open && activeTabId === "link"
-                ? "bg-sky-500/15 text-sky-700 dark:text-sky-300"
-                : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-800/70"
+                ? "bg-cyan-500/12 border-[#22D3EE]/35 text-cyan-800 dark:text-[#22D3EE]"
+                : "border-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-[#162032]"
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
@@ -228,16 +227,16 @@ export function BottomDock({
               onSelectTab("tcpflowy");
               if (!open) onToggleOpen();
             }}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap border transition-colors ${
               open && activeTabId === "tcpflowy"
-                ? "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
-                : "text-slate-600 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-800/70"
+                ? "bg-indigo-500/15 border-[#6366F1]/40 text-indigo-700 dark:text-[#818CF8]"
+                : "border-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-[#162032]"
             }`}
           >
-            <Waves className="w-3.5 h-3.5" />
+            <SignalWaveformIcon className="w-3.5 h-3" />
             <span>Captures &amp; tcpflowy</span>
             {captures.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-indigo-500/15 text-indigo-700 dark:text-indigo-300">
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-indigo-500/20 text-indigo-700 dark:text-[#818CF8]">
                 {captures.length}
               </span>
             )}
@@ -258,8 +257,8 @@ export function BottomDock({
                 }
                 className={`p-1 rounded transition-colors ${
                   floating
-                    ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
-                    : "hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400"
+                    ? "bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE]"
+                    : "hover:bg-slate-100 dark:hover:bg-[#162032] text-slate-500 dark:text-slate-400"
                 }`}
               >
                 {floating ? (
@@ -273,7 +272,7 @@ export function BottomDock({
                 type="button"
                 onClick={onToggleExpanded}
                 title={expanded ? "Restore Console Size" : "Maximize Console"}
-                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400"
+                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-[#162032] text-slate-500 dark:text-slate-400"
               >
                 {expanded ? (
                   <Minimize2 className="w-3.5 h-3.5" />
@@ -288,7 +287,7 @@ export function BottomDock({
             type="button"
             onClick={onToggleOpen}
             title={open ? "Minimize Console Dock" : "Expand Console Dock"}
-            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400"
+            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-[#162032] text-slate-500 dark:text-slate-400"
           >
             {open ? (
               <ChevronDown className="w-4 h-4" />
@@ -324,7 +323,7 @@ export function BottomDock({
 
           {/* Empty state if an active `vm:*` tab was closed and no tabs remain */}
           {activeTabId.startsWith("vm:") && consoleTabs.length === 0 && (
-            <div className="h-full rounded-lg bg-slate-50 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800 p-4 flex items-center justify-center text-xs text-slate-500 dark:text-zinc-400">
+            <div className="h-full rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.14)] p-4 flex items-center justify-center text-xs text-slate-500 dark:text-slate-400">
               Double-click any VM node on the canvas (or click its Console icon)
               to open an interactive Serial + UEFI Graphical session.
             </div>
@@ -334,12 +333,19 @@ export function BottomDock({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 h-full overflow-y-auto">
               {selectedEdge && edgeData ? (
                 <>
-                  <div className="md:col-span-2 rounded-lg bg-slate-50 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800 p-3 space-y-3">
+                  <div className="md:col-span-2 rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.14)] p-3 space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
-                        Wire {edgeData.sourcePortLabel} ──{" "}
-                        {edgeData.targetPortLabel} •{" "}
-                        <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        Wire{" "}
+                        <span className="font-mono text-cyan-700 dark:text-[#22D3EE]">
+                          {edgeData.sourcePortLabel}
+                        </span>{" "}
+                        ──{" "}
+                        <span className="font-mono text-cyan-700 dark:text-[#22D3EE]">
+                          {edgeData.targetPortLabel}
+                        </span>{" "}
+                        •{" "}
+                        <span className="font-mono text-emerald-600 dark:text-[#34D399]">
                           {edgeData.pps} pps (
                           {formatThroughput(edgeData.bytesPerSec)})
                         </span>
@@ -351,8 +357,8 @@ export function BottomDock({
                         }
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
                           edgeData.adminUp
-                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
-                            : "bg-rose-500/15 border-rose-500/35 text-rose-700 dark:text-rose-300"
+                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-[#34D399]"
+                            : "bg-rose-500/15 border-rose-500/40 text-rose-700 dark:text-[#F43F5E]"
                         }`}
                       >
                         <Scissors className="w-3.5 h-3.5" />
@@ -364,7 +370,7 @@ export function BottomDock({
 
                     <div className="grid grid-cols-3 gap-3 pt-1">
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                           Latency ({edgeData.latencyMs} ms)
                         </span>
                         <input
@@ -377,12 +383,12 @@ export function BottomDock({
                               latencyMs: Number(e.target.value),
                             })
                           }
-                          className="w-full accent-sky-500"
+                          className="w-full accent-[#22D3EE]"
                         />
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                           Jitter (±{edgeData.jitterMs} ms)
                         </span>
                         <input
@@ -395,12 +401,12 @@ export function BottomDock({
                               jitterMs: Number(e.target.value),
                             })
                           }
-                          className="w-full accent-sky-500"
+                          className="w-full accent-[#22D3EE]"
                         />
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                           Packet Loss ({edgeData.lossPercent}%)
                         </span>
                         <input
@@ -414,26 +420,31 @@ export function BottomDock({
                               lossPercent: Number(e.target.value),
                             })
                           }
-                          className="w-full accent-amber-500"
+                          className="w-full accent-[#F59E0B]"
                         />
                       </label>
                     </div>
                   </div>
 
-                  <div className="rounded-lg bg-slate-50 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800 p-3 flex flex-col justify-between gap-2">
+                  <div className="rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.14)] p-3 flex flex-col justify-between gap-2">
                     <div className="space-y-1">
-                      <div className="text-xs font-semibold text-slate-800 dark:text-zinc-100 flex items-center justify-between gap-1.5">
+                      <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1.5">
                         <span className="inline-flex items-center gap-1.5">
-                          <Activity className="w-3.5 h-3.5 text-sky-500" />
+                          <SignalWaveformIcon
+                            animated={Boolean(
+                              edgeData.capturingPcap || edgeData.liveWireshark
+                            )}
+                            className="w-4 h-3 text-[#22D3EE]"
+                          />
                           <span>Zero-Root Wiretap</span>
                         </span>
                         {edgeData.capturingPcap && (
-                          <span className="text-[10px] font-mono text-rose-600 dark:text-rose-400">
+                          <span className="text-[10px] font-mono text-[#22D3EE]">
                             REC • {edgeData.capturedPackets ?? 0} pkts
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         Mirrors raw Ethernet II UDP datagrams into libpcap{" "}
                         <code className="font-mono">.pcap</code> files or named
                         FIFO pipes for live Wireshark.
@@ -446,8 +457,8 @@ export function BottomDock({
                           onClick={() => onTogglePcapRecording(selectedEdge.id)}
                           className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-medium transition-colors ${
                             edgeData.capturingPcap
-                              ? "bg-rose-600 hover:bg-rose-500 text-white"
-                              : "bg-sky-600 hover:bg-sky-500 text-white"
+                              ? "bg-[#F43F5E] hover:bg-rose-500 text-white"
+                              : "bg-[#0891B2] hover:bg-[#06B6D4] text-white"
                           }`}
                         >
                           <Radio
@@ -467,8 +478,8 @@ export function BottomDock({
                           onClick={() => onToggleLiveWireshark(selectedEdge.id)}
                           className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-medium border transition-colors ${
                             edgeData.liveWireshark
-                              ? "bg-sky-600 text-white border-sky-500"
-                              : "bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/30 text-sky-700 dark:text-sky-300"
+                              ? "bg-[#22D3EE] text-slate-950 font-semibold border-[#22D3EE]"
+                              : "bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-400/30 text-cyan-700 dark:text-[#22D3EE]"
                           }`}
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
@@ -484,7 +495,7 @@ export function BottomDock({
                         <button
                           type="button"
                           onClick={() => onStopAndDissect(selectedEdge.id)}
-                          className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                          className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-semibold bg-[#6366F1] hover:bg-[#818CF8] text-white transition-colors"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
                           <span>Stop &amp; Dissect with tcpflowy</span>
@@ -494,7 +505,7 @@ export function BottomDock({
                   </div>
                 </>
               ) : (
-                <div className="md:col-span-3 rounded-lg bg-slate-50 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800 p-4 flex items-center justify-center text-xs text-slate-500 dark:text-zinc-400">
+                <div className="md:col-span-3 rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.14)] p-4 flex items-center justify-center text-xs text-slate-500 dark:text-slate-400">
                   Click or right-click any Ethernet wire on the canvas to
                   inspect live PPS/throughput, cut/restore the cable, or tune
                   latency, jitter, and packet loss.
@@ -532,9 +543,9 @@ export function BottomDock({
     <>
       {workspaceBody}
       {/* Slim placeholder bar at bottom when Console Workspace is popped out */}
-      <div className="h-8 shrink-0 border-t border-slate-200/90 dark:border-zinc-800/90 bg-white/90 dark:bg-zinc-900/90 px-3 flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400">
+      <div className="h-8 shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white/90 dark:bg-[#111827]/92 px-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <span className="inline-flex items-center gap-1.5">
-          <PictureInPicture2 className="w-3.5 h-3.5 text-sky-500" />
+          <PictureInPicture2 className="w-3.5 h-3.5 text-[#22D3EE]" />
           <span>
             Console Workspace is popped out ({consoleTabs.length} VM tab
             {consoleTabs.length === 1 ? "" : "s"} active)
@@ -545,7 +556,7 @@ export function BottomDock({
             <button
               type="button"
               onClick={onToggleOpen}
-              className="text-sky-600 dark:text-sky-400 font-medium hover:underline"
+              className="text-cyan-600 dark:text-[#22D3EE] font-medium hover:underline"
             >
               Show Floating Window
             </button>
@@ -553,7 +564,7 @@ export function BottomDock({
           <button
             type="button"
             onClick={onToggleFloating}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#162032] dark:hover:bg-[#1E2B42] text-slate-700 dark:text-slate-200"
           >
             <PanelBottom className="w-3 h-3" />
             <span>Dock to Bottom</span>

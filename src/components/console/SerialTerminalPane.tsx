@@ -111,31 +111,31 @@ export function SerialTerminalPane({
         getWinSizePixels: true,
       },
       fontFamily:
-        '"SF Mono", Menlo, Monaco, "Cascadia Mono", "JetBrains Mono", monospace',
+        '"SF Mono", "JetBrains Mono", Menlo, Monaco, "Cascadia Mono", monospace',
       fontSize: 12,
       lineHeight: 1.24,
       theme: {
-        background: "#09090b",
-        foreground: "#e4e4e7",
-        cursor: "#34d399",
-        cursorAccent: "#09090b",
-        selectionBackground: "rgba(56, 189, 248, 0.32)",
-        black: "#18181b",
-        red: "#f87171",
-        green: "#4ade80",
-        yellow: "#fbbf24",
-        blue: "#60a5fa",
-        magenta: "#c084fc",
-        cyan: "#22d3ee",
-        white: "#e4e4e7",
-        brightBlack: "#52525b",
-        brightRed: "#fca5a5",
-        brightGreen: "#86efac",
-        brightYellow: "#fde68a",
-        brightBlue: "#93c5fd",
-        brightMagenta: "#d8b4fe",
-        brightCyan: "#67e8f9",
-        brightWhite: "#fafafa",
+        background: "#090E18",
+        foreground: "#E2E8F0",
+        cursor: "#22D3EE",
+        cursorAccent: "#090E18",
+        selectionBackground: "rgba(34, 211, 238, 0.22)",
+        black: "#0D1321",
+        red: "#F43F5E",
+        green: "#10B981",
+        yellow: "#F59E0B",
+        blue: "#818CF8",
+        magenta: "#C084FC",
+        cyan: "#22D3EE",
+        white: "#E2E8F0",
+        brightBlack: "#475569",
+        brightRed: "#FB7185",
+        brightGreen: "#34D399",
+        brightYellow: "#FBBF24",
+        brightBlue: "#A5B4FC",
+        brightMagenta: "#D8B4FE",
+        brightCyan: "#67E8F9",
+        brightWhite: "#F8FAFC",
       },
     });
 
@@ -351,31 +351,31 @@ export function SerialTerminalPane({
 
   return (
     <div
-      className={`h-full w-full flex flex-col bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden ${
+      className={`h-full w-full flex flex-col bg-[#090E18] rounded-lg border border-[rgba(34,211,238,0.16)] overflow-hidden ${
         visible ? "" : "hidden"
       }`}
     >
       {/* Compact Serial Action Strip */}
-      <div className="h-7 px-2.5 bg-zinc-900/95 border-b border-zinc-800 flex items-center justify-between gap-2 text-[11px] shrink-0">
-        <div className="flex items-center gap-2 min-w-0 font-mono text-zinc-400">
+      <div className="h-7 px-2.5 bg-[#111827] border-b border-[rgba(34,211,238,0.14)] flex items-center justify-between gap-2 text-[11px] shrink-0">
+        <div className="flex items-center gap-2 min-w-0 font-mono text-slate-400">
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
               connState === "connected"
-                ? "bg-emerald-500"
+                ? "bg-[#10B981]"
                 : connState === "connecting"
-                ? "bg-amber-400 animate-pulse"
-                : "bg-zinc-600"
+                ? "bg-[#F59E0B] animate-pulse"
+                : "bg-slate-600"
             }`}
           />
-          <span className="text-zinc-200 font-medium">{serialDev}</span>
-          <span className="hidden sm:inline truncate text-zinc-500">
+          <span className="text-slate-100 font-medium">{serialDev}</span>
+          <span className="hidden sm:inline truncate text-slate-500">
             unix:{socketPath}
           </span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400">
+          <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#162032] text-[#22D3EE] border border-[rgba(34,211,238,0.18)]">
             {dims.cols}×{dims.rows}
           </span>
           {actionFlash && (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300">
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-[#22D3EE]">
               {actionFlash}
             </span>
           )}
@@ -386,7 +386,7 @@ export function SerialTerminalPane({
             <button
               type="button"
               onClick={onBootVm}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium mr-1"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#10B981] hover:bg-[#34D399] text-slate-950 text-[10px] font-semibold mr-1"
             >
               <Play className="w-2.5 h-2.5 fill-current" />
               <span>Boot VM</span>
@@ -397,7 +397,7 @@ export function SerialTerminalPane({
             type="button"
             onClick={() => void handleCopySelection()}
             title="Copy selected terminal text (⌘C)"
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-800 text-zinc-300 text-[10px]"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#162032] text-slate-300 text-[10px]"
           >
             <ClipboardCopy className="w-3 h-3" />
             <span className="hidden md:inline">Copy</span>
@@ -407,7 +407,7 @@ export function SerialTerminalPane({
             type="button"
             onClick={() => void handlePasteClipboard()}
             title="Paste clipboard into serial console (⌘V)"
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-800 text-zinc-300 text-[10px]"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#162032] text-slate-300 text-[10px]"
           >
             <ClipboardPaste className="w-3 h-3" />
             <span className="hidden md:inline">Paste</span>
@@ -418,7 +418,7 @@ export function SerialTerminalPane({
             onClick={() => void handleSendBreak()}
             disabled={status === "stopped"}
             title="Send UART Serial Break sequence"
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-amber-500/20 text-amber-300 disabled:opacity-35 text-[10px]"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-amber-500/20 text-[#F59E0B] disabled:opacity-35 text-[10px]"
           >
             <Zap className="w-3 h-3" />
             <span>Break</span>
@@ -429,7 +429,7 @@ export function SerialTerminalPane({
             onClick={() => void handleSendCtrlAltDel()}
             disabled={status === "stopped"}
             title="Send hardware Ctrl+Alt+Del via QMP"
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-rose-500/20 text-rose-300 disabled:opacity-35 text-[10px]"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-rose-500/20 text-[#F43F5E] disabled:opacity-35 text-[10px]"
           >
             <ShieldAlert className="w-3 h-3" />
             <span>Ctrl+Alt+Del</span>
@@ -439,7 +439,7 @@ export function SerialTerminalPane({
             type="button"
             onClick={() => termRef.current?.clear()}
             title="Clear scrollback buffer"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+            className="p-1 rounded hover:bg-[#162032] text-slate-400 hover:text-slate-200"
           >
             <Eraser className="w-3 h-3" />
           </button>
@@ -448,7 +448,7 @@ export function SerialTerminalPane({
             type="button"
             onClick={() => setReconnectTick((t) => t + 1)}
             title="Reconnect serial socket"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+            className="p-1 rounded hover:bg-[#162032] text-slate-400 hover:text-slate-200"
           >
             <RefreshCw className="w-3 h-3" />
           </button>
