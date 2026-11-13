@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -139,26 +139,44 @@ export function StorageLibraryModal({
   );
   const [applyingStorage, setApplyingStorage] = useState(false);
 
+  // Keep latest parent callbacks in refs so catalog loading & Tauri event listeners
+  // never re-trigger in a loop when parent telemetry re-renders App.
+  const onNotifyRef = useRef(onNotify);
+  onNotifyRef.current = onNotify;
+  const onTemplatesChangedRef = useRef(onTemplatesChanged);
+  onTemplatesChangedRef.current = onTemplatesChanged;
+
+  const focusedKey = useMemo(
+    () =>
+      focusedCatalogIds && focusedCatalogIds.length > 0
+        ? focusedCatalogIds.join("|")
+        : "",
+    [focusedCatalogIds]
+  );
+
   const refreshCatalog = useCallback(async () => {
     setLoadingEntries(true);
     try {
       const list = await listCatalogEntries();
       setEntries(list);
     } catch (err: unknown) {
-      onNotify("error", err instanceof Error ? err.message : String(err));
+      onNotifyRef.current(
+        "error",
+        err instanceof Error ? err.message : String(err)
+      );
     } finally {
       setLoadingEntries(false);
     }
-  }, [onNotify]);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
-    if (focusedCatalogIds && focusedCatalogIds.length > 0) {
+    if (focusedKey) {
       setFilterTab("all");
       setSearchQuery("");
     }
     void refreshCatalog();
-  }, [focusedCatalogIds, open, refreshCatalog, storageState?.resolvedTemplatesDir]);
+  }, [focusedKey, open, refreshCatalog, storageState?.resolvedTemplatesDir]);
 
   // Sync storage drafts from active `storageState`
   useEffect(() => {
@@ -170,10 +188,12 @@ export function StorageLibraryModal({
     setProbedTelemetry(storageState.diskTelemetry);
   }, [storageState]);
 
-  // Subscribe to `"catalog://download-progress"` events while open (or globally)
+  // Subscribe once to `"catalog://download-progress"` events (StrictMode & async-cleanup safe)
   useEffect(() => {
+    let disposed = false;
     let unlisten: (() => void) | null = null;
     void onCatalogDownloadProgress((ev) => {
+      if (disposed) return;
       setProgressById((prev) => ({ ...prev, [ev.catalogId]: ev }));
       if (
         ev.stage === "ready" ||
@@ -181,20 +201,25 @@ export function StorageLibraryModal({
         ev.stage === "cancelled"
       ) {
         if (ev.stage === "ready") {
-          onNotify("ok", ev.message);
-          void onTemplatesChanged();
+          onNotifyRef.current("ok", ev.message);
+          void onTemplatesChangedRef.current();
         } else if (ev.stage === "error" && ev.error) {
-          onNotify("error", `${ev.catalogId}: ${ev.error}`);
+          onNotifyRef.current("error", `${ev.catalogId}: ${ev.error}`);
         }
         void refreshCatalog();
       }
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     });
     return () => {
+      disposed = true;
       unlisten?.();
     };
-  }, [onNotify, onTemplatesChanged, refreshCatalog]);
+  }, [refreshCatalog]);
 
   const readyCount = useMemo(
     () =>
@@ -440,14 +465,15 @@ export function StorageLibraryModal({
 
   const categoryAccent = (category: OsCatalogEntryDto["category"]) => {
     switch (category) {
-      case "Linux":
-        return "bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border-[#22D3EE]/35";
       case "BSD Family":
         return "bg-[#F59E0B]/15 text-amber-700 dark:text-[#F59E0B] border-[#F59E0B]/35";
       case "Routers & Firewalls":
         return "bg-[#6366F1]/15 text-indigo-700 dark:text-[#818CF8] border-[#6366F1]/35";
       case "Research, UNIX & Retro":
         return "bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border-[#10B981]/35";
+      case "Linux":
+      default:
+        return "bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border-[#22D3EE]/35";
     }
   };
 
@@ -466,7 +492,7 @@ export function StorageLibraryModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
+      className="fixed inset-0 z-50 bg-slate-950/70 dark:bg-[#050912]/85 flex items-center justify-center p-3 sm:p-5"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -479,7 +505,7 @@ export function StorageLibraryModal({
         {/* Modal Header with Woven Circuit Ornament */}
         <div className="relative px-5 py-3.5 border-b border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-gradient-to-r from-cyan-500/[0.08] via-indigo-500/[0.05] to-emerald-500/[0.05] dark:from-[#0D1321] dark:via-[#111827] dark:to-[#0D1321] flex items-center justify-between gap-4 shrink-0 overflow-hidden">
           <EtherloomBackdropOrnament
-            rasterVariant="ornament"
+            rasterVariant="none"
             opacityClassName="opacity-20"
             className="hidden dark:block absolute inset-0"
           />
@@ -968,8 +994,8 @@ export function StorageLibraryModal({
           </div>
         )}
 
-        {/* Scrollable 15-OS Catalog Grid */}
-        <div className="flex-1 overflow-y-auto p-5 bg-white dark:bg-[#0D1321]/65">
+        {/* Scrollable 15-OS Catalog Grid (Opaque GPU-composited surface for macOS WKWebView stability) */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 bg-slate-50 dark:bg-[#0D1321]">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {filteredEntries.map((entry) => {
               const prog = progressById[entry.id];
@@ -985,16 +1011,17 @@ export function StorageLibraryModal({
               const archInfo = describeArchAccel(entry);
               const tipsOpen = Boolean(expandedTips[entry.id]);
               const mirrorOpen = Boolean(mirrorInputOpen[entry.id]);
+              const tips = entry.quirksAndTips ?? [];
 
               return (
                 <div
                   key={entry.id}
-                  className={`rounded-xl border p-4 flex flex-col justify-between gap-3 transition-all ${
+                  className={`rounded-xl border p-4 flex flex-col justify-between gap-3 transition-colors ${
                     isReady
-                      ? "bg-emerald-500/[0.03] dark:bg-[#162032] dark:hover:bg-[#1E2B42]/90 border-[#10B981]/35 dark:border-[#10B981]/40"
+                      ? "bg-white dark:bg-[#162032] dark:hover:bg-[#1E2B42] border-[#10B981]/35 dark:border-[#10B981]/40"
                       : isInstallerReady
-                      ? "bg-amber-500/[0.03] dark:bg-[#162032] dark:hover:bg-[#1E2B42]/90 border-[#F59E0B]/35"
-                      : "bg-slate-50/60 dark:bg-[#162032] dark:hover:bg-[#1E2B42]/85 border-slate-200 dark:border-[rgba(34,211,238,0.16)] dark:hover:border-[rgba(34,211,238,0.38)]"
+                      ? "bg-white dark:bg-[#162032] dark:hover:bg-[#1E2B42] border-[#F59E0B]/35"
+                      : "bg-white dark:bg-[#162032] dark:hover:bg-[#1E2B42] border-slate-200 dark:border-[rgba(34,211,238,0.16)] dark:hover:border-[rgba(34,211,238,0.38)]"
                   }`}
                 >
                   <div className="space-y-2.5">
@@ -1083,7 +1110,7 @@ export function StorageLibraryModal({
                         </span>
                         <code className="font-mono text-slate-800 dark:text-slate-200">
                           {entry.defaultCpus}c • {entry.defaultRamMb}M •{" "}
-                          {entry.firmware.toUpperCase()}
+                          {String(entry.firmware ?? "uefi").toUpperCase()}
                         </code>
                       </div>
                       <div className="col-span-2 sm:col-span-1 px-2 py-1 rounded bg-white/80 dark:bg-[#090E18] border border-slate-200/70 dark:border-[rgba(34,211,238,0.14)] truncate">
@@ -1118,14 +1145,14 @@ export function StorageLibraryModal({
                         )}
                         <span>
                           Particularities &amp; Lab Tips (
-                          {entry.quirksAndTips.length})
+                          {tips.length})
                         </span>
                       </button>
 
                       {tipsOpen && (
-                        <div className="mt-2 rounded-lg bg-white dark:bg-[#090E18] border border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] p-2.5 space-y-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                        <div className="mt-2 rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] p-2.5 space-y-1.5 text-[11px] text-slate-600 dark:text-slate-300">
                           <ul className="list-disc pl-4 space-y-1">
-                            {entry.quirksAndTips.map((tip, idx) => (
+                            {tips.map((tip, idx) => (
                               <li key={idx} className="leading-snug">
                                 {tip}
                               </li>

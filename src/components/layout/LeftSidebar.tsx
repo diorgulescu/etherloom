@@ -140,7 +140,7 @@ export function LeftSidebar({
   };
 
   return (
-    <aside className="w-72 shrink-0 border-r border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50/90 dark:bg-[#111827]/88 backdrop-blur-md flex flex-col h-full select-none">
+    <aside className="w-72 shrink-0 border-r border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-slate-50 dark:bg-[#111827] flex flex-col h-full select-none">
       {/* Search Box + OS Library Downloader + Custom VM Wizard CTA */}
       <div className="p-3 space-y-2 border-b border-slate-200/70 dark:border-[rgba(34,211,238,0.12)]">
         <button

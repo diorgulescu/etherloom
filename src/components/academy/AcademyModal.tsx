@@ -152,7 +152,7 @@ export function AcademyModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 dark:bg-[#050912]/85"
       role="dialog"
       aria-modal="true"
       aria-labelledby="etherloom-academy-title"
@@ -161,7 +161,7 @@ export function AcademyModal({
         {/* Modal Header with Woven Circuit Backdrop Ornament */}
         <div className="relative px-5 py-4 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.16)] bg-gradient-to-r from-indigo-500/[0.08] via-cyan-500/[0.05] to-transparent dark:from-[#0D1321] dark:via-[#111827] dark:to-[#0D1321] flex items-center justify-between gap-4 overflow-hidden">
           <EtherloomBackdropOrnament
-            rasterVariant="banner"
+            rasterVariant="none"
             opacityClassName="opacity-20"
             className="hidden dark:block absolute inset-0"
           />
@@ -260,7 +260,7 @@ export function AcademyModal({
         </div>
 
         {/* Lab Cards List */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 bg-white dark:bg-[#0D1321]/60">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-3 bg-slate-50 dark:bg-[#0D1321]">
           {filteredLabs.map((lab) => {
             const isActive = activeLabId === lab.id;
             const isLaunching = launchingLabId === lab.id;
@@ -271,10 +271,10 @@ export function AcademyModal({
             return (
               <div
                 key={lab.id}
-                className={`rounded-xl border p-4 transition-all ${
+                className={`rounded-xl border p-4 transition-colors ${
                   isActive
-                    ? "border-[#22D3EE]/60 bg-cyan-500/[0.04] dark:bg-[#1E2B42]/90 ring-1 ring-[#22D3EE]/25 shadow-loom-cyan"
-                    : "border-slate-200 dark:border-[rgba(34,211,238,0.15)] bg-white dark:bg-[#162032] hover:border-slate-300 dark:hover:bg-[#1E2B42]/85 dark:hover:border-[rgba(34,211,238,0.40)]"
+                    ? "border-[#22D3EE]/60 bg-cyan-500/[0.04] dark:bg-[#1E2B42] ring-1 ring-[#22D3EE]/25 shadow-loom-cyan"
+                    : "border-slate-200 dark:border-[rgba(34,211,238,0.15)] bg-white dark:bg-[#162032] hover:border-slate-300 dark:hover:bg-[#1E2B42] dark:hover:border-[rgba(34,211,238,0.40)]"
                 }`}
               >
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
@@ -451,7 +451,7 @@ export function AcademyModal({
 
         {/* Focused "Required OS Images Missing" Prompt Overlay when clicking Start Lab */}
         {promptLab && !promptLab.allTemplatesReady && (
-          <div className="absolute inset-0 z-20 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm flex items-center justify-center p-5">
+          <div className="absolute inset-0 z-20 bg-slate-950/75 dark:bg-[#050912]/88 flex items-center justify-center p-5">
             <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#111827] border border-amber-500/45 shadow-2xl overflow-hidden">
               <div className="px-5 py-4 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border-b border-slate-200 dark:border-[rgba(34,211,238,0.14)] flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3">

@@ -259,7 +259,7 @@ export function VncScreenPane({
             </span>
           )}
           {flashMsg && (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 font-sans">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-sans">
               {flashMsg}
             </span>
           )}

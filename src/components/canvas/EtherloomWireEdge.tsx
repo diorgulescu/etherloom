@@ -149,7 +149,7 @@ export function EtherloomWireEdge({
 
       {/* Layer 3: Live Traffic Packet Pulses along the wire when PPS > 0 (zero CPU drain when idle) */}
       {hasTraffic && (
-        <>
+        <g className="loom-traffic-pulse">
           <circle r="3" fill="#34D399" opacity="0.95">
             <animateMotion
               dur={`${pulseDurationSec.toFixed(2)}s`}
@@ -165,7 +165,7 @@ export function EtherloomWireEdge({
               path={edgePath}
             />
           </circle>
-        </>
+        </g>
       )}
 
       <EdgeLabelRenderer>

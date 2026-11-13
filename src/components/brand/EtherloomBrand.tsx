@@ -300,14 +300,9 @@ export function EtherloomBackdropOrnament({
         <img
           src={rasterSrc}
           alt=""
+          decoding="async"
           onError={() => setRasterFailed(true)}
-          className={`w-full h-full object-cover mix-blend-lighten ${opacityClassName}`}
-          style={{
-            WebkitMaskImage:
-              "linear-gradient(to right, rgba(0,0,0,0.92), rgba(0,0,0,0.45) 50%, rgba(0,0,0,0.92))",
-            maskImage:
-              "linear-gradient(to right, rgba(0,0,0,0.92), rgba(0,0,0,0.45) 50%, rgba(0,0,0,0.92))",
-          }}
+          className={`w-full h-full object-cover ${opacityClassName}`}
         />
       )}
 

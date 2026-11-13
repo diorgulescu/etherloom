@@ -86,7 +86,7 @@ export function TopToolbar({
     : `${projectName} (unsaved)`;
 
   return (
-    <header className="h-12 shrink-0 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-white/88 dark:bg-[#111827]/90 backdrop-blur-md px-3 flex items-center justify-between gap-2 z-20">
+    <header className="h-12 shrink-0 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-white dark:bg-[#111827] px-3 flex items-center justify-between gap-2 z-20">
       {/* Left section: Sidebar toggle, Official Brand Emblem, Project File Actions & Active Bundle */}
       <div className="flex items-center gap-2 min-w-0">
         <button
@@ -151,7 +151,7 @@ export function TopToolbar({
           >
             <Save className="w-3.5 h-3.5 text-[#10B981]" />
             <span className="hidden lg:inline">Save</span>
-            <kbd className="hidden 2xl:inline text-[9.5px] font-mono px-1 py-0.2 rounded bg-slate-200/70 dark:bg-[#090E18] text-slate-500 dark:text-slate-400">
+            <kbd className="hidden 2xl:inline text-[9.5px] font-mono px-1 py-0.5 rounded bg-slate-200/70 dark:bg-[#090E18] text-slate-500 dark:text-slate-400">
               ⌘S
             </kbd>
             {isDirty && (
@@ -230,7 +230,7 @@ export function TopToolbar({
           <HardDriveDownload className="w-3.5 h-3.5" />
           <span>OS Library</span>
           {readyTemplateCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-cyan-500/20 text-cyan-900 dark:text-cyan-100">
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-cyan-500/20 text-cyan-900 dark:text-cyan-100">
               {readyTemplateCount}
             </span>
           )}

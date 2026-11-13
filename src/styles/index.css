@@ -5,9 +5,9 @@
 @layer base {
   :root {
     color-scheme: light;
-    --bg-canvas: #F1F5F9;
+    --bg-canvas: #F8FAFC;
     --bg-panel: #FFFFFF;
-    --bg-panel-glass: rgba(255, 255, 255, 0.88);
+    --bg-panel-glass: rgba(255, 255, 255, 0.92);
     --bg-card: #FFFFFF;
     --bg-card-hover: #F8FAFC;
     --bg-terminal: #090E18;
@@ -32,12 +32,21 @@
     /* Deep Slate-Navy Woven Patchbay Hierarchy */
     --bg-canvas: #0D1321;
     --bg-panel: #111827;
-    --bg-panel-glass: rgba(17, 24, 39, 0.86);
+    --bg-panel-glass: rgba(17, 24, 39, 0.92);
     --bg-card: #162032;
     --bg-card-hover: #1E2B42;
     --bg-terminal: #090E18;
     --border-subtle: rgba(34, 211, 238, 0.14);
     --border-focus: rgba(34, 211, 238, 0.45);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    background-color: var(--bg-canvas);
+    overscroll-behavior: none;
   }
 
   * {
@@ -48,13 +57,20 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     letter-spacing: -0.008em;
   }
+
+  /* Native form popups & select elements in Dark Mode */
+  .dark select,
+  .dark option {
+    background-color: #090E18;
+    color: #f1f5f9;
+  }
 }
 
 /* Reusable Woven Patchbay surface utilities */
 .loom-glass-panel {
   background-color: var(--bg-panel-glass);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .loom-hairline {
@@ -81,22 +97,46 @@
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgba(34, 211, 238, 0.20);
+  background: rgba(34, 211, 238, 0.22);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(34, 211, 238, 0.38);
+  background: rgba(34, 211, 238, 0.40);
 }
 
-/* React Flow Woven Patchbay Dark-Glass Controls & Minimap */
+/* React Flow Woven Patchbay Dark-Glass Surface Overrides */
+.dark .react-flow {
+  --xy-background-color-default: #0D1321;
+  --xy-minimap-background-color-default: #111827;
+  --xy-attribution-background-color-default: rgba(13, 19, 33, 0.85);
+  background-color: #0D1321 !important;
+}
+
+.dark .react-flow__background {
+  background-color: #0D1321 !important;
+}
+
 .react-flow__attribution {
   font-size: 9.5px;
-  opacity: 0.35;
+  opacity: 0.45;
+  border-top-left-radius: 6px;
+}
+
+.dark .react-flow__attribution {
+  background: rgba(13, 19, 33, 0.85) !important;
+  color: #64748b !important;
+}
+
+.dark .react-flow__attribution a {
+  color: #64748b !important;
+}
+
+.dark .react-flow__minimap {
+  background-color: #111827 !important;
 }
 
 .dark .react-flow__controls {
-  background: rgba(17, 24, 39, 0.90) !important;
-  backdrop-filter: blur(12px);
+  background: rgba(17, 24, 39, 0.94) !important;
   border: 1px solid rgba(34, 211, 238, 0.18) !important;
   border-radius: 10px !important;
   overflow: hidden;
@@ -127,19 +167,26 @@
   stroke-dasharray: 5 5;
 }
 
-/* Animated ECG / Waveform Pulse for Wiretap Badges */
+/* Animated ECG / Waveform Pulse for Wiretap Badges (Compositor-safe opacity-only — avoids WebKit SVG drop-shadow filter crash) */
 @keyframes loomWaveformPulse {
   0%,
   100% {
-    opacity: 0.78;
-    filter: drop-shadow(0 0 2px rgba(34, 211, 238, 0.45));
+    opacity: 0.72;
   }
   50% {
     opacity: 1;
-    filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.85));
   }
 }
 
 .animate-loom-waveform {
   animation: loomWaveformPulse 1.5s ease-in-out infinite;
+}
+
+/* Pause background canvas animations while any modal dialog is open to eliminate WKWebView GPU contention */
+.loom-modal-open .animate-loom-waveform {
+  animation-play-state: paused !important;
+}
+
+.loom-modal-open .loom-traffic-pulse {
+  display: none !important;
 }

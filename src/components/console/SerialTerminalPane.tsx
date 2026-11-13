@@ -371,11 +371,11 @@ export function SerialTerminalPane({
           <span className="hidden sm:inline truncate text-slate-500">
             unix:{socketPath}
           </span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#162032] text-[#22D3EE] border border-[rgba(34,211,238,0.18)]">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#162032] text-[#22D3EE] border border-[rgba(34,211,238,0.18)]">
             {dims.cols}×{dims.rows}
           </span>
           {actionFlash && (
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-[#22D3EE]">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-[#22D3EE]">
               {actionFlash}
             </span>
           )}

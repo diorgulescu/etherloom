@@ -410,7 +410,7 @@ export function NodeConfigModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-slate-950/70 dark:bg-[#050912]/85 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
@@ -492,7 +492,7 @@ export function NodeConfigModal({
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4 bg-white dark:bg-[#111827]">
           {feedback && (
             <div
               className={`rounded-lg px-3.5 py-2.5 text-xs border flex items-center gap-2 ${

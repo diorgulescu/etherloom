@@ -277,7 +277,7 @@ function PortHandleCell({
           <span>{port.label}</span>
         </span>
         {port.ipLabel && (
-          <span className="mt-0.5 text-[9px] font-mono px-1 py-0.2 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/25 truncate max-w-[108px]">
+          <span className="mt-0.5 text-[9px] font-mono px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/25 truncate max-w-[108px]">
             {port.ipLabel}
           </span>
         )}
@@ -531,7 +531,7 @@ export function EtherloomNode({
               title={`Architecture: ${data.arch ?? "aarch64"} • NIC: ${
                 data.nicModel ?? "virtio-net-pci"
               }`}
-              className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-medium border shrink-0 ${
+              className={`px-1.5 py-0.5 rounded font-mono text-[9px] font-medium border shrink-0 ${
                 archBadge.isNativeHvf
                   ? "bg-emerald-500/12 text-emerald-700 dark:text-[#34D399] border-emerald-500/30"
                   : "bg-indigo-500/15 text-indigo-700 dark:text-[#818CF8] border-indigo-500/30"
@@ -545,7 +545,7 @@ export function EtherloomNode({
             {data.bootMediaPath && (
               <span
                 title={`Installer attached: ${data.bootMediaPath}`}
-                className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-mono font-medium shrink-0"
+                className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-mono font-medium shrink-0"
               >
                 <Disc className="w-2.5 h-2.5" />
                 ISO

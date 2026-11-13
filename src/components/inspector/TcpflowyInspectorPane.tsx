@@ -400,7 +400,7 @@ export function TcpflowyInspectorPane({
                     {cap.filename}
                   </span>
                   {cap.isRecording && (
-                    <span className="shrink-0 px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-cyan-500/20 text-[#22D3EE] border border-cyan-400/35">
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-cyan-500/20 text-[#22D3EE] border border-cyan-400/35">
                       REC
                     </span>
                   )}
@@ -963,7 +963,7 @@ export function TcpflowyInspectorPane({
                       <div className="mt-1 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span
-                            className={`px-1.5 py-0.2 rounded border font-mono text-[9.5px] ${handshakeBadgeStyle(
+                            className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] ${handshakeBadgeStyle(
                               flow.handshakeState
                             )}`}
                           >
@@ -975,7 +975,7 @@ export function TcpflowyInspectorPane({
                             </span>
                           )}
                           {anomalies > 0 && (
-                            <span className="px-1.5 py-0.2 rounded bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-mono">
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-mono">
                               {flow.retransmissions > 0
                                 ? `${flow.retransmissions} retrans `
                                 : ""}
@@ -1107,7 +1107,7 @@ export function TcpflowyInspectorPane({
                             <div className="col-span-10 space-y-0.5 min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span
-                                  className={`px-1.5 py-0.2 rounded border font-mono text-[10px] font-semibold ${tcpFlagPillStyle(
+                                  className={`px-1.5 py-0.5 rounded border font-mono text-[10px] font-semibold ${tcpFlagPillStyle(
                                     seg.flags
                                   )}`}
                                 >
@@ -1128,17 +1128,17 @@ export function TcpflowyInspectorPane({
                                 </span>
 
                                 {seg.isRetransmission && (
-                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border border-rose-500/40 text-[9.5px] font-mono font-semibold">
+                                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border border-rose-500/40 text-[9.5px] font-mono font-semibold">
                                     RETRANS
                                   </span>
                                 )}
                                 {seg.isOutOfOrder && (
-                                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-[#F59E0B] border border-amber-500/40 text-[9.5px] font-mono font-semibold">
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-[#F59E0B] border border-amber-500/40 text-[9.5px] font-mono font-semibold">
                                     DUP-ACK / OOO
                                   </span>
                                 )}
                                 {seg.isZeroWindow && (
-                                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border border-rose-500/40 text-[9.5px] font-mono font-semibold">
+                                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-[#F43F5E] border border-rose-500/40 text-[9.5px] font-mono font-semibold">
                                     ZERO-WIN
                                   </span>
                                 )}

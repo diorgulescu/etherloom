@@ -158,7 +158,7 @@ export function CustomVmWizardModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-slate-950/70 dark:bg-[#050912]/85 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
@@ -192,7 +192,7 @@ export function CustomVmWizardModal({
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto overscroll-contain bg-white dark:bg-[#111827]">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">

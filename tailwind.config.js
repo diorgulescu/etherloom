@@ -22,6 +22,17 @@ export default {
           rose: "#F43F5E",
         },
       },
+      opacity: {
+        12: "0.12",
+        14: "0.14",
+        18: "0.18",
+        22: "0.22",
+        24: "0.24",
+        88: "0.88",
+        92: "0.92",
+        96: "0.96",
+        98: "0.98",
+      },
       fontFamily: {
         sans: [
           "-apple-system",
@@ -41,6 +52,8 @@ export default {
         ],
       },
       boxShadow: {
+        "2xs": "0 1px 1px 0 rgba(0, 0, 0, 0.05)",
+        xs: "0 1px 2px 0 rgba(0, 0, 0, 0.08)",
         "loom-cyan":
           "0 0 0 1px rgba(34, 211, 238, 0.45), 0 0 22px rgba(34, 211, 238, 0.18)",
         "loom-card":

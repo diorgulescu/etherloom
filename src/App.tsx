@@ -11,6 +11,7 @@ import type { EtherloomFlowNode } from "./components/canvas/EtherloomNode";
 import type { EtherloomWireEdgeType } from "./components/canvas/EtherloomWireEdge";
 import { AcademyModal } from "./components/academy/AcademyModal";
 import { LabGuideDrawer } from "./components/academy/LabGuideDrawer";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import {
   BottomDock,
   type ActiveWorkspaceTabId,
@@ -521,6 +522,7 @@ export function App() {
       .then(setTcpflowyStatus)
       .catch(() => {});
 
+    let disposed = false;
     let unlistenStorage: (() => void) | null = null;
     let unlistenProgress: (() => void) | null = null;
     let unlistenTcpflowyProg: (() => void) | null = null;
@@ -528,25 +530,32 @@ export function App() {
     let unlistenMetrics: (() => void) | null = null;
 
     void onStorageStatusChanged((snap) => {
+      if (disposed) return;
       setStorageState(snap);
       void refreshTemplates();
     }).then((fn) => {
-      unlistenStorage = fn;
+      if (disposed) fn();
+      else unlistenStorage = fn;
     });
 
     void onStorageMigrationProgress((prog) => {
+      if (disposed) return;
       setMigrationProgress(prog);
     }).then((fn) => {
-      unlistenProgress = fn;
+      if (disposed) fn();
+      else unlistenProgress = fn;
     });
 
     void onTcpflowyInstallProgress((prog) => {
+      if (disposed) return;
       setTcpflowyProgress(prog);
     }).then((fn) => {
-      unlistenTcpflowyProg = fn;
+      if (disposed) fn();
+      else unlistenTcpflowyProg = fn;
     });
 
     void onVmStateChanged((ev) => {
+      if (disposed) return;
       const mappedStatus =
         ev.status === "starting"
           ? "booting"
@@ -587,13 +596,16 @@ export function App() {
         })
       );
     }).then((fn) => {
-      unlistenVm = fn;
+      if (disposed) fn();
+      else unlistenVm = fn;
     });
 
     void onFabricMetrics((ev) => {
+      if (disposed) return;
       const linkMap = new Map(ev.links.map((l) => [l.id, l]));
-      setEdges((curr) =>
-        curr.map((edge) => {
+      setEdges((curr) => {
+        let changed = false;
+        const next = curr.map((edge) => {
           const snap = linkMap.get(edge.id);
           if (!snap || !edge.data) return edge;
           const totalPkts = snap.txPackets + snap.rxPackets;
@@ -638,6 +650,7 @@ export function App() {
             return edge;
           }
 
+          changed = true;
           return {
             ...edge,
             data: {
@@ -655,13 +668,16 @@ export function App() {
               liveWireshark: nextLiveWs,
             },
           };
-        })
-      );
+        });
+        return changed ? next : curr;
+      });
     }).then((fn) => {
-      unlistenMetrics = fn;
+      if (disposed) fn();
+      else unlistenMetrics = fn;
     });
 
     return () => {
+      disposed = true;
       unlistenStorage?.();
       unlistenProgress?.();
       unlistenTcpflowyProg?.();
@@ -2106,8 +2122,37 @@ export function App() {
   const wiresharkAvailable =
     !isTauriRuntime() || (envReport ? envReport.wireshark.found : true);
 
+  const anyModalOpen =
+    storageLibraryOpen ||
+    welcomeModalOpen ||
+    academyModalOpen ||
+    Boolean(configNode) ||
+    customVmWizardOpen ||
+    newProjectModalOpen ||
+    doctorModalOpen ||
+    settingsModalOpen;
+
+  const handleClearLibraryFocus = useCallback(() => {
+    setLibraryFocusedCatalogIds(null);
+    setLibraryFocusedLabTitle(null);
+  }, []);
+
+  const handleCloseStorageLibrary = useCallback(() => {
+    setStorageLibraryOpen(false);
+    setLibraryFocusedCatalogIds(null);
+    setLibraryFocusedLabTitle(null);
+  }, []);
+
+  const handleClearAcademyPrompt = useCallback(() => {
+    setAcademyPromptLabId(null);
+  }, []);
+
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900 dark:bg-[#0D1321] dark:text-slate-100">
+    <div
+      className={`h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900 dark:bg-[#0D1321] dark:text-slate-100 ${
+        anyModalOpen ? "loom-modal-open" : ""
+      }`}
+    >
       <TopToolbar
         projectName={projectName}
         bundlePath={bundlePath}
@@ -2238,9 +2283,7 @@ export function App() {
               setSettingsInitialSection("tcpflowy");
               setSettingsModalOpen(true);
             }}
-            onNotify={(kind, text, actionLabel, onAction) =>
-              showToast(kind, text, actionLabel, onAction)
-            }
+            onNotify={showToast}
             onToggleOpen={() => setDockOpen((v) => !v)}
             onToggleExpanded={() => setDockExpanded((v) => !v)}
             onToggleFloating={() => {
@@ -2321,40 +2364,38 @@ export function App() {
       )}
 
       {/* Modals */}
-      <StorageLibraryModal
-        open={storageLibraryOpen}
-        hostArch={envReport?.hostArch ?? "aarch64"}
-        storageState={storageState}
-        migrationProgress={migrationProgress}
-        focusedCatalogIds={libraryFocusedCatalogIds}
-        focusedLabTitle={libraryFocusedLabTitle}
-        onClearFocusedCatalogIds={() => {
-          setLibraryFocusedCatalogIds(null);
-          setLibraryFocusedLabTitle(null);
-        }}
-        onReturnToAcademy={
-          libraryFocusedCatalogIds
-            ? () => {
-                setStorageLibraryOpen(false);
-                setLibraryFocusedCatalogIds(null);
-                setLibraryFocusedLabTitle(null);
-                setAcademyModalOpen(true);
-              }
-            : undefined
-        }
-        onClose={() => {
-          setStorageLibraryOpen(false);
-          setLibraryFocusedCatalogIds(null);
-          setLibraryFocusedLabTitle(null);
-        }}
-        onApplyStorageUpdate={handleApplyStorageUpdate}
-        onRetryDetection={handleRetryStorage}
-        onFallbackInternal={handleFallbackInternalStorage}
-        onAddCatalogOsNode={handleAddCatalogOsNode}
-        onGuidedSetupStarted={handleGuidedSetupStarted}
-        onTemplatesChanged={refreshTemplates}
-        onNotify={(kind, text) => showToast(kind, text)}
-      />
+      <ErrorBoundary
+        scopeLabel="Storage & OS Library Manager"
+        onReset={handleCloseStorageLibrary}
+      >
+        <StorageLibraryModal
+          open={storageLibraryOpen}
+          hostArch={envReport?.hostArch ?? "aarch64"}
+          storageState={storageState}
+          migrationProgress={migrationProgress}
+          focusedCatalogIds={libraryFocusedCatalogIds}
+          focusedLabTitle={libraryFocusedLabTitle}
+          onClearFocusedCatalogIds={handleClearLibraryFocus}
+          onReturnToAcademy={
+            libraryFocusedCatalogIds
+              ? () => {
+                  setStorageLibraryOpen(false);
+                  setLibraryFocusedCatalogIds(null);
+                  setLibraryFocusedLabTitle(null);
+                  setAcademyModalOpen(true);
+                }
+              : undefined
+          }
+          onClose={handleCloseStorageLibrary}
+          onApplyStorageUpdate={handleApplyStorageUpdate}
+          onRetryDetection={handleRetryStorage}
+          onFallbackInternal={handleFallbackInternalStorage}
+          onAddCatalogOsNode={handleAddCatalogOsNode}
+          onGuidedSetupStarted={handleGuidedSetupStarted}
+          onTemplatesChanged={refreshTemplates}
+          onNotify={showToast}
+        />
+      </ErrorBoundary>
 
       <WelcomeModal
         open={welcomeModalOpen}
@@ -2387,30 +2428,35 @@ export function App() {
         onOpenCustomVmWizard={() => setCustomVmWizardOpen(true)}
       />
 
-      <AcademyModal
-        open={academyModalOpen}
-        labs={academyLabs}
-        loading={academyLoading}
-        launchingLabId={launchingLabId}
-        activeLabId={activeLab?.summary.id ?? null}
-        initialPromptLabId={academyPromptLabId}
-        onClearInitialPromptLab={() => setAcademyPromptLabId(null)}
-        onClose={() => setAcademyModalOpen(false)}
-        onRefresh={() => void refreshAcademyLabs()}
-        onLaunchLab={(labId) => void handleLaunchAcademyLab(labId)}
-        onOpenTemplateWizard={() => {
-          setAcademyModalOpen(false);
-          setLibraryFocusedCatalogIds(null);
-          setLibraryFocusedLabTitle(null);
-          setStorageLibraryOpen(true);
-        }}
-        onOpenOsLibraryForCatalogIds={(catalogIds, labTitle) => {
-          setAcademyModalOpen(false);
-          setLibraryFocusedCatalogIds(catalogIds);
-          setLibraryFocusedLabTitle(labTitle ?? null);
-          setStorageLibraryOpen(true);
-        }}
-      />
+      <ErrorBoundary
+        scopeLabel="Networking Academy"
+        onReset={() => setAcademyModalOpen(false)}
+      >
+        <AcademyModal
+          open={academyModalOpen}
+          labs={academyLabs}
+          loading={academyLoading}
+          launchingLabId={launchingLabId}
+          activeLabId={activeLab?.summary.id ?? null}
+          initialPromptLabId={academyPromptLabId}
+          onClearInitialPromptLab={handleClearAcademyPrompt}
+          onClose={() => setAcademyModalOpen(false)}
+          onRefresh={() => void refreshAcademyLabs()}
+          onLaunchLab={(labId) => void handleLaunchAcademyLab(labId)}
+          onOpenTemplateWizard={() => {
+            setAcademyModalOpen(false);
+            setLibraryFocusedCatalogIds(null);
+            setLibraryFocusedLabTitle(null);
+            setStorageLibraryOpen(true);
+          }}
+          onOpenOsLibraryForCatalogIds={(catalogIds, labTitle) => {
+            setAcademyModalOpen(false);
+            setLibraryFocusedCatalogIds(catalogIds);
+            setLibraryFocusedLabTitle(labTitle ?? null);
+            setStorageLibraryOpen(true);
+          }}
+        />
+      </ErrorBoundary>
 
       <NodeConfigModal
         open={Boolean(configNode)}

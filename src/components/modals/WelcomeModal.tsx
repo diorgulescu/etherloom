@@ -46,7 +46,7 @@ export function WelcomeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 dark:bg-[#050912]/85"
       role="dialog"
       aria-modal="true"
       aria-labelledby="etherloom-welcome-title"
@@ -113,7 +113,7 @@ export function WelcomeModal({
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-5 overflow-y-auto max-h-[72vh]">
+        <div className="p-6 space-y-5 overflow-y-auto overscroll-contain max-h-[72vh] bg-white dark:bg-[#111827]">
           {/* Primary Featured Card: Networking Academy & Guided Labs */}
           <div className="rounded-xl border border-[#6366F1]/35 bg-[#6366F1]/[0.06] dark:bg-[#162032]/90 dark:border-[#6366F1]/40 p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">

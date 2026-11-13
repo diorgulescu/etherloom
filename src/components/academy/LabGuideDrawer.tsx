@@ -353,7 +353,7 @@ export function LabGuideDrawer({
     totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
 
   return (
-    <aside className="w-[430px] xl:w-[465px] shrink-0 border-l border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white/95 dark:bg-[#111827]/92 backdrop-blur-md flex flex-col min-h-0 z-10">
+    <aside className="w-[430px] xl:w-[465px] shrink-0 border-l border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white dark:bg-[#111827] flex flex-col min-h-0 z-10">
       {/* Drawer Header */}
       <div className="px-3.5 py-2.5 border-b border-slate-200/80 dark:border-[rgba(34,211,238,0.14)] bg-gradient-to-r from-indigo-500/[0.08] via-cyan-500/[0.04] to-transparent space-y-2 shrink-0">
         <div className="flex items-start justify-between gap-2">

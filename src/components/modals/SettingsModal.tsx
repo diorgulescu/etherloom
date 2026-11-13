@@ -240,7 +240,7 @@ export function SettingsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 dark:bg-[#050912]/85"
       role="dialog"
       aria-modal="true"
       aria-labelledby="etherloom-settings-title"
@@ -880,10 +880,10 @@ export function SettingsModal({
                         key={opt.id}
                         type="button"
                         onClick={() => onChangeTheme(opt.id)}
-                        className={`p-3 rounded-xl border text-xs font-medium transition-all ${
+                        className={`p-3 rounded-xl border text-xs font-medium transition-colors ${
                           themePreference === opt.id
                             ? "border-[#22D3EE] bg-[#22D3EE]/12 text-cyan-700 dark:text-[#22D3EE] shadow-2xs"
-                            : "border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/70 dark:bg-[#162032] text-slate-700 dark:text-slate-300 hover:dark:bg-[#1E2B42]"
+                            : "border-slate-200 dark:border-[rgba(34,211,238,0.16)] bg-slate-50/70 dark:bg-[#162032] text-slate-700 dark:text-slate-300 dark:hover:bg-[#1E2B42]"
                         }`}
                       >
                         {opt.title}

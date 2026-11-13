@@ -148,12 +148,12 @@ export function BottomDock({
   const containerClass = floating
     ? open
       ? expanded
-        ? "fixed inset-5 rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white/98 dark:bg-[#111827]/96 backdrop-blur-xl shadow-2xl flex flex-col z-40"
-        : "fixed bottom-10 right-4 w-[min(920px,94vw)] h-[min(540px,72vh)] rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white/98 dark:bg-[#111827]/96 backdrop-blur-xl shadow-2xl flex flex-col z-40"
+        ? "fixed inset-5 rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white dark:bg-[#111827] shadow-2xl flex flex-col z-40"
+        : "fixed bottom-10 right-4 w-[min(920px,94vw)] h-[min(540px,72vh)] rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white dark:bg-[#111827] shadow-2xl flex flex-col z-40"
       : "hidden"
     : `${
         !open ? "h-9" : expanded ? "h-[72vh]" : "h-72"
-      } shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white/95 dark:bg-[#111827]/92 backdrop-blur-md flex flex-col transition-[height] duration-200 z-10`;
+      } shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white dark:bg-[#111827] flex flex-col transition-[height] duration-200 z-10`;
 
   const workspaceBody = (
     <section className={containerClass}>
@@ -272,7 +272,7 @@ export function BottomDock({
             <SignalWaveformIcon className="w-3.5 h-3" />
             <span>Captures &amp; tcpflowy</span>
             {captures.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-indigo-500/20 text-indigo-700 dark:text-[#818CF8]">
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-indigo-500/20 text-indigo-700 dark:text-[#818CF8]">
                 {captures.length}
               </span>
             )}
@@ -628,7 +628,7 @@ export function BottomDock({
     <>
       {workspaceBody}
       {/* Slim placeholder bar at bottom when Console Workspace is popped out */}
-      <div className="h-8 shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white/90 dark:bg-[#111827]/92 px-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+      <div className="h-8 shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white dark:bg-[#111827] px-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <span className="inline-flex items-center gap-1.5">
           <PictureInPicture2 className="w-3.5 h-3.5 text-[#22D3EE]" />
           <span>

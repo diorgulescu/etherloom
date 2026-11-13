@@ -42,7 +42,7 @@ export function DependencyCheckModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 dark:bg-[#050912]/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 dark:bg-[#050912]/85"
       role="dialog"
       aria-modal="true"
       aria-labelledby="env-doctor-title"
@@ -126,7 +126,7 @@ export function DependencyCheckModal({
         )}
 
         {/* Dependency Cards */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-white dark:bg-[#0D1321]/55">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-3 bg-slate-50 dark:bg-[#0D1321]">
           {!report ? (
             <div className="py-12 text-center text-xs text-slate-500 dark:text-slate-400">
               Running macOS environment checks…
