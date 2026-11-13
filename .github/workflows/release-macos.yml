@@ -22,14 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: aarch64-apple-darwin
-            arch: arm64
-            label: Apple Silicon (aarch64)
-          - target: x86_64-apple-darwin
-            arch: x64
-            label: Intel (x86_64)
-    if: ${{ matrix.arch == 'arm64' || github.event_name == 'push' || inputs.build_intel == true }}
+        include: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.build_intel == 'false' || github.event.inputs.build_intel == false)) && fromJSON('[{"target":"aarch64-apple-darwin","arch":"arm64","label":"Apple Silicon (aarch64)"}]') || fromJSON('[{"target":"aarch64-apple-darwin","arch":"arm64","label":"Apple Silicon (aarch64)"},{"target":"x86_64-apple-darwin","arch":"x64","label":"Intel (x86_64)"}]') }}
 
     steps:
       - name: Checkout repository
@@ -56,6 +49,7 @@ jobs:
         run: npm ci
 
       - name: Build Tauri v2 macOS .app & .dmg deliverables
+        shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -63,7 +57,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx tauri build --target ${{ matrix.target }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ] && [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
+          npx tauri build --target ${{ matrix.target }}
 
       - name: Package GPLv3-compliant release archives & SHA256 checksums
         shell: bash
