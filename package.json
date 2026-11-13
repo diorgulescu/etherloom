@@ -3,6 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
+  "author": {
+    "name": "Dragoş Iorgulescu",
+    "url": "https://github.com/diorgulescu"
+  },
+  "contributors": [
+    {
+      "name": "Antigravity (Google DeepMind)",
+      "url": "https://antigravity.google"
+    }
+  ],
   "description": "macOS-native zero-root network orchestration and learning studio powered by QEMU + Hypervisor.framework",
   "repository": {
     "type": "git",

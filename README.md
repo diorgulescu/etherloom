@@ -1,63 +1,69 @@
 # Etherloom
 
-**Open-source, zero-root macOS network orchestration and packet-inspection studio** built for Apple Silicon (`aarch64`) and Intel Macs.
+**Open-source, zero-root macOS network orchestration, packet-capture, and multi-OS learning studio** built for Apple Silicon (`aarch64`) and Intel Macs.
 
 [![CI — Tests & Verification](https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml/badge.svg)](https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml)
 [![Build macOS Deliverables](https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml/badge.svg)](https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-0f172a.svg)](#prerequisites-macos)
-[![Hypervisor: Apple HVF](https://img.shields.io/badge/Hypervisor-QEMU%20%2B%20Apple%20HVF-0284c7.svg)](#architecture)
-[![Privilege: Zero Root](https://img.shields.io/badge/Privilege-Zero%20Root%20%2F%20No%20sudo-059669.svg)](#zero-root-wiretaps--tcpflowy-visual-flow-dissector)
+[![Platform: macOS](https://img.shields.io/badge/Platform-macOS%2013%2B%20(Apple%20Silicon%20%26%20Intel)-0f172a.svg)](#system-requirements)
+[![Hypervisor: Apple HVF + Multi-Arch TCG](https://img.shields.io/badge/QEMU-ARM64%20HVF%20%2B%20x86__64%2Fi386%2FRISC--V-0284c7.svg)](#supported-15-os-catalog--multi-architecture-matrix)
+[![Privilege: Zero Root](https://img.shields.io/badge/Privilege-Zero%20Root%20%2F%20No%20sudo-059669.svg)](#zero-root-architecture)
 
-Etherloom lets students, systems engineers, and security practitioners design multi-OS virtual topologies (**Linux**, **OpenBSD**, **FreeBSD**, and **NetBSD** alongside built-in **L2 Ethernet Switches** and **L1 Hubs**), inject live link impairments, stream wiretaps directly into **Wireshark**, and visually dissect TCP flows inside the app using [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) — all in **100% unprivileged userspace** with zero kernel extensions, zero `vmnet` helper daemons, and zero `sudo` prompts.
-
----
-
-## Highlights
-
-- **Zero-Root Userspace Packet Fabric**: QEMU VirtIO NICs attach via loopback UDP datagram sockets (`127.0.0.1`) to an async Rust `PacketFabric` that forwards raw Ethernet II frames, performs IEEE 802.1D MAC learning/aging on L2 Switches, floods frames on L1 Hubs, and enforces per-wire **Latency**, **Jitter**, **Packet Loss %**, and **Cable Cut** impairments in real time.
-- **First-Class BSD & Linux Support**: Built-in OS profiles with accurate guest interface naming (`eth0` on Alpine/Linux, `vio0` on OpenBSD, `vtnet0` on FreeBSD, `vioif0` on NetBSD), UEFI `edk2-aarch64-code.fd` firmware boot, `.iso`/`.img` installer wizard, and 1-click Copy-on-Write (`qcow2`) **Golden Template** promotion.
-- **Unified Dual-Console Workspace**: Every VM exposes both a zero-buffered **Serial Console** (`@xterm/xterm` over Unix domain sockets for `tmux`, `vi`, `pfctl`, `systat`, and BSD text installers) and an **Embedded UEFI / Framebuffer Screen** (`@novnc/novnc` over a Rust VNC-to-WebSocket proxy, plus optional native QEMU Cocoa window mode).
-- **One-Click Wiretaps & Integrated `tcpflowy` Flow Dissector**:
-  - **Record `.pcap`**: Write microsecond-timestamped `LINKTYPE_ETHERNET` captures directly into the active `.etherloom/captures/` bundle.
-  - **Live Wireshark Stream**: Spawn macOS `Wireshark.app` attached to a `/tmp/etherloom/tap_<link>.pcap` named FIFO pipe for zero-privilege real-time packet inspection.
-  - **`tcpflowy` Visual Dissector**: Managed Python virtual environment (`python-env/`) running `tcpflowy` with interactive **Packet Ladder Diagrams** (`SYN` / `SYN-ACK` / `PSH,ACK` / `FIN` + red retransmission & zero-window highlights), **Reconstructed ASCII / Hex Streams**, **SPLT Timing & Entropy Telemetry**, and **Auto-Synthesized Suricata / Wireshark / BPF Rules**.
-- **Interactive Networking Academy**: 5 built-in, vendor-neutral guided labs with topology blueprints, step-by-step tasks, ASCII protocol diagrams, wire highlights, and **1-click Send to Serial** command blocks.
-- **External SSD Resilience (`/Volumes/...`)**: Split storage engine keeping sockets, FIFOs, and Python symlinks local while storing heavy `.iso` media, base `.qcow2` templates, and `.etherloom` workspaces on internal APFS or external Thunderbolt/USB-C SSDs (including ExFAT support and automatic `qcow2` backing-file rebasing).
+**Etherloom** lets students, network engineers, security researchers, and educators design multi-OS virtual networks across **15 curated operating systems** (**Linux**, **BSDs**, **Enterprise Routers & Firewalls**, **Plan 9 / Illumos**, and **Retro FreeDOS + mTCP**) alongside built-in **IEEE 802.1D L2 Switches** and **L1 Hubs**, inject live link impairments, stream wiretaps directly into **Wireshark**, and visually dissect TCP flows inside the app using [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) — all in **100% unprivileged userspace** with zero kernel extensions, zero `vmnet` helper daemons, and zero `sudo` prompts.
 
 ---
 
-## Architecture
+## Key Highlights
+
+- **Zero-Root Userspace Packet Fabric**: QEMU NICs connect via loopback UDP datagram sockets (`127.0.0.1`) to an async Rust `PacketFabric` that switches raw Ethernet II frames (with zero length prefix), maintains live inspectable 802.1D MAC learning tables on L2 Switches, floods frames on L1 Hubs, and enforces per-wire **Latency (ms)**, **Jitter (±ms)**, **Packet Loss (%)**, and **Cable Cut** impairments in real time.
+- **Multi-Architecture QEMU Engine (`aarch64`, `x86_64`, `i386`, `riscv64`)**:
+  - **Native Hardware Virtualization (`-accel hvf`)** for ARM64 guests on Apple Silicon (`M1/M2/M3/M4`) and `x86_64` guests on Intel Macs.
+  - **Multi-Threaded TCG (`-accel tcg,thread=multi`)** for cross-architecture router/firewall appliances (`OPNsense`, `pfSense CE`, `VyOS`, `OmniOS`, `DragonFly BSD`, `Haiku`) and instant sub-second retro stacks (`FreeDOS + mTCP` in `32 MB` RAM).
+  - **Selectable NIC Hardware (`virtio-net-pci`, `e1000`, `rtl8139`, `pcnet`, `ne2k_pci`)** with automatic canvas port relabeling (`vtnet0` ↔ `em0`, `vio0` ↔ `em0`, `vioif0` ↔ `wm0`, `ether1`, `/net/ether0`, `e1000g0`, `PCNTPK 0x60`).
+- **Unified Storage & 15-OS On-Demand Library Manager**: Download, verify, extract, convert, import, or delete OS images directly from the GUI onto your internal SSD or an external USB-C/Thunderbolt SSD (`/Volumes/...`), with **1-Click Guided Template Setup** that auto-promotes installed disks to read-only (`0444`) Copy-on-Write Golden Templates on shutdown.
+- **Dual-Console Multi-Tab Workspace**: Every VM simultaneously exposes a zero-buffered **Serial Terminal** (`@xterm/xterm` over Unix domain sockets for `tmux`, `vi`, `pfctl`, `vtysh`, and BSD installers) and an **Embedded UEFI / VGA Screen** (`@novnc/novnc` over a Rust VNC-to-WebSocket proxy, or native macOS Cocoa window).
+- **One-Click Wiretaps & Integrated `tcpflowy` Visual Flow Dissector**:
+  - **Live Wireshark Stream**: Creates a `/tmp/etherloom/tap_<link>.pcap` named FIFO pipe (`mkfifo`) and launches `Wireshark.app` for live zero-root packet inspection.
+  - **Record `.pcap` & Dissect**: Writes microsecond-accurate `LINKTYPE_ETHERNET` `.pcap` files into `<project>.etherloom/captures/` and dissects them in-app via `tcpflowy` — rendering interactive **TCP Packet Ladder Diagrams** (3-way handshakes, retransmissions, out-of-order segments, zero-window probes), **Reconstructed ASCII/Hex Streams**, **SPLT Timing & Entropy Profiles**, and **Auto-Synthesized Suricata / Wireshark / BPF Signatures**.
+- **Interactive Networking Academy**: 8 built-in, multi-OS guided labs spanning Alpine Linux, OpenBSD, OpenWrt, MikroTik RouterOS CHR v7, and 32-bit FreeDOS (`mTCP`) — complete with declarative `lab.toml` blueprints, 1-click OS Library prerequisite handoffs, step-by-step Markdown drawers, wire highlights, and **Send to Serial** command blocks.
+
+---
+
+## Zero-Root Architecture
 
 ```mermaid
 flowchart TB
   subgraph UI["React 19 + TypeScript Studio UI"]
-    Canvas["@xyflow/react Topology Canvas\nNodes, NIC LEDs, Animated Wires"]
-    Dock["Multi-Tab Bottom / Floating Dock\nxterm.js Serial • noVNC Screen • tcpflowy UI"]
-    AcademyUI["Interactive Academy Drawer\n5 Guided Labs • Send-to-Serial"]
+    Canvas["@xyflow/react Topology Canvas\nArch Badges • Dynamic NIC Labels • Animated Wires"]
+    LibModal["Storage & 15-OS Library Manager\nOn-Demand Downloader • External SSD Telemetry"]
+    Dock["Multi-Tab Console & Inspector Dock\nxterm.js Serial • noVNC Screen • tcpflowy UI"]
+    AcademyUI["Interactive Academy Drawer\n8 Multi-OS Labs • Send-to-Serial"]
   end
 
   subgraph Core["Tauri v2 Rust Backend (100% Userspace, Zero Root)"]
-    Supervisor["VmManager\nqemu-system-aarch64 -accel hvf"]
+    Supervisor["VmManager (Multi-Arch QEMU)\naarch64 HVF • x86_64/i386/riscv64 TCG"]
+    Catalog["CatalogManager\n15 OS Specs • .staging/ Streamer • Auto-Promote"]
     Fabric["PacketFabric (Tokio UDP)\nL2 Switch MAC Table • L1 Hub • Impairments"]
     Bridges["ConsoleBridge\nUnix Serial WS + VNC TCP-to-WS Proxy"]
     Tap["PcapTapManager\nlibpcap Writer + mkfifo Named Pipes"]
-    PyBridge["TcpflowyBridge\nManaged python-env + Packet Timeline"]
-    Store["StorageManager + ImageStore\nAPFS/ExFAT Guard + CoW qcow2 Overlays"]
+    PyBridge["TcpflowyBridge\nManaged python-env + Packet Ladder"]
+    Store["StorageManager + ImageStore\n/Volumes Guard • APFS/ExFAT • CoW Rebase"]
   end
 
   subgraph Host["macOS Host Binaries & Storage"]
-    QEMU["QEMU Guests (Linux / OpenBSD / FreeBSD / NetBSD)\nVirtIO-Net UDP + PL011 Serial + ramfb VNC"]
+    QEMU["QEMU Guests (15 Curated OSes)\nvirtio-net / e1000 / pcnet UDP + Serial + VNC"]
     WS["Wireshark.app\nLive -k -i /tmp/etherloom/tap_*.pcap"]
     Disk["~/Library/Application Support/Etherloom\nor External SSD (/Volumes/...)"]
   end
 
   Canvas <-->|Tauri IPC & Telemetry| Fabric
   Canvas <-->|VM Lifecycle| Supervisor
+  LibModal <-->|Download / Import / Guided Setup| Catalog
   AcademyUI -->|Lab Blueprints & Serial Write| Core
   Dock <-->|Loopback WebSockets| Bridges
   Dock <-->|Structured JSON Flows| PyBridge
 
+  Catalog -->|Streams & Converts in .staging/| Disk
   Supervisor -->|Spawns & Supervises| QEMU
   QEMU <-->|Raw Ethernet II over UDP| Fabric
   QEMU <-->|Unix Serial + VNC| Bridges
@@ -68,81 +74,72 @@ flowchart TB
   Store -->|Templates, ISOs, Overlays| Disk
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the complete system specification, port-allocation schemes, `topology.toml` schema, and socket protocols.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the complete technical specification, QEMU UDP framing rules, `topology.toml` schema, and IPC contracts.
 
 ---
 
-## Prerequisites (macOS)
+## Supported 15-OS Catalog & Multi-Architecture Matrix
 
-Etherloom runs on **macOS 13+** (Apple Silicon M1/M2/M3/M4 with native `Hypervisor.framework` acceleration, or Intel Macs).
+Open **OS Library** in the top toolbar (or click **`+ Get More OS Images (15)`** in the left palette) to download, import, or launch 1-click guided setup for any of the 15 curated operating systems:
 
-### 1. Runtime Dependencies (Homebrew)
-
-```bash
-# Required: QEMU + UEFI firmware (edk2-aarch64-code.fd) + qemu-img
-brew install qemu
-
-# Optional (recommended): Live wiretap streaming in Wireshark.app
-brew install --cask wireshark
-
-# Optional (recommended): Python 3.10+ (or uv) for the in-app tcpflowy Flow Dissector
-brew install python uv
-```
-
-> **Built-in Environment Doctor**: Because macOS GUI `.app` bundles launch with a minimal `PATH`, Etherloom's `env_doctor` automatically probes `/opt/homebrew/bin`, `/usr/local/bin`, `/Applications/Wireshark.app`, and `~/.local/bin` on startup and displays actionable diagnostics in the top toolbar.
-
-### 2. Build Toolchain (From Source)
-
-- **Rust** (`1.77+` stable via [`rustup`](https://rustup.rs/))
-- **Node.js** (`20+` LTS) & `npm`
-- **Xcode Command Line Tools**: `xcode-select --install`
+| # | Operating System | Category | Arch | Accel (Apple Silicon / Intel) | Default NIC & Guest Naming | Firmware / Disk | Default RAM | Networking & Lab Highlights |
+| :-: | :--- | :--- | :---: | :---: | :--- | :---: | :---: | :--- |
+| **1** | **Alpine Linux** | Linux | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`eth0`, `eth1`) | UEFI / `virtio-blk` | `256 MB` | ~58 MB download, boots in ~2s; `iproute2`, `nftables`, `tcpdump` |
+| **2** | **Debian Cloud** | Linux | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`enp0s1` / `eth0`) | UEFI / `virtio-blk` | `512 MB` | Full `systemd` + `glibc` stack (`FRRouting`, `WireGuard`, Python/Go) |
+| **3** | **FreeBSD** | BSD Family | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`vtnet0` / `em0`) | UEFI / `virtio-blk` | `512 MB` | VNET network jails, `pf`/`ipfw`, `dummynet`, `CARP`, ZFS |
+| **4** | **OpenBSD** | BSD Family | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`vio0` / `em0`) | UEFI / `virtio-blk` | `512 MB` | SHA-256 verified `install76.img` + 1-click Guided Setup; `pf`, `CARP`, `pfsync`, `OpenBGPD` |
+| **5** | **NetBSD** | BSD Family | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`vioif0` / `wm0`) | UEFI / `virtio-blk` | `256 MB` | Pre-installed `evbarm-aarch64` image; `npf` firewall & rump kernels |
+| **6** | **OpenWrt** | Routers & Firewalls | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`eth0`, `eth1`) | UEFI / `virtio-blk` | `128 MB` | 14 MB image! Instant `ash` shell, UCI config, `fw4`/`nftables`, 802.1Q VLANs |
+| **7** | **MikroTik RouterOS CHR** | Routers & Firewalls | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`ether1`, `ether2`) | UEFI / `virtio-blk` | `256 MB` | Native ARM64 RouterOS v7 (`ether1..n` 1-based); BGP, OSPF, MPLS, VXLAN |
+| **8** | **VyOS** | Routers & Firewalls | `x86_64` | MTTCG / **HVF** | `virtio-net-pci` (`eth0`, `eth1`) | SeaBIOS / `virtio-blk` | `1024 MB` | Juniper-style `configure`/`set`/`commit` CLI + FRRouting (`vyos`/`vyos`) |
+| **9** | **OPNsense (`nano`)** | Routers & Firewalls | `x86_64` | MTTCG / **HVF** | `e1000` (`em0`, `em1`) | SeaBIOS / `virtio-blk` | `2048 MB` | Pre-installed `nano` serial appliance — boots straight to console & WebGUI |
+| **10** | **pfSense CE** | Routers & Firewalls | `x86_64` | MTTCG / **HVF** | `e1000` (`em0`, `em1`) | UEFI / `virtio-blk` | `2048 MB` | Classic FreeBSD `pf` firewall (Local File Import from Netgate portal) |
+| **11** | **9front (Plan 9)** | Research, UNIX & Retro | `aarch64` | **HVF** / TCG | `virtio-net-pci` (`/net/ether0`) | UEFI / `virtio-blk` | `512 MB` | Native ARM64 Plan 9 where the TCP/IP stack is a `/net` filesystem! |
+| **12** | **OmniOS (Illumos)** | Research, UNIX & Retro | `x86_64` | MTTCG / **HVF** | `e1000` (`e1000g0`, `e1000g1`) | SeaBIOS / `virtio-blk` | `2048 MB` | Solaris/Illumos Crossbow (`dladm` VNICs/etherstubs, `ipadm`), DTrace, Zones |
+| **13** | **DragonFly BSD** | BSD Family | `x86_64` | MTTCG / **HVF** | `e1000` (`em0`, `em1`) | SeaBIOS / `ahci` | `1024 MB` | Per-CPU lockless LWKT network protocol threads & HAMMER2 filesystem |
+| **14** | **Haiku OS** | Research, UNIX & Retro | `x86_64` | MTTCG / **HVF** | `e1000` (`/dev/net/ipro1000/0`) | UEFI / `ahci` | `1024 MB` | Ultra-responsive BeOS-inspired graphical desktop over Embedded VNC |
+| **15** | **FreeDOS + mTCP** | Research, UNIX & Retro | `i386` | Fast TCG | `pcnet` (`PCNTPK 0x60`) | SeaBIOS / `ide` | `32 MB` | Boots in <1s! Crynwr packet drivers + mTCP with **zero** background OS noise |
 
 ---
 
-## Quickstart
+## External SSD & On-Demand Storage Management
 
-### 1. Clone & Run in Development Mode
+Modern laptops often have tight internal SSD space, so Etherloom is engineered from the ground up for external USB-C / Thunderbolt SSDs (`/Volumes/<DriveName>/Etherloom`):
 
-```bash
-git clone https://github.com/diorgulescu/etherloom.git
-cd etherloom
+1. **Zero `/tmp` Bloat (`.staging/` Streaming)**: When you download or extract multi-hundred-MB images in the **Storage & OS Library Manager**, `curl` streams, checksum verification, `.xz`/`.gz`/`.bz2`/`.zip` decompression, and `qemu-img convert` all run strictly inside `{active_storage_root}/.staging/` before atomically moving into `templates/` or `isos/`.
+2. **Smart Internal vs. External Split**:
+   - **Always Local**: `~/Library/Application Support/Etherloom/settings.toml`, `python-env/` (which requires POSIX symlinks incompatible with ExFAT), and `/tmp/etherloom/` sockets/FIFOs (avoiding macOS's `104-byte sun_path` Unix socket limit and ExFAT FIFO restrictions).
+   - **Relocatable Heavy Media**: `templates/`, `isos/`, and `projects/*.etherloom` live wherever you choose — internal APFS or external APFS/ExFAT SSDs, with live `statfs` free/total capacity telemetry.
+3. **Unplugged Drive Protection & Portable CoW Rebase**:
+   - Etherloom checks POSIX `st_dev` device IDs before touching `/Volumes/<Name>`, never creating phantom folders under `/Volumes` if a drive is unplugged.
+   - Moving templates or opening a `*.etherloom` workspace on another Mac automatically updates Copy-on-Write backing pointers via `qemu-img rebase -u`.
+4. **Safe Deletion Guard**: Deleting an OS image from the Library Manager scans your saved `*.etherloom` project overlays first and warns you if any existing lab depends on that Golden Template.
 
-# Install frontend packages
-npm install
+---
 
-# Launch the Tauri v2 macOS desktop studio
-npm run tauri dev
-```
+## Companion CLI Scripts (`scripts/`)
 
-To build a standalone macOS `.app` / `.dmg` bundle:
+Prefer terminal workflows or pre-provisioning a classroom drive? Etherloom ships two standalone GPLv3 scripts in [`scripts/`](scripts/) that share the exact same `<slug>-<arch>-base.qcow2` naming convention as the GUI Library Manager:
 
-```bash
-npm run tauri build
-```
-
-### 2. Provision ARM64 Base Templates Automatically (`scripts/prepare_library.sh`)
-
-Use the included [`scripts/prepare_library.sh`](scripts/prepare_library.sh) helper (also callable as `scripts/prepare-library.sh`) to download, verify, expand, and write-protect official `aarch64` base images (**Alpine Linux**, **FreeBSD UFS**, **NetBSD**, and the SHA-256-verified **OpenBSD** installer kit) onto your internal SSD or an external USB-C/Thunderbolt SSD:
+### 1. `scripts/prepare_library.sh` (also `scripts/prepare-library.sh`)
+Downloads, verifies, expands, and write-protects (`chmod 0444`) official `aarch64` base images onto local or external storage:
 
 ```bash
-# Install xz alongside qemu for decompressing FreeBSD / Alpine cloud images
+# Install QEMU + xz (for decompressing FreeBSD / Alpine cloud images)
 brew install qemu xz
 
-# Provision all 4 guest families onto an external SSD (with /Volumes st_dev mount guard)
-./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom
+# Provision Alpine, FreeBSD, NetBSD & SHA-256-verified OpenBSD installer onto an external SSD
+./scripts/prepare-library.sh /Volumes/Samsung_T7/Etherloom
 
-# Or provision only selected OS families onto default local storage
-./scripts/prepare_library.sh ~/Library/Application\ Support/Etherloom/Library --only alpine,freebsd
+# Or provision selected OS families onto default internal storage
+./scripts/prepare-library.sh ~/Library/Application\ Support/Etherloom/Library --only alpine,freebsd
 
-# Launch the guided 2-minute HVF terminal installer to build openbsd-aarch64-base.qcow2
-./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd
+# Launch the interactive 2-minute HVF terminal setup to build openbsd-aarch64-base.qcow2
+./scripts/prepare-library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd
 ```
 
-You can also install any custom `.iso` or `.img` directly inside the GUI via **Install OS from ISO / IMG** in the left palette and click **Promote Disk to Read-Only Base Template** in **Node Settings → Storage**.
-
-### 3. CLI Two-VM Wire & Wireshark Smoke Test (`scripts/smoke-test-wire.sh`)
-
-To verify Apple HVF acceleration, Copy-on-Write `qcow2` overlays, QEMU UDP socket wiring, `.pcap` capture, and live Wireshark streaming directly from the terminal (in split-screen `tmux` or `Terminal.app`):
+### 2. `scripts/smoke-test-wire.sh`
+Spins up two Copy-on-Write QEMU HVF guests wired back-to-back over raw UDP Ethernet sockets in `tmux` / `Terminal.app`, attaches a `.pcap` wiretap, and optionally streams live frames into Wireshark:
 
 ```bash
 ./scripts/smoke-test-wire.sh /Volumes/Samsung_T7/Etherloom --node1 alpine --node2 freebsd
@@ -150,82 +147,114 @@ To verify Apple HVF acceleration, Copy-on-Write `qcow2` overlays, QEMU UDP socke
 
 ---
 
-## Zero-Root Wiretaps & `tcpflowy` Visual Flow Dissector
+## Wire Capture & `tcpflowy` Visual Flow Dissector
 
-Click any virtual cable on the canvas (or select the **Link & Capture** tab in the Bottom Dock) to inspect traffic without touching `bpf` permissions or `sudo`:
+Click any virtual cable on the canvas (or open the **Link & Wiretap** / **Captures & tcpflowy** tabs in the Bottom Dock) to inspect every frame without `bpf` group changes or `sudo`:
 
-1. **Live Wireshark**: Creates `/tmp/etherloom/tap_<link_id>.pcap` via `mkfifo`, writes a standard `libpcap` global header (`LINKTYPE_ETHERNET = 1`), streams live frames across the virtual wire, and launches `Wireshark.app -k -i <fifo>`. Closing Wireshark cleanly detaches the tap without interrupting VM traffic.
-2. **Record `.pcap` & Stop + Dissect**: Records microsecond-accurate `.pcap` files into `<workspace>.etherloom/captures/` with a live packet counter badge on the wire. Clicking **Stop & Dissect** switches directly to the **`tcpflowy` Flow Dissector** tab:
-   - **One-Click Managed Environment**: Etherloom provisions an isolated Python virtual environment in `~/Library/Application Support/Etherloom/python-env/` and installs `tcpflowy` from PyPI on demand.
-   - **Packet Ladder Diagram**: Visualizes `Client ──▶ Server` and `Client ◀── Server` segments with TCP flags, relative sequence/ack numbers, window sizes, inter-arrival deltas, and color-coded TCP retransmissions, out-of-order arrivals, and zero-window probes.
-   - **Stream Reconstruction & SPLT Analytics**: Inspect reassembled bidirectional ASCII or hex-dump payloads, SPLT burst-timing histograms, Shannon payload entropy, and auto-generated **Suricata**, **Wireshark**, and **tcpdump BPF** signatures.
+- **Live Wireshark (`mkfifo`)**: Streams real-time `LINKTYPE_ETHERNET` frames into `/Applications/Wireshark.app` over `/tmp/etherloom/tap_<link_id>.pcap`. Closing Wireshark cleanly detaches the tap with zero impact on running VMs.
+- **Record `.pcap` & Stop + Dissect**: Saves standard `.pcap` files into `<project>.etherloom/captures/` and launches [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) inside Etherloom's managed `python-env/`:
+  - **Interactive Packet Ladder**: Step through `SYN` → `SYN,ACK` → `ACK`, `PSH,ACK` payload turns, `FIN`/`RST` teardowns, duplicate ACKs, retransmissions, and zero-window events.
+  - **Stream Reconstruction & SPLT Signatures**: View reassembled `C->S` and `S->C` ASCII/Hex payloads, SPLT packet-length/inter-arrival signatures, Shannon entropy classification, passive DNS maps, and ready-to-copy **Wireshark** & **Suricata** rules.
 
 ---
 
 ## Interactive Networking Academy
 
-Click **Academy** in the top toolbar (or launch directly from the Welcome screen) to open a clean sandbox workspace (`academy-<lab_id>.etherloom`) paired with the collapsible right-side **Lab Guide Drawer**:
+Click **Academy** in the top toolbar to instantiate a clean sandbox copy (`academy-<lab_id>.etherloom`) paired with the collapsible right-side **Lab Guide Drawer**. If a lab requires an OS image that has not been downloaded yet, Etherloom surfaces a 1-click **Download / Setup in OS Library** deep-link filtered directly to the missing catalog items:
 
-| # | Lab Title | Difficulty | Key Concepts & OS Tools |
-| :-: | :--- | :--- | :--- |
-| **01** | **Ethernet, Hubs vs. Switches & ARP Under the Microscope** | Beginner | L1 Hub flooding vs. L2 Switch MAC table learning, broadcast ARP requests vs. unicast ARP replies |
-| **02** | **IP Subnetting & Static Routing From Scratch** | Beginner | Dual `/24` subnets, multi-homed Linux IPv4 forwarding, static routes, `ip route`, TTL decrement |
-| **03** | **Stateful Firewalls & NAT with OpenBSD `pf`** | Intermediate | OpenBSD `vio0`/`vio1`, default-deny `pf.conf`, `match out on egress nat-to`, `pfctl -ss` state table |
-| **04** | **High-Availability Failover with OpenBSD `CARP` + `pfsync`** | Advanced | Active/Backup OpenBSD cluster, shared `carp0` virtual IP (`vhid 1`), live state sync over `pfsync0`, zero-drop TCP failover |
-| **05** | **Dissecting TCP: Handshakes, Window Scaling & Packet Loss** | Intermediate | Pre-impaired WAN link (`80 ms` RTT, `5%` loss), 3-way handshake, `wscale`, RTO/fast-retransmit analysis in `tcpflowy` |
+| # | Lab Title | Difficulty | Guest Operating Systems | Core Networking Concepts Covered |
+| :-: | :--- | :---: | :--- | :--- |
+| **01** | **Ethernet, Hubs vs. Switches & ARP Under the Microscope** | `Beginner` | Alpine Linux (`aarch64` HVF) + Virtual L1 Hub & L2 Switch | Shared-medium L1 Hub flooding vs. L2 Switch `802.1D` MAC learning, broadcast ARP requests vs. unicast ARP replies |
+| **02** | **IP Subnetting & Static Routing From Scratch** | `Beginner` | Alpine Linux (`aarch64` HVF) | Dual `/24` subnets, multi-homed Linux IPv4 forwarding, static routes (`ip route`), L2 MAC rewrites & IP `TTL` decrement |
+| **03** | **Stateful Firewalls & NAT with OpenBSD `pf`** | `Intermediate` | OpenBSD + Alpine Linux (`aarch64` HVF) | OpenBSD `vio0`/`vio1`, default-deny `/etc/pf.conf`, `nat-to` masquerading, `rdr-to` port forwarding, `pfctl -ss`, dual-wire `tcpflowy` NAT proof |
+| **04** | **High-Availability Failover with OpenBSD `CARP` + `pfsync`** | `Advanced` | OpenBSD + Alpine Linux (`aarch64` HVF) | Active/Backup OpenBSD firewall cluster, shared `carp0` virtual IP (`vhid 1`), live TCP state replication over `pfsync0`, zero-drop cable-cut failover |
+| **05** | **Dissecting TCP: Handshakes, Window Scaling & Packet Loss** | `Intermediate` | Alpine Linux (`aarch64` HVF) | Impaired WAN link (`80 ms` RTT, `5%` loss), 3-way handshake, window scaling, duplicate ACKs & RTO/fast-retransmit ladders in `tcpflowy` |
+| **06** | **Zero-Noise ARP & TCP Dissection with FreeDOS (`mTCP`)** | `Beginner` | FreeDOS 1.3 (`i386` TCG, `32 MB` RAM, `pcnet`) + Alpine Linux (`aarch64` HVF) | Silencing Linux IPv6 link-up chatter, Crynwr `PCNTPK INT 0x60` packet driver + `mTCP`, exact 4-packet ARP+ICMP exchange, pure `SEQ`/`ACK` byte math in `tcpflowy` |
+| **07** | **802.1Q VLAN Segmentation, Trunking & Inter-VLAN Routing on OpenWrt** | `Intermediate` | OpenWrt (`aarch64` HVF) + Alpine Linux (`aarch64` HVF) | Modern UCI `bridge-vlan` / DSA filtering (`eth0:u*`, `eth1:u*`, `eth2:t`), L2 broadcast isolation, double-tagged `0x8100` trunk captures, Router-on-a-Stick & `fw4`/`nftables` zone isolation |
+| **08** | **Multi-Vendor eBGP Peering & Route Failover: MikroTik CHR v7 ↔ OpenBSD (`OpenBGPD`)** | `Advanced` | MikroTik RouterOS CHR v7 + OpenBSD + Alpine Linux (`aarch64` HVF) | Authentic RouterOS v7 `/routing/bgp/connection` + `/routing/filter/rule`, OpenBSD `/etc/bgpd.conf`, **RFC 8212** explicit import/export policy, `TCP/179` `OPEN`/`UPDATE`/`KEEPALIVE` dissection & live cable-cut BGP reconvergence |
 
-### Authoring Custom Labs
-
-Each Academy lab is a self-contained folder under [`labs/<lab-id>/`](labs/) containing two declarative files:
-
-- `lab.toml`: Lab metadata (`id`, `number`, `title`, `difficulty`, `tags`, `required_templates`), `[[steps]]` checkpoints (`highlight_links` to illuminate target wires on the canvas), and the `[[topology.nodes]]` / `[[topology.links]]` blueprint.
-- `guide.md`: Markdown tutorial supporting `diagram` ASCII blocks, expandable `<details>` hints, persistent `- [ ]` task checkboxes, and `node=<node-id>` fenced shell blocks that render **Copy** and **Send to `<host>` Serial** buttons automatically.
-
-You can also place custom lab folders in `{storage_root}/labs/<lab-id>/` and Etherloom will discover them alongside the 5 built-in labs.
+Instructors can author custom labs by placing `<lab-id>/lab.toml` + `guide.md` inside [`labs/`](labs/) or `{storage_root}/labs/` — complete with `highlight_links` canvas illumination and `node=<id>` **Send to Serial** command blocks.
 
 ---
 
-## External SSD Storage & Portability
+## System Requirements
 
-Open **Settings (`⌘,`) → Storage Locations** to relocate heavy VM assets (`templates/`, `isos/`, `projects/`) to an external Thunderbolt or USB-C SSD (`/Volumes/<DriveName>/EtherloomLibrary`):
-
-- **Local Runtime Invariants**: `settings.toml`, `python-env/` (which requires POSIX symlinks), and `/tmp/etherloom/` sockets/FIFOs always stay on your internal macOS volume so ExFAT external drives and long `/Volumes/...` paths never break QEMU Unix domain sockets (`104-byte sun_path` limit) or Wireshark pipes.
-- **Disconnect Guard & Safe Migration**: If an external SSD is unplugged, Etherloom surfaces a non-destructive reconnection banner (`Retry`, `Choose Folder…`, or `Fallback to Internal SSD`) without overwriting your configured paths, and `qcow2` overlays automatically rebase their backing-file pointers via `qemu-img rebase -u` when workspaces move between Macs or drives.
+| Component | Minimum | Recommended | Notes |
+| :--- | :--- | :--- | :--- |
+| **Operating System** | **macOS 13** (Ventura) | **macOS 14** (Sonoma) / **macOS 15+** (Sequoia) | Uses Apple `Hypervisor.framework` (`-accel hvf`) in unprivileged userspace |
+| **Processor (CPU)** | Apple Silicon (`M1`+) or Intel `x86_64` (`VT-x`) | Apple `M1 Pro` / `M2` / `M3` / `M4` (8+ cores) | Native `HVF` when guest arch matches host (`aarch64` on M-series, `x86_64` on Intel); multi-threaded `TCG` (`thread=multi`) for cross-arch guests |
+| **Memory (RAM)** | **8 GB** | **16 GB+** | Lightweight labs use `32 MB` (FreeDOS), `128 MB` (OpenWrt), `256 MB` (Alpine / MikroTik CHR), and `512 MB` (OpenBSD / FreeBSD); `16 GB+` recommended for multi-router topologies or `x86_64` firewalls (`OPNsense` / `VyOS`) |
+| **Internal Disk Space** | **500 MB** free | **2 GB+** free | Stores `~/Library/Application Support/Etherloom/settings.toml`, the local `tcpflowy` `python-env/` venv, and ephemeral `/tmp/etherloom/` Unix sockets & FIFO pipes |
+| **OS Library Storage** | **4 GB** free | **20–40 GB+** free (Internal SSD or External USB-C / Thunderbolt SSD) | Configurable in **OS Library → Paths & Migrate**; supports **APFS** (sparse `qcow2` overlays) and **ExFAT** external drives (`/Volumes/...`) with `.staging/` extraction |
+| **Account Privileges** | **Standard macOS User** | **Standard macOS User** | **Zero `root` / `sudo`**, zero `.kext` / system extensions, zero `bpf` group changes |
+| **Host Packages** | **QEMU 8.2+** (`brew install qemu`) | **QEMU 9.x+** + **Wireshark 4.x+** + **Python 3.10+ / `uv`** | Verified live via the in-app **Env Doctor** toolbar badge (`qemu-system-*`, `qemu-img`, `edk2` UEFI firmware, `Wireshark.app`/`tshark`, `python3`/`uv`) |
+| **Source Build Tools** *(optional)* | Xcode CLT, **Rust 1.77.2+**, **Node.js 20+** | Latest stable `rustup` + Node `20`/`22` LTS | Only needed when building Etherloom from source (`npm run tauri dev` / `build`) |
 
 ---
 
-## Development, CI/CD & Verification
+## Prerequisites & Installation (macOS)
+
+Etherloom runs on **macOS 13+** on both **Apple Silicon** (`M1` / `M2` / `M3` / `M4`) and **Intel** Macs.
+
+### 1. Host Runtime Packages (Homebrew)
 
 ```bash
-# Validate macOS library & smoke-test scripts
-bash -n scripts/prepare_library.sh scripts/smoke-test-wire.sh
+# Required: Multi-architecture QEMU (aarch64, x86_64, i386, riscv64) + EDK2 UEFI firmware + qemu-img
+brew install qemu
 
-# Type-check React 19 + TypeScript and build production frontend assets
+# Optional (recommended): Live FIFO wiretap inspection in Wireshark.app
+brew install --cask wireshark
+
+# Optional (recommended): Python 3.10+ & uv for the in-app tcpflowy Flow Dissector
+brew install python uv
+```
+
+> **Tip**: Click the **Env Doctor** badge in Etherloom's top toolbar anytime to verify all 6 host dependencies (`qemu-system-aarch64`, multi-arch `qemu-system-x86_64`/`i386`/`riscv64`, `qemu-img`, `edk2` UEFI firmware, `Wireshark`, and `python3`/`uv`).
+
+### 2. Build & Run From Source
+
+Ensure **Rust** (`1.77+` via [`rustup`](https://rustup.rs/)), **Node.js** (`20+` LTS), and **Xcode Command Line Tools** (`xcode-select --install`) are installed:
+
+```bash
+git clone https://github.com/diorgulescu/etherloom.git
+cd etherloom
+
+# Install frontend dependencies
+npm install
+
+# Launch Etherloom in development mode
+npm run tauri dev
+
+# Build standalone macOS .app / .dmg release bundle
+npm run tauri build
+```
+
+### 3. Automated Verification & Test Suite
+
+```bash
+# Validate shell scripts
+bash -n scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh
+
+# Type-check React 19 + TypeScript and build production Vite bundle
 npm run build
 
-# Run Rust backend unit tests (storage, fabric, qcow2 workspace rebase, pcap taps, tcpflowy, academy)
+# Check & run Rust backend unit tests (env_doctor, multi-arch vm_manager, images, catalog, storage, fabric, workspace, pcap, tcpflowy, academy)
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-GitHub Actions pipelines live in [`.github/workflows/`](.github/workflows/):
-- [`ci.yml`](.github/workflows/ci.yml): Runs shell script lints (`bash -n` + `shellcheck`), TypeScript/Vite production builds, and the full macOS Rust unit & integration test suite on every push and pull request.
-- [`release-macos.yml`](.github/workflows/release-macos.yml): Builds Apple Silicon (`aarch64-apple-darwin`) and Intel (`x86_64-apple-darwin`) `.dmg` and GPLv3-compliant `.app.tar.gz` deliverables with `SHA256SUMS`, uploading workflow artifacts and publishing GitHub Releases on `v*.*.*` tags.
-- [`pages.yml`](.github/workflows/pages.yml): Deploys the static project documentation site from [`docs/`](docs/) to GitHub Pages.
+---
+
+## Contributors
+
+- **[Dragoş Iorgulescu (`@diorgulescu`)](https://github.com/diorgulescu)** — Creator, System Architecture, [`tcpflowy`](https://github.com/diorgulescu/tcpflowy) Author & Project Maintainer
+- **[Antigravity](https://antigravity.google/)** *(Google DeepMind Agentic AI)* — Co-Author & Engineering Contributor (Multi-Architecture Tauri/Rust Backend, Zero-Root `PacketFabric`, React Topology Studio, 15-OS Catalog & Guided Academy Labs)
 
 ---
 
-## Credits & Upstream Foundations
+## Credits & License (GNU GPLv3)
 
-Etherloom builds upon and orchestrates remarkable open-source software — see [**CREDITS.md**](CREDITS.md) for complete attribution and license notices:
+Etherloom is free and open-source software distributed under the **GNU General Public License v3.0 (or later)** (`SPDX-License-Identifier: GPL-3.0-or-later`).
 
-- **[`tcpflowy`](https://github.com/diorgulescu/tcpflowy)** (*Dragos Iorgulescu*) — Powers the integrated Visual Flow Dissector, SPLT timing signatures, entropy profiling, passive DNS correlation, and Suricata/Wireshark/BPF rule synthesis.
-- **[QEMU](https://www.qemu.org/)**, **[TianoCore EDK II](https://github.com/tianocore/edk2)**, & **Apple `Hypervisor.framework`** — Hardware-accelerated ARM64/x86_64 VM execution, UEFI firmware, and Copy-on-Write `qcow2` overlays.
-- **[Wireshark](https://www.wireshark.org/)** — Live named-pipe (`mkfifo`) Ethernet frame inspection.
-- **Guest Operating Systems**: **[OpenBSD](https://www.openbsd.org/)** (`pf`, `CARP`, `pfsync`, `vio`), **[FreeBSD](https://www.freebsd.org/)** (`vtnet`), **[NetBSD](https://www.netbsd.org/)** (`vioif`), and **[Alpine Linux](https://alpinelinux.org/)**.
-- **Application Stack**: **[Tauri v2](https://tauri.app/)**, **[Tokio](https://tokio.rs/)**, **[React 19](https://react.dev/)**, **[`@xyflow/react`](https://reactflow.dev/)**, **[`xterm.js`](https://xtermjs.org/)**, **[`noVNC`](https://novnc.com/)**, **[Lucide](https://lucide.dev/)**, and **[Tailwind CSS](https://tailwindcss.com/)**.
-
----
-
-## License
-
-Etherloom is free and open-source software licensed under the **GNU General Public License v3.0 (or later)** (`SPDX-License-Identifier: GPL-3.0-or-later`) — see [LICENSE](LICENSE) and [CREDITS.md](CREDITS.md) for details.
+- See [**LICENSE**](LICENSE) for license terms.
+- See [**CREDITS.md**](CREDITS.md) for upstream attributions, including [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy), [**QEMU**](https://www.qemu.org/), [**TianoCore EDK II**](https://github.com/tianocore/edk2), [**Wireshark**](https://www.wireshark.org/), [**Tauri v2**](https://tauri.app/), [**React**](https://react.dev/), [**`@xyflow/react`**](https://reactflow.dev/), [**`xterm.js`**](https://xtermjs.org/), [**`noVNC`**](https://novnc.com/), and the communities behind all 15 supported guest operating systems.

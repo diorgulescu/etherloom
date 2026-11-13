@@ -56,7 +56,10 @@ etherloom/
 │   ├── 02-ip-subnetting-static-routing/
 │   ├── 03-openbsd-pf-stateful-nat/
 │   ├── 04-openbsd-carp-pfsync-ha/
-│   └── 05-tcp-handshakes-window-loss/
+│   ├── 05-tcp-handshakes-window-loss/
+│   ├── 06-freedos-mtcp-zero-noise/
+│   ├── 07-openwrt-8021q-vlans/
+│   └── 08-mikrotik-openbsd-ebgp/
 ├── package.json                 # Frontend dependencies & scripts
 ├── index.html                   # Vite entry point
 ├── vite.config.ts               # Vite bundler config for Tauri v2
@@ -70,7 +73,7 @@ etherloom/
 │   └── components/
 │       ├── academy/             # AcademyModal browser & collapsible right-side LabGuideDrawer
 │       ├── layout/              # Toolbar, LeftSidebar, WorkspaceCanvas, BottomDock
-│       ├── modals/              # WelcomeModal, DependencyCheckModal, Settings, VM Wizard
+│       ├── modals/              # StorageLibraryModal, WelcomeModal, DependencyCheckModal, Settings, VM Wizard
 │       ├── canvas/              # @xyflow/react nodes, edges, port handles & lab wire highlights
 │       ├── console/             # xterm.js serial tabs & noVNC graphical display views
 │       └── inspector/           # Link impairments, live capture controls, tcpflowy Flow Inspector
@@ -84,10 +87,11 @@ etherloom/
         ├── main.rs              # Binary entry point
         ├── lib.rs               # Tauri builder, state registration, IPC command handlers
         ├── academy.rs           # Guided Lab engine, template readiness & clean sandbox instantiation
-        ├── env_doctor.rs        # macOS binary, UEFI firmware, Wireshark, Python/uv discovery
+        ├── catalog.rs           # Curated 15-OS catalog, .staging/ download streamer & 1-click Guided Setup
+        ├── env_doctor.rs        # Multi-arch QEMU, EDK2 UEFI firmware, Wireshark, Python/uv discovery
         ├── storage.rs           # Split storage config (settings.toml), /Volumes mount guard, statfs & migration
-        ├── images.rs            # OS profiles, golden templates, CoW overlays & portable qcow2 auto-rebase
-        ├── vm_manager.rs        # QEMU HVF process supervisor, QMP shutdown, Unix serial & VNC/Cocoa display
+        ├── images.rs            # 15 OS profiles, golden templates, CoW overlays & portable qcow2 auto-rebase
+        ├── vm_manager.rs        # Multi-arch QEMU HVF/TCG supervisor, QMP shutdown, Unix serial & VNC/Cocoa display
         ├── fabric.rs            # Central UDP PacketFabric, L2 MAC table, L1 hub, impairments & link telemetry
         ├── console_bridge.rs    # Async Unix serial & VNC TCP-to-WebSocket console multiplexer
         ├── pcap_tap.rs          # Zero-copy libpcap (.pcap) recorder & live Wireshark named FIFO streamer
@@ -97,18 +101,29 @@ etherloom/
 
 ---
 
-## 4. Supported Guest Families & Built-in Nodes
+## 4. Multi-Architecture Guest Matrix & Built-in Nodes
 
-Etherloom models both full QEMU virtual machines and lightweight userspace switching elements inside the Rust `PacketFabric`:
+Etherloom orchestrates **15 curated operating systems** across 4 CPU architectures (`aarch64`, `x86_64`, `i386`, `riscv64`), 5 PCI Ethernet controller models (`virtio-net-pci`, `e1000`, `rtl8139`, `pcnet`, `ne2k_pci`), 2 firmware modes (`uefi`, `bios`), and 3 primary disk buses (`virtio-blk`, `ahci`, `ide`), alongside built-in userspace switching devices:
 
-| Node Family | Kind | NIC Driver | Guest Interface Naming | Notes |
+| OS / Node | Arch | Default NIC | Guest Interface Naming | Default Firmware / Disk |
 | :--- | :--- | :--- | :--- | :--- |
-| **Linux** | QEMU VM | `virtio-net-pci` | `eth0`, `eth1`, … (or `enp0s*`) | Cloud images, Alpine, Debian, Ubuntu, Fedora |
-| **FreeBSD** | QEMU VM | `virtio-net-pci` | `vtnet0`, `vtnet1`, … | Supports ISO/memstick UEFI interactive install & serial console |
-| **OpenBSD** | QEMU VM | `virtio-net-pci` | `vio0`, `vio1`, … | Supports `installXX.img` UEFI install via `ramfb` VNC console |
-| **NetBSD** | QEMU VM | `virtio-net-pci` | `vioif0`, `vioif1`, … | Supports UEFI ISO install via `ramfb` VNC console |
-| **L2 Switch** | Built-in (`PacketFabric`) | Virtual ports | `sw-p0`, `sw-p1`, … | IEEE 802.1D learning bridge: MAC table aging, unknown-unicast/broadcast flooding |
-| **L1 Hub** | Built-in (`PacketFabric`) | Virtual ports | `hub-p0`, `hub-p1`, … | Pure multi-port repeater: floods every ingress frame out all other active ports |
+| **Alpine Linux** | `aarch64` | `virtio-net-pci` | `eth0`, `eth1`, … | UEFI / `virtio-blk` |
+| **Debian Cloud** | `aarch64` | `virtio-net-pci` | `enp0s1` / `eth0`, … | UEFI / `virtio-blk` |
+| **FreeBSD** | `aarch64` | `virtio-net-pci` | `vtnet0` (or `em0` w/ `e1000`) | UEFI / `virtio-blk` |
+| **OpenBSD** | `aarch64` | `virtio-net-pci` | `vio0` (or `em0` w/ `e1000`) | UEFI / `virtio-blk` |
+| **NetBSD** | `aarch64` | `virtio-net-pci` | `vioif0` (or `wm0` w/ `e1000`) | UEFI / `virtio-blk` |
+| **OpenWrt** | `aarch64` | `virtio-net-pci` | `eth0` (`br-lan`), `eth1` (`wan`) | UEFI / `virtio-blk` |
+| **MikroTik RouterOS CHR** | `aarch64` | `virtio-net-pci` | `ether1`, `ether2` (1-based) | UEFI / `virtio-blk` |
+| **VyOS** | `x86_64` | `virtio-net-pci` | `eth0`, `eth1`, … | SeaBIOS / `virtio-blk` |
+| **OPNsense (`nano`)** | `x86_64` | `e1000` | `em0` (LAN), `em1` (WAN) | SeaBIOS / `virtio-blk` |
+| **pfSense CE** | `x86_64` | `e1000` | `em0` (WAN), `em1` (LAN) | UEFI / `virtio-blk` |
+| **9front (Plan 9)** | `aarch64` | `virtio-net-pci` | `/net/ether0`, `/net/ether1` | UEFI / `virtio-blk` |
+| **OmniOS (Illumos)** | `x86_64` | `e1000` | `e1000g0`, `e1000g1` (`dladm`) | SeaBIOS / `virtio-blk` |
+| **DragonFly BSD** | `x86_64` | `e1000` | `em0`, `em1` | SeaBIOS / `ahci` |
+| **Haiku OS** | `x86_64` | `e1000` | `/dev/net/ipro1000/0` | UEFI / `ahci` |
+| **FreeDOS + mTCP** | `i386` | `pcnet` | `PCNTPK 0x60` (`32 MB` RAM) | SeaBIOS / `ide` |
+| **L2 Switch** | `PacketFabric` | Virtual ports | `p1`..`p8` | IEEE 802.1D MAC learning bridge |
+| **L1 Hub** | `PacketFabric` | Virtual ports | `p1`..`p6` | Shared-medium repeater |
 
 Deterministic locally administered MAC addresses (`52:54:00:XX:YY:ZZ` or project-scoped `02:EL:XX:YY:ZZ:PP`) are assigned per `(node_id, port_index)` so guest interface ordering corresponds predictably to topology ports (`0 -> eth0 / vtnet0 / vio0 / vioif0`).
 
@@ -147,25 +162,25 @@ Every link supports two simultaneous tap sinks:
 
 ---
 
-## 6. Dual Console Architecture & HVF Virtualization
+## 6. Multi-Architecture QEMU Engine & Dual Console Architecture
 
-### 6.1 Machine & Firmware Baseline
-On Apple Silicon (`aarch64`), every QEMU VM launches with hardware virtualization via `Hypervisor.framework`:
+### 6.1 Per-Architecture Machine, Acceleration & Firmware Selection
+`vm_manager::build_qemu_args` dynamically selects the QEMU binary, machine model, hardware vs. MTTCG acceleration, firmware, display adapter, and disk/NIC buses based on `(host_arch, guest_arch, firmware, disk_bus, nic_model)`:
 
-```text
-qemu-system-aarch64 \
-  -name <node_name> \
-  -M virt,highmem=on \
-  -accel hvf \
-  -cpu host \
-  -smp <vcpus> \
-  -m <memory_mb>M \
-  -drive if=pflash,format=raw,readonly=on,file=<edk2-aarch64-code.fd> \
-  -drive if=pflash,format=raw,file=<node_efivars.fd> \
-  -drive if=virtio,format=qcow2,file=<overlay.qcow2>
-```
+- **`GuestArch::Aarch64` (`qemu-system-aarch64`)**:
+  - Machine: `-M virt,highmem=on`
+  - Acceleration: `-accel hvf -cpu host` on Apple Silicon (`aarch64` host), or `-accel tcg,thread=multi,tb-size=512 -cpu max` on Intel Macs.
+  - Firmware & Display: Read-only `edk2-aarch64-code.fd` pflash + `-device ramfb` + `qemu-xhci` USB keyboard/tablet.
+- **`GuestArch::X86_64` (`qemu-system-x86_64`)**:
+  - Machine: `-M q35`
+  - Acceleration: `-accel hvf -cpu host` on Intel Macs (`x86_64` host), or `-accel tcg,thread=multi,tb-size=1024 -cpu max` on Apple Silicon.
+  - Firmware & Display: SeaBIOS (default when `firmware = "bios"`, ideal for OPNsense `nano`, VyOS, OmniOS, DragonFly BSD) or `edk2-x86_64-code.fd` pflash (`firmware = "uefi"`), paired with `-vga std` + `qemu-xhci` USB tablet.
+- **`GuestArch::I386` (`qemu-system-i386`)**:
+  - Machine: `-M pc -accel tcg -cpu pentium3` with `-vga std`, supporting RAM footprints down to `16–32 MB`, Legacy IDE (`-hda`/`-cdrom`), and classic Crynwr packet-driver NICs (`pcnet`, `ne2k_pci`, `rtl8139`) for FreeDOS + mTCP.
+- **`GuestArch::Riscv64` (`qemu-system-riscv64`)**:
+  - Machine: `-M virt -accel tcg,thread=multi -cpu rv64 -bios default` (OpenSBI) + `-device virtio-gpu-pci`.
 
-*(On Intel Macs (`x86_64`), the VM builder adapts to `qemu-system-x86_64 -M q35 -accel hvf -cpu host` with `edk2-x86_64-code.fd` when running native `x86_64` guests, or `qemu-system-aarch64 -M virt,highmem=on -accel tcg,tb-size=512 -cpu max` when emulating ARM64.)*
+All newly added fields (`arch`, `nic_model`, `firmware`, `disk_bus`) use `#[serde(default)]` across `WorkspaceNode`, `WorkspacePort`, `OsProfile`, `BaseTemplateInfo`, and `SpawnVmRequest` to guarantee **100% backward compatibility** with Phase 2 `topology.toml` projects, Phase 5 Academy labs, and `scripts/prepare_library.sh` templates.
 
 ### 6.2 Dual Console Channels (Always Provisioned)
 Many BSD installers (`FreeBSD`, `OpenBSD`, `NetBSD`) boot into the EFI framebuffer console by default before `/boot/loader.conf` or `/etc/boot.conf` is configured for serial output. Therefore, **every VM** exposes two consoles simultaneously:
@@ -310,8 +325,19 @@ Before starting VMs, wiretaps, or flow inspections, the Rust `env_doctor` module
 
 | Dependency | Probe Locations | Required For | Severity if Missing |
 | :--- | :--- | :--- | :--- |
-| **`qemu-system-aarch64`** | `/opt/homebrew/bin`, `/usr/local/bin`, `PATH` | Booting ARM64 HVF virtual machines | Amber warning (blocks VM start) |
-| **`qemu-img`** | `/opt/homebrew/bin`, `/usr/local/bin`, `PATH` | Creating CoW `qcow2` overlays | Amber warning (blocks VM creation) |
-| **`edk2-aarch64-code.fd`** | `/opt/homebrew/share/qemu/`, `/usr/local/share/qemu/` | UEFI boot firmware for `-M virt` | Amber warning (blocks UEFI VM start) |
+| **`qemu-system-aarch64`** | `/opt/homebrew/bin`, `/usr/local/bin`, `PATH` | Booting ARM64 HVF virtual machines | Amber warning (blocks ARM64 VM start) |
+| **`qemu-system-{x86_64,i386,riscv64}`** | `/opt/homebrew/bin`, `/usr/local/bin`, `PATH` | Multi-arch TCG/HVF VMs (OPNsense, pfSense, VyOS, OmniOS, DragonFly, Haiku, FreeDOS) | Amber warning (blocks non-ARM64 VM start) |
+| **`qemu-img`** | `/opt/homebrew/bin`, `/usr/local/bin`, `PATH` | Creating CoW `qcow2` overlays & converting downloaded raw images | Amber warning (blocks VM creation) |
+| **`edk2-{aarch64,x86_64}-code.fd`** | `/opt/homebrew/share/qemu/`, `/usr/local/share/qemu/` | UEFI boot firmware for `-M virt` and `-M q35` | Amber warning (blocks UEFI VM start) |
 | **`Wireshark`** | `/Applications/Wireshark.app/Contents/MacOS/Wireshark`, `wireshark`/`tshark` in `/opt/homebrew/bin`, `/usr/local/bin`, `PATH` | Live FIFO wiretapping (`Wireshark.app`) / CLI capture inspection | Amber warning (optional; `.pcap` file capture still works natively) |
 | **`python3` / `uv`** | `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`, `PATH` | Isolated `tcpflowy` environment & Flow Inspector | Amber warning (optional; disables in-app `tcpflowy` inspector until installed) |
+
+---
+
+## 10. On-Demand OS Catalog & `.staging/` Download Pipeline (`catalog.rs`)
+
+`src-tauri/src/catalog.rs` and `StorageLibraryModal.tsx` provide an integrated **Storage & 15-OS Library Manager**:
+1. **External-SSD-Safe `.staging/` Streaming:** Downloads, checksum checks (e.g. OpenBSD `SHA256`), archive extractions (`.xz`, `.gz`, `.bz2`, `.zip`), and `qemu-img convert -O qcow2` operations execute strictly inside `{active_storage_root}/.staging/` rather than `/tmp`, preventing internal macOS disk exhaustion when users target an external `/Volumes/...` SSD.
+2. **Real-Time Progress & Cancellation:** Emits `"catalog://download-progress"` events (`stage`, `bytesDownloaded`, `totalBytes`, `percent`, `message`) every 220 ms and supports instant task cancellation with deterministic `.staging/` cleanup.
+3. **1-Click Guided Template Setup & Auto-Promotion:** For installer-delivered OSes (OpenBSD `install76.img`, VyOS, DragonFly BSD, Haiku, FreeDOS), `catalog_launch_guided_setup` creates a target `.qcow2` disk, boots the installer with Serial + VNC attached, and registers a `FinalizeTemplateOnExit` hook in `VmManager`. Upon clean guest shutdown (`halt -p` / `poweroff`) with a populated disk (`> 2 MB`), Etherloom automatically detaches the installer, writes `<slug>-<arch>-base.qcow2.etherloom-template.json`, and locks the Golden Template to POSIX `0444` read-only.
+4. **Reference-Checked Deletion:** Before deleting any template, `find_referencing_projects` inspects `.qcow2` overlays across `projects/*.etherloom/overlays/` via `qemu-img info` and warns the user if any saved topologies depend on that backing file.

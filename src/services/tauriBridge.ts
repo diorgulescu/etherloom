@@ -7,7 +7,9 @@ import type {
   BaseTemplateInfo,
   CaptureFileInfo,
   CatalogComponent,
+  CatalogDownloadProgressEvent,
   ConsoleSessionEndpoints,
+  DeleteCatalogImageResult,
   DiskInfo,
   DiskTelemetry,
   DissectPcapRequest,
@@ -19,6 +21,7 @@ import type {
   LiveWiresharkSessionInfo,
   MacTableEntry,
   NodeDiskStatusDto,
+  OsCatalogEntryDto,
   OsProfile,
   OverlayRebaseReport,
   OverlayTemplateBinding,
@@ -178,10 +181,14 @@ export async function fetchEnvStatus(forceRefresh = false): Promise<EnvDoctorRep
     templatesDir: "~/Library/Application Support/Etherloom/Library/templates",
     overallBadge: "warning",
     okCount: 0,
-    warningCount: 5,
+    warningCount: 6,
     qemuSystemAarch64: emptyProbe("qemu-system-aarch64"),
+    qemuSystemX86_64: emptyProbe("qemu-system-x86_64"),
+    qemuSystemI386: emptyProbe("qemu-system-i386"),
+    qemuSystemRiscv64: emptyProbe("qemu-system-riscv64"),
     qemuImg: emptyProbe("qemu-img"),
     edk2Aarch64Code: emptyProbe("edk2-aarch64-code.fd"),
+    edk2X86_64Code: emptyProbe("edk2-x86_64-code.fd"),
     wireshark: emptyProbe("Wireshark"),
     python3: emptyProbe("python3"),
     uv: emptyProbe("uv"),
@@ -190,7 +197,7 @@ export async function fetchEnvStatus(forceRefresh = false): Promise<EnvDoctorRep
         id: "qemu-system-aarch64",
         title: "QEMU System Emulator (qemu-system-aarch64)",
         category: "Hypervisor & Compute",
-        requiredFor: "Booting Linux, FreeBSD, OpenBSD & NetBSD guests with -accel hvf",
+        requiredFor: "Booting ARM64 Linux, BSD & Router guests with native -accel hvf",
         badge: "warning",
         found: false,
         path: null,
@@ -198,6 +205,19 @@ export async function fetchEnvStatus(forceRefresh = false): Promise<EnvDoctorRep
         remediation: "brew install qemu",
         details: "Run inside Tauri desktop shell to execute live host probe",
         searchedPaths: ["/opt/homebrew/bin/qemu-system-aarch64", "/usr/local/bin/qemu-system-aarch64"],
+      },
+      {
+        id: "qemu-multi-arch",
+        title: "QEMU Multi-Architecture Emulators (x86_64 / i386 / riscv64)",
+        category: "Hypervisor & Compute",
+        requiredFor: "OPNsense, pfSense, VyOS, OmniOS, DragonFly BSD, Haiku & FreeDOS",
+        badge: "warning",
+        found: false,
+        path: null,
+        version: null,
+        remediation: "brew install qemu",
+        details: "Installed automatically by Homebrew's `qemu` formula",
+        searchedPaths: ["/opt/homebrew/bin/qemu-system-x86_64", "/opt/homebrew/bin/qemu-system-i386"],
       },
       {
         id: "qemu-img",
@@ -466,6 +486,10 @@ export async function listOsProfiles(): Promise<OsProfile[]> {
         id: "alpine-linux",
         name: "Alpine Linux",
         guestFamily: "linux",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
         nicPrefix: "eth",
         nicNamingPattern: "eth{n}",
         altNicNamingPattern: null,
@@ -478,6 +502,10 @@ export async function listOsProfiles(): Promise<OsProfile[]> {
         id: "debian-linux",
         name: "Debian / Generic Linux",
         guestFamily: "linux",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
         nicPrefix: "eth",
         nicNamingPattern: "enp0s{n} / eth{n}",
         altNicNamingPattern: "enp0s{n}",
@@ -490,21 +518,29 @@ export async function listOsProfiles(): Promise<OsProfile[]> {
         id: "freebsd",
         name: "FreeBSD",
         guestFamily: "freebsd",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
         nicPrefix: "vtnet",
         nicNamingPattern: "vtnet{n}",
-        altNicNamingPattern: null,
+        altNicNamingPattern: "em{n}",
         defaultRamMb: 512,
         defaultCpus: 2,
         recommendedDiskGb: 12,
-        notes: "FreeBSD ARM64 UEFI guest with virtio vtnet0..n",
+        notes: "FreeBSD ARM64 UEFI guest with virtio vtnet0..n (or em0..n)",
       },
       {
         id: "openbsd",
         name: "OpenBSD",
         guestFamily: "openbsd",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
         nicPrefix: "vio",
         nicNamingPattern: "vio{n}",
-        altNicNamingPattern: null,
+        altNicNamingPattern: "em{n}",
         defaultRamMb: 512,
         defaultCpus: 2,
         recommendedDiskGb: 8,
@@ -514,13 +550,177 @@ export async function listOsProfiles(): Promise<OsProfile[]> {
         id: "netbsd",
         name: "NetBSD",
         guestFamily: "netbsd",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
         nicPrefix: "vioif",
         nicNamingPattern: "vioif{n}",
-        altNicNamingPattern: null,
+        altNicNamingPattern: "wm{n}",
         defaultRamMb: 256,
         defaultCpus: 1,
         recommendedDiskGb: 6,
         notes: "NetBSD evbarm-aarch64 UEFI guest with npf & vioif0..n",
+      },
+      {
+        id: "openwrt",
+        name: "OpenWrt",
+        guestFamily: "linux",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "eth",
+        nicNamingPattern: "eth{n}",
+        altNicNamingPattern: null,
+        defaultRamMb: 128,
+        defaultCpus: 1,
+        recommendedDiskGb: 2,
+        notes: "Ultra-fast embedded router (UCI, nftables, LuCI)",
+      },
+      {
+        id: "mikrotik-chr",
+        name: "MikroTik RouterOS CHR",
+        guestFamily: "linux",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "ether",
+        nicNamingPattern: "ether{n+1}",
+        altNicNamingPattern: null,
+        defaultRamMb: 256,
+        defaultCpus: 2,
+        recommendedDiskGb: 2,
+        notes: "MikroTik Cloud Hosted Router v7 ARM64 (ether1..n)",
+      },
+      {
+        id: "vyos",
+        name: "VyOS",
+        guestFamily: "linux",
+        arch: "x86_64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "bios",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "eth",
+        nicNamingPattern: "eth{n}",
+        altNicNamingPattern: null,
+        defaultRamMb: 1024,
+        defaultCpus: 2,
+        recommendedDiskGb: 8,
+        notes: "Enterprise Juniper-style CLI router (FRRouting BGP/OSPF/MPLS)",
+      },
+      {
+        id: "opnsense",
+        name: "OPNsense",
+        guestFamily: "freebsd",
+        arch: "x86_64",
+        defaultNicModel: "e1000",
+        defaultFirmware: "bios",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "em",
+        nicNamingPattern: "em{n} / vtnet{n}",
+        altNicNamingPattern: "vtnet{n}",
+        defaultRamMb: 2048,
+        defaultCpus: 2,
+        recommendedDiskGb: 16,
+        notes: "HardenedBSD firewall appliance (nano serial image)",
+      },
+      {
+        id: "pfsense",
+        name: "pfSense CE",
+        guestFamily: "freebsd",
+        arch: "x86_64",
+        defaultNicModel: "e1000",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "em",
+        nicNamingPattern: "em{n} / vtnet{n}",
+        altNicNamingPattern: "vtnet{n}",
+        defaultRamMb: 2048,
+        defaultCpus: 2,
+        recommendedDiskGb: 16,
+        notes: "Classic FreeBSD pf enterprise firewall appliance",
+      },
+      {
+        id: "9front",
+        name: "9front (Plan 9)",
+        guestFamily: "other",
+        arch: "aarch64",
+        defaultNicModel: "virtio-net-pci",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "/net/ether",
+        nicNamingPattern: "/net/ether{n}",
+        altNicNamingPattern: null,
+        defaultRamMb: 512,
+        defaultCpus: 2,
+        recommendedDiskGb: 4,
+        notes: "Bell Labs Plan 9 distributed OS (/net/ipifc)",
+      },
+      {
+        id: "omnios",
+        name: "OmniOS (Illumos)",
+        guestFamily: "other",
+        arch: "x86_64",
+        defaultNicModel: "e1000",
+        defaultFirmware: "bios",
+        defaultDiskBus: "virtio-blk",
+        nicPrefix: "e1000g",
+        nicNamingPattern: "e1000g{n} / vioif{n}",
+        altNicNamingPattern: "vioif{n}",
+        defaultRamMb: 2048,
+        defaultCpus: 2,
+        recommendedDiskGb: 16,
+        notes: "OpenSolaris/Illumos Crossbow (dladm/ipadm, DTrace, Zones)",
+      },
+      {
+        id: "dragonflybsd",
+        name: "DragonFly BSD",
+        guestFamily: "freebsd",
+        arch: "x86_64",
+        defaultNicModel: "e1000",
+        defaultFirmware: "bios",
+        defaultDiskBus: "ahci",
+        nicPrefix: "em",
+        nicNamingPattern: "em{n} / vtnet{n}",
+        altNicNamingPattern: "vtnet{n}",
+        defaultRamMb: 1024,
+        defaultCpus: 2,
+        recommendedDiskGb: 12,
+        notes: "LWKT per-CPU network stack & HAMMER2 filesystem",
+      },
+      {
+        id: "haiku",
+        name: "Haiku OS",
+        guestFamily: "other",
+        arch: "x86_64",
+        defaultNicModel: "e1000",
+        defaultFirmware: "uefi",
+        defaultDiskBus: "ahci",
+        nicPrefix: "/dev/net/ipro1000/",
+        nicNamingPattern: "/dev/net/ipro1000/{n}",
+        altNicNamingPattern: null,
+        defaultRamMb: 1024,
+        defaultCpus: 2,
+        recommendedDiskGb: 8,
+        notes: "BeOS spiritual successor with graphical desktop over VNC",
+      },
+      {
+        id: "freedos",
+        name: "FreeDOS + mTCP",
+        guestFamily: "other",
+        arch: "i386",
+        defaultNicModel: "pcnet",
+        defaultFirmware: "bios",
+        defaultDiskBus: "ide",
+        nicPrefix: "PCNTPK",
+        nicNamingPattern: "PCNTPK 0x60",
+        altNicNamingPattern: "NE2000 0x60",
+        defaultRamMb: 32,
+        defaultCpus: 1,
+        recommendedDiskGb: 1,
+        notes: "16/32-bit DOS Crynwr packet drivers + mTCP userspace stack",
       },
     ];
   }
@@ -1448,11 +1648,14 @@ const BROWSER_FALLBACK_LABS: AcademyLabSummary[] = [
     nodeCount: 2,
     linkCount: 1,
     stepCount: 4,
+    requiredCatalogIds: ["alpine-linux"],
     requiredTemplates: [
       {
+        catalogId: "alpine-linux",
         osProfileId: "alpine-linux",
         osProfileName: "Alpine Linux",
         guestFamily: "linux",
+        arch: "aarch64",
         satisfied: true,
         matchedTemplateId: "tpl-alpine",
         matchedTemplateName: "Alpine Linux 3.20",
@@ -1461,11 +1664,161 @@ const BROWSER_FALLBACK_LABS: AcademyLabSummary[] = [
     allTemplatesReady: true,
     sourceKind: "builtin",
   },
+  {
+    id: "06-freedos-mtcp-zero-noise",
+    number: 6,
+    title: "Zero-Noise ARP & TCP Dissection with FreeDOS (mTCP)",
+    subtitle:
+      "Eliminate modern OS background chatter completely by pairing 32-bit FreeDOS (PCNTPK 0x60 + mTCP) with an IPv6-quieted Alpine server—capturing the exact 4 frames of ARP+ICMP and a pure TCP stream in tcpflowy.",
+    difficulty: "Beginner",
+    estimatedMinutes: 20,
+    tags: ["Zero-Noise", "FreeDOS i386", "ARP", "TCP Internals", "tcpflowy"],
+    nodeCount: 2,
+    linkCount: 1,
+    stepCount: 4,
+    requiredCatalogIds: ["freedos", "alpine-linux"],
+    requiredTemplates: [
+      {
+        catalogId: "freedos",
+        osProfileId: "freedos",
+        osProfileName: "FreeDOS + mTCP",
+        guestFamily: "other",
+        arch: "i386",
+        satisfied: false,
+        matchedTemplateId: null,
+        matchedTemplateName: null,
+      },
+      {
+        catalogId: "alpine-linux",
+        osProfileId: "alpine-linux",
+        osProfileName: "Alpine Linux",
+        guestFamily: "linux",
+        arch: "aarch64",
+        satisfied: true,
+        matchedTemplateId: "tpl-alpine",
+        matchedTemplateName: "Alpine Linux 3.20",
+      },
+    ],
+    allTemplatesReady: false,
+    sourceKind: "builtin",
+  },
+  {
+    id: "07-openwrt-8021q-vlans",
+    number: 7,
+    title: "802.1Q VLAN Segmentation, Trunking & Inter-VLAN Routing on OpenWrt",
+    subtitle:
+      "Configure modern OpenWrt UCI bridge-vlan filtering (no legacy swconfig!), prove L2 broadcast isolation, capture double-tagged 802.1Q frames on a trunk wire, and enforce fw4/nftables zone rules.",
+    difficulty: "Intermediate",
+    estimatedMinutes: 30,
+    tags: ["802.1Q VLANs", "OpenWrt ARM64", "Bridge-VLAN / DSA", "L2 Isolation"],
+    nodeCount: 4,
+    linkCount: 3,
+    stepCount: 4,
+    requiredCatalogIds: ["openwrt", "alpine-linux"],
+    requiredTemplates: [
+      {
+        catalogId: "openwrt",
+        osProfileId: "openwrt",
+        osProfileName: "OpenWrt",
+        guestFamily: "linux",
+        arch: "aarch64",
+        satisfied: false,
+        matchedTemplateId: null,
+        matchedTemplateName: null,
+      },
+      {
+        catalogId: "alpine-linux",
+        osProfileId: "alpine-linux",
+        osProfileName: "Alpine Linux",
+        guestFamily: "linux",
+        arch: "aarch64",
+        satisfied: true,
+        matchedTemplateId: "tpl-alpine",
+        matchedTemplateName: "Alpine Linux 3.20",
+      },
+    ],
+    allTemplatesReady: false,
+    sourceKind: "builtin",
+  },
+  {
+    id: "08-mikrotik-openbsd-ebgp",
+    number: 8,
+    title:
+      "Multi-Vendor eBGP Peering & Route Failover: MikroTik CHR v7 ↔ OpenBSD (OpenBGPD)",
+    subtitle:
+      "Establish RFC 8212-compliant eBGP sessions over TCP/179 between MikroTik RouterOS v7 (AS 65001) and OpenBSD OpenBGPD (AS 65002), dissect BGP OPEN/UPDATE/KEEPALIVE in tcpflowy, and test live Cut Cable failover.",
+    difficulty: "Advanced",
+    estimatedMinutes: 35,
+    tags: ["eBGP", "MikroTik CHR v7", "OpenBSD OpenBGPD", "RFC 8212", "TCP/179"],
+    nodeCount: 4,
+    linkCount: 4,
+    stepCount: 4,
+    requiredCatalogIds: ["mikrotik-chr", "openbsd", "alpine-linux"],
+    requiredTemplates: [
+      {
+        catalogId: "mikrotik-chr",
+        osProfileId: "mikrotik-chr",
+        osProfileName: "MikroTik RouterOS CHR",
+        guestFamily: "linux",
+        arch: "aarch64",
+        satisfied: false,
+        matchedTemplateId: null,
+        matchedTemplateName: null,
+      },
+      {
+        catalogId: "openbsd",
+        osProfileId: "openbsd",
+        osProfileName: "OpenBSD",
+        guestFamily: "openbsd",
+        arch: "aarch64",
+        satisfied: false,
+        matchedTemplateId: null,
+        matchedTemplateName: null,
+      },
+      {
+        catalogId: "alpine-linux",
+        osProfileId: "alpine-linux",
+        osProfileName: "Alpine Linux",
+        guestFamily: "linux",
+        arch: "aarch64",
+        satisfied: true,
+        matchedTemplateId: "tpl-alpine",
+        matchedTemplateName: "Alpine Linux 3.20",
+      },
+    ],
+    allTemplatesReady: false,
+    sourceKind: "builtin",
+  },
 ];
+
+function syncBrowserFallbackLabReadiness(): AcademyLabSummary[] {
+  return BROWSER_FALLBACK_LABS.map((lab) => {
+    const updatedReqs = lab.requiredTemplates.map((req) => {
+      const catId = req.catalogId ?? req.osProfileId;
+      const catEntry = BROWSER_FALLBACK_OS_CATALOG.find(
+        (e) => e.id === catId || e.osProfileId === req.osProfileId
+      );
+      if (catEntry && catEntry.availability === "ready") {
+        return {
+          ...req,
+          satisfied: true,
+          matchedTemplateId: catEntry.templateId ?? `tpl-${catId}`,
+          matchedTemplateName: catEntry.name,
+        };
+      }
+      return req;
+    });
+    return {
+      ...lab,
+      requiredTemplates: updatedReqs,
+      allTemplatesReady: updatedReqs.every((r) => r.satisfied),
+    };
+  });
+}
 
 export async function listAcademyLabs(): Promise<AcademyLabSummary[]> {
   if (!isTauriRuntime()) {
-    return BROWSER_FALLBACK_LABS;
+    return syncBrowserFallbackLabReadiness();
   }
   return invoke<AcademyLabSummary[]>("academy_list_labs");
 }
@@ -1574,5 +1927,811 @@ export async function instantiateAcademyLab(
   return invoke<InstantiatedLabDto>("academy_instantiate_lab", {
     labId,
     resetClean,
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 6: Curated 15-OS Catalog & On-Demand Image Download Manager IPC Client
+// -----------------------------------------------------------------------------
+
+const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
+  {
+    id: "alpine-linux",
+    name: "Alpine Linux",
+    version: "3.21 Cloud ARM64",
+    category: "Linux",
+    guestFamily: "linux",
+    osProfileId: "alpine-linux",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "eth0, eth1 …",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 1,
+    defaultRamMb: 256,
+    recommendedDiskGb: 4,
+    estimatedDownloadMb: 58,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/nocloud_alpine-3.21.3-aarch64-uefi-tiny-r0.qcow2",
+    checksumUrl: null,
+    officialSiteUrl: "https://alpinelinux.org/cloud/",
+    defaultCredentials: "root (passwordless on serial ttyAMA0)",
+    summary:
+      "Featherweight musl + BusyBox Linux router & service host booting in ~2 seconds via native ARM64 HVF.",
+    quirksAndTips: [
+      "Interfaces enumerate predictably as eth0, eth1 in PCI slot order.",
+      "Configure IPs instantly via `ip addr add 10.0.1.10/24 dev eth0 && ip link set eth0 up`.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "debian-linux",
+    name: "Debian Cloud",
+    version: "12 Bookworm ARM64",
+    category: "Linux",
+    guestFamily: "linux",
+    osProfileId: "debian-linux",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "enp0s1 / eth0 …",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 512,
+    recommendedDiskGb: 10,
+    estimatedDownloadMb: 340,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-arm64.qcow2",
+    checksumUrl: null,
+    officialSiteUrl: "https://cloud.debian.org/images/cloud/",
+    defaultCredentials: "root (passwordless console on nocloud image)",
+    summary:
+      "Full glibc + systemd Debian 12 nocloud image ideal for FRRouting, WireGuard, nftables, and Python/Go services.",
+    quirksAndTips: [
+      "The `nocloud` variant logs `root` in directly on serial console without requiring cloud-init seed ISOs.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "freebsd",
+    name: "FreeBSD",
+    version: "14.2-RELEASE ARM64",
+    category: "BSD Family",
+    guestFamily: "freebsd",
+    osProfileId: "freebsd",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "vtnet0, vtnet1 (or em0 with e1000)",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 512,
+    recommendedDiskGb: 12,
+    estimatedDownloadMb: 620,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://download.freebsd.org/releases/VM-IMAGES/14.2-RELEASE/aarch64/Latest/FreeBSD-14.2-RELEASE-arm64-aarch64.qcow2.xz",
+    checksumUrl: null,
+    officialSiteUrl: "https://www.freebsd.org/where/",
+    defaultCredentials: "root (no password)",
+    summary:
+      "Official FreeBSD 14.2 ARM64 VM image featuring VNET jails, pf/ipfw, dummynet, CARP, and ZFS.",
+    quirksAndTips: [
+      "VirtIO NICs appear as `vtnet0`, `vtnet1`; Intel e1000 NICs appear as `em0`, `em1`.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "openbsd",
+    name: "OpenBSD",
+    version: "7.6 ARM64",
+    category: "BSD Family",
+    guestFamily: "openbsd",
+    osProfileId: "openbsd",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "vio0, vio1 (or em0 with e1000)",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 512,
+    recommendedDiskGb: 8,
+    estimatedDownloadMb: 495,
+    deliveryKind: "guided_installer",
+    downloadUrl: "https://cdn.openbsd.org/pub/OpenBSD/7.6/arm64/install76.img",
+    checksumUrl: "https://cdn.openbsd.org/pub/OpenBSD/7.6/arm64/SHA256",
+    officialSiteUrl: "https://www.openbsd.org/arm64.html",
+    defaultCredentials: "root (set during 2-minute installer)",
+    summary:
+      "Reference platform for pf stateful firewalling, CARP + pfsync HA, OpenBGPD, ospfd, and relayd.",
+    quirksAndTips: [
+      "OpenBSD ships verified installer images (`install76.img` + `SHA256`) rather than pre-baked cloud disks.",
+      "Click 'Launch Guided Template Setup' — at `boot>` type `set tty com0`, install to `sd0`, and run `halt -p` to auto-promote!",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "netbsd",
+    name: "NetBSD",
+    version: "10.1 evbarm-aarch64",
+    category: "BSD Family",
+    guestFamily: "netbsd",
+    osProfileId: "netbsd",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "vioif0, vioif1 (or wm0 with e1000)",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 1,
+    defaultRamMb: 256,
+    recommendedDiskGb: 6,
+    estimatedDownloadMb: 330,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/evbarm-aarch64/binary/gzimg/arm64.img.gz",
+    checksumUrl: null,
+    officialSiteUrl: "https://wiki.netbsd.org/ports/evbarm/",
+    defaultCredentials: "root (no password)",
+    summary:
+      "Clean, portable BSD UNIX featuring the NPF packet filter, rump kernels, and pre-installed bootable `arm64.img`.",
+    quirksAndTips: [
+      "Automatically resizes root FFS partition on first UEFI boot.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "openwrt",
+    name: "OpenWrt",
+    version: "23.05.5 armsr/armv8",
+    category: "Routers & Firewalls",
+    guestFamily: "linux",
+    osProfileId: "openwrt",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "eth0 (br-lan), eth1 (wan)",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 1,
+    defaultRamMb: 128,
+    recommendedDiskGb: 2,
+    estimatedDownloadMb: 14,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://downloads.openwrt.org/releases/23.05.5/targets/armsr/armv8/openwrt-23.05.5-armsr-armv8-generic-ext4-combined-efi.img.gz",
+    checksumUrl: null,
+    officialSiteUrl: "https://openwrt.org/",
+    defaultCredentials: "root (press Enter on serial for instant root shell)",
+    summary:
+      "14 MB ARM64 embedded router OS with UCI declarative config, fw4/nftables, dnsmasq, and 802.1Q VLAN bridges.",
+    quirksAndTips: [
+      "Press Enter in the serial terminal after boot messages settle to open root ash shell.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "mikrotik-chr",
+    name: "MikroTik RouterOS CHR",
+    version: "7.16.2 Stable ARM64",
+    category: "Routers & Firewalls",
+    guestFamily: "linux",
+    osProfileId: "mikrotik-chr",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "ether1, ether2, ether3 (1-based)",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 256,
+    recommendedDiskGb: 2,
+    estimatedDownloadMb: 55,
+    deliveryKind: "direct_template",
+    downloadUrl: "https://download.mikrotik.com/routeros/7.16.2/chr-7.16.2-arm64.img.zip",
+    checksumUrl: null,
+    officialSiteUrl: "https://mikrotik.com/download",
+    defaultCredentials: "admin / (blank password — prompts on first login)",
+    summary:
+      "Native ARM64 Cloud Hosted Router running at full Apple Silicon HVF speed with BGP, OSPF, MPLS, VXLAN, and WireGuard.",
+    quirksAndTips: [
+      "Interfaces are 1-indexed (`ether1`, `ether2`). Free tier supports unlimited lab features (1 Mbps/port cap).",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "vyos",
+    name: "VyOS",
+    version: "1.5 Stream Rolling (x86_64)",
+    category: "Routers & Firewalls",
+    guestFamily: "linux",
+    osProfileId: "vyos",
+    arch: "x86_64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "eth0, eth1, eth2 …",
+    firmware: "bios",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 1024,
+    recommendedDiskGb: 8,
+    estimatedDownloadMb: 490,
+    deliveryKind: "guided_installer",
+    downloadUrl:
+      "https://github.com/vyos/vyos-rolling-nightly-builds/releases/latest/download/vyos-1.5-rolling-amd64.iso",
+    checksumUrl: null,
+    officialSiteUrl: "https://vyos.io/",
+    defaultCredentials: "vyos / vyos",
+    summary:
+      "Juniper-inspired (`configure` / `set` / `commit`) enterprise router OS built on Debian + FRRouting.",
+    quirksAndTips: [
+      "Boots live from ISO (`vyos`/`vyos`); run `install image` then `poweroff` in Guided Setup to create a permanent Golden Template.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "9front",
+    name: "9front (Plan 9)",
+    version: "arm64.img.gz",
+    category: "Research, UNIX & Retro",
+    guestFamily: "other",
+    osProfileId: "9front",
+    arch: "aarch64",
+    nicModel: "virtio-net-pci",
+    nicNamingHint: "/net/ether0, /net/ether1",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 512,
+    recommendedDiskGb: 4,
+    estimatedDownloadMb: 380,
+    deliveryKind: "direct_template",
+    downloadUrl: "https://9front.org/iso/9front-10931.arm64.img.gz",
+    checksumUrl: null,
+    officialSiteUrl: "https://9front.org/",
+    defaultCredentials: "glenda (autologin)",
+    summary:
+      "Community fork of Bell Labs' Plan 9 where the entire network stack is a synthetic `/net` filesystem!",
+    quirksAndTips: [
+      "Dial TCP in pure shell without sockets: `ip/ipconfig` and inspect `/net/ipifc`.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "opnsense",
+    name: "OPNsense",
+    version: "24.7 Nano Serial (amd64)",
+    category: "Routers & Firewalls",
+    guestFamily: "freebsd",
+    osProfileId: "opnsense",
+    arch: "x86_64",
+    nicModel: "e1000",
+    nicNamingHint: "em0 (LAN), em1 (WAN)",
+    firmware: "bios",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 2048,
+    recommendedDiskGb: 16,
+    estimatedDownloadMb: 510,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://pkg.opnsense.org/releases/24.7/OPNsense-24.7-nano-amd64.img.bz2",
+    checksumUrl: null,
+    officialSiteUrl: "https://opnsense.org/download/",
+    defaultCredentials: "root / opnsense",
+    summary:
+      "Pre-installed `nano` serial appliance of OPNsense — boots straight to console menu & HTTPS WebGUI with zero installation.",
+    quirksAndTips: [
+      "Uses `e1000` (`em0`, `em1`) by default for rock-solid FreeBSD checksum offload compatibility.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "pfsense",
+    name: "pfSense CE",
+    version: "2.7.2 CE (amd64)",
+    category: "Routers & Firewalls",
+    guestFamily: "freebsd",
+    osProfileId: "pfsense",
+    arch: "x86_64",
+    nicModel: "e1000",
+    nicNamingHint: "em0 (WAN), em1 (LAN)",
+    firmware: "uefi",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 2048,
+    recommendedDiskGb: 16,
+    estimatedDownloadMb: 790,
+    deliveryKind: "local_import_only",
+    downloadUrl: null,
+    checksumUrl: null,
+    officialSiteUrl: "https://www.pfsense.org/download/",
+    defaultCredentials: "admin / pfsense",
+    summary:
+      "Classic FreeBSD pf enterprise firewall appliance (import your downloaded Netgate ISO/memstick via Local File Import).",
+    quirksAndTips: [
+      "Netgate distributes pfSense CE through their free storefront checkout rather than static mirror URLs — use 'Import Local File' below.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "omnios",
+    name: "OmniOS (Illumos)",
+    version: "r151052 LTS Cloud (x86_64)",
+    category: "Research, UNIX & Retro",
+    guestFamily: "other",
+    osProfileId: "omnios",
+    arch: "x86_64",
+    nicModel: "e1000",
+    nicNamingHint: "e1000g0, e1000g1 (dladm / ipadm)",
+    firmware: "bios",
+    diskBus: "virtio-blk",
+    defaultCpus: 2,
+    defaultRamMb: 2048,
+    recommendedDiskGb: 16,
+    estimatedDownloadMb: 460,
+    deliveryKind: "direct_template",
+    downloadUrl:
+      "https://downloads.omnios.org/media/stable/omnios-r151052.cloud.qcow2.xz",
+    checksumUrl: null,
+    officialSiteUrl: "https://omnios.org/",
+    defaultCredentials: "root (no password on console)",
+    summary:
+      "OpenSolaris / Illumos distribution showcasing Crossbow (`dladm` VNICs/etherstubs, `ipadm`), DTrace, ZFS, and Zones.",
+    quirksAndTips: [
+      "Create virtual NICs & switches inside a single host with `dladm create-etherstub` and `dladm create-vnic`.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "dragonflybsd",
+    name: "DragonFly BSD",
+    version: "6.4.0-RELEASE (x86_64)",
+    category: "BSD Family",
+    guestFamily: "freebsd",
+    osProfileId: "dragonflybsd",
+    arch: "x86_64",
+    nicModel: "e1000",
+    nicNamingHint: "em0, em1",
+    firmware: "bios",
+    diskBus: "ahci",
+    defaultCpus: 2,
+    defaultRamMb: 1024,
+    recommendedDiskGb: 12,
+    estimatedDownloadMb: 360,
+    deliveryKind: "guided_installer",
+    downloadUrl:
+      "https://avalon.dragonflybsd.org/iso-images/dfly-x86_64-6.4.0_REL.img.bz2",
+    checksumUrl: null,
+    officialSiteUrl: "https://www.dragonflybsd.org/",
+    defaultCredentials: "root (no password) or installer",
+    summary:
+      "Famous for lockless per-CPU LWKT network protocol threads and the HAMMER2 filesystem.",
+    quirksAndTips: [
+      "Defaults to AHCI SATA (`ad0` / `da0`) and Intel `e1000` (`em0`) for maximum hardware compatibility.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "haiku",
+    name: "Haiku OS",
+    version: "R1/beta5 (x86_64)",
+    category: "Research, UNIX & Retro",
+    guestFamily: "other",
+    osProfileId: "haiku",
+    arch: "x86_64",
+    nicModel: "e1000",
+    nicNamingHint: "/dev/net/ipro1000/0",
+    firmware: "uefi",
+    diskBus: "ahci",
+    defaultCpus: 2,
+    defaultRamMb: 1024,
+    recommendedDiskGb: 8,
+    estimatedDownloadMb: 820,
+    deliveryKind: "guided_installer",
+    downloadUrl:
+      "https://eu.hpkg.haiku-os.org/haiku/release/r1beta5/haiku-r1beta5-x86_64-anyboot.iso",
+    checksumUrl: null,
+    officialSiteUrl: "https://www.haiku-os.org/",
+    defaultCredentials: "user (graphical BeOS-style desktop via Embedded VNC)",
+    summary:
+      "Spiritual successor to BeOS — boots into an ultra-responsive graphical desktop inside Etherloom's VNC console tab.",
+    quirksAndTips: [
+      "Click 'Try Haiku' on the boot splash to launch a live desktop immediately or 'Install Haiku' to create a Golden Template.",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+  {
+    id: "freedos",
+    name: "FreeDOS + mTCP",
+    version: "1.3 LiveCD (i386 Retro)",
+    category: "Research, UNIX & Retro",
+    guestFamily: "other",
+    osProfileId: "freedos",
+    arch: "i386",
+    nicModel: "pcnet",
+    nicNamingHint: "PCNTPK INT=0x60",
+    firmware: "bios",
+    diskBus: "ide",
+    defaultCpus: 1,
+    defaultRamMb: 32,
+    recommendedDiskGb: 1,
+    estimatedDownloadMb: 410,
+    deliveryKind: "guided_installer",
+    downloadUrl:
+      "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/distributions/1.3/official/FD13-LiveCD.zip",
+    checksumUrl: null,
+    officialSiteUrl: "https://www.freedos.org/",
+    defaultCredentials: "Single-user DOS prompt (`C:\\>`)",
+    summary:
+      "Boots in under 1 second in 32 MB RAM! Teaches raw Ethernet packet drivers (`PCNTPKT 0x60`) and userspace mTCP.",
+    quirksAndTips: [
+      "Zero background multicast/IPv6/ARP chatter — when you run `ping.exe` or `htget.exe` in mTCP, Wireshark shows ONLY your exact frames!",
+    ],
+    availability: "not_downloaded",
+    templateId: null,
+    templatePath: null,
+    templateSizeBytes: null,
+    installerPath: null,
+    installerSizeBytes: null,
+    referencingProjects: [],
+  },
+];
+
+export async function pickCatalogDiskOrArchiveDialog(
+  defaultDir?: string
+): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  const selected = await open({
+    title: "Import Disk Image, Installer ISO, or Compressed Archive",
+    directory: false,
+    multiple: false,
+    defaultPath: defaultDir && !defaultDir.startsWith("~") ? defaultDir : undefined,
+    filters: [
+      {
+        name: "VM Disks, ISOs & Compressed Archives",
+        extensions: [
+          "qcow2",
+          "img",
+          "raw",
+          "iso",
+          "xz",
+          "gz",
+          "bz2",
+          "zip",
+          "vmdk",
+          "vdi",
+        ],
+      },
+    ],
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
+function normalizeCatalogEntryDto(
+  raw: Record<string, unknown>
+): OsCatalogEntryDto {
+  const deliveryRaw = String(raw.deliveryKind ?? "direct_template");
+  const deliveryKind =
+    deliveryRaw === "ready_to_boot" || deliveryRaw === "direct_template"
+      ? "direct_template"
+      : deliveryRaw === "guided_installer"
+      ? "guided_installer"
+      : "local_import_only";
+
+  return {
+    id: String(raw.id ?? ""),
+    name: String(raw.name ?? ""),
+    version: String(
+      raw.version ?? raw.upstreamSourceLabel ?? "Official Upstream"
+    ),
+    category: (raw.category as OsCatalogEntryDto["category"]) ?? "Linux",
+    guestFamily:
+      (raw.guestFamily as OsCatalogEntryDto["guestFamily"]) ?? "linux",
+    osProfileId: String(raw.osProfileId ?? raw.id ?? "alpine-linux"),
+    arch: (raw.arch as OsCatalogEntryDto["arch"]) ?? "aarch64",
+    nicModel:
+      (raw.nicModel as OsCatalogEntryDto["nicModel"]) ??
+      (raw.defaultNicModel as OsCatalogEntryDto["nicModel"]) ??
+      "virtio-net-pci",
+    nicNamingHint: String(
+      raw.nicNamingHint ?? raw.interfaceNaming ?? "eth0, eth1, …"
+    ),
+    firmware:
+      (raw.firmware as OsCatalogEntryDto["firmware"]) ??
+      (raw.defaultFirmware as OsCatalogEntryDto["firmware"]) ??
+      "uefi",
+    diskBus:
+      (raw.diskBus as OsCatalogEntryDto["diskBus"]) ??
+      (raw.defaultDiskBus as OsCatalogEntryDto["diskBus"]) ??
+      "virtio-blk",
+    defaultCpus: Number(raw.defaultCpus ?? raw.defaultVcpus ?? 1),
+    defaultRamMb: Number(raw.defaultRamMb ?? 256),
+    recommendedDiskGb: Number(raw.recommendedDiskGb ?? 4),
+    estimatedDownloadMb: Number(raw.estimatedDownloadMb ?? 100),
+    deliveryKind,
+    downloadUrl:
+      typeof raw.downloadUrl === "string"
+        ? raw.downloadUrl
+        : deliveryKind !== "local_import_only"
+        ? String(raw.officialUrl ?? raw.officialSiteUrl ?? "")
+        : null,
+    checksumUrl: typeof raw.checksumUrl === "string" ? raw.checksumUrl : null,
+    officialSiteUrl: String(raw.officialSiteUrl ?? raw.officialUrl ?? ""),
+    defaultCredentials: String(raw.defaultCredentials ?? ""),
+    summary: String(raw.summary ?? raw.tagline ?? ""),
+    quirksAndTips: Array.isArray(raw.quirksAndTips)
+      ? raw.quirksAndTips.map(String)
+      : [],
+    availability:
+      (raw.availability as OsCatalogEntryDto["availability"]) ??
+      "not_downloaded",
+    templateId:
+      typeof raw.templateId === "string"
+        ? raw.templateId
+        : typeof raw.installedTemplateId === "string"
+        ? raw.installedTemplateId
+        : null,
+    templatePath:
+      typeof raw.templatePath === "string"
+        ? raw.templatePath
+        : typeof raw.installedTemplatePath === "string"
+        ? raw.installedTemplatePath
+        : null,
+    templateSizeBytes:
+      typeof raw.templateSizeBytes === "number"
+        ? raw.templateSizeBytes
+        : typeof raw.installedSizeBytes === "number"
+        ? raw.installedSizeBytes
+        : null,
+    installerPath:
+      typeof raw.installerPath === "string"
+        ? raw.installerPath
+        : typeof raw.installerMediaPath === "string"
+        ? raw.installerMediaPath
+        : null,
+    installerSizeBytes:
+      typeof raw.installerSizeBytes === "number"
+        ? raw.installerSizeBytes
+        : typeof raw.installerMediaSizeBytes === "number"
+        ? raw.installerMediaSizeBytes
+        : null,
+    referencingProjects: Array.isArray(raw.referencingProjects)
+      ? raw.referencingProjects.map(String)
+      : [],
+  };
+}
+
+export async function listCatalogEntries(): Promise<OsCatalogEntryDto[]> {
+  if (!isTauriRuntime()) {
+    return BROWSER_FALLBACK_OS_CATALOG;
+  }
+  const raw = await invoke<Record<string, unknown>[]>("catalog_list_entries");
+  return raw.map(normalizeCatalogEntryDto);
+}
+
+export async function startCatalogDownload(
+  catalogId: string,
+  customUrl?: string | null
+): Promise<void> {
+  if (!isTauriRuntime()) {
+    const hit = BROWSER_FALLBACK_OS_CATALOG.find((e) => e.id === catalogId);
+    if (hit) {
+      hit.availability =
+        hit.deliveryKind === "guided_installer" ? "installer_ready" : "ready";
+      if (hit.availability === "ready") {
+        hit.templateId = `${catalogId}-${hit.arch}-base`;
+        hit.templatePath = `~/Library/Application Support/Etherloom/Library/templates/${catalogId}-${hit.arch}-base.qcow2`;
+        hit.templateSizeBytes = hit.estimatedDownloadMb * 1024 * 1024;
+      } else {
+        hit.installerPath = `~/Library/Application Support/Etherloom/Library/isos/${catalogId}-installer.img`;
+        hit.installerSizeBytes = hit.estimatedDownloadMb * 1024 * 1024;
+      }
+    }
+    return;
+  }
+  return invoke<void>("catalog_start_download", {
+    request: {
+      catalogId,
+      customUrl: customUrl?.trim() ? customUrl.trim() : null,
+    },
+  });
+}
+
+export async function cancelCatalogDownload(
+  catalogId: string
+): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return true;
+  }
+  return invoke<boolean>("catalog_cancel_download", { catalogId });
+}
+
+export async function importCatalogLocalFile(
+  catalogId: string,
+  sourcePath: string
+): Promise<OsCatalogEntryDto> {
+  if (!isTauriRuntime()) {
+    const hit =
+      BROWSER_FALLBACK_OS_CATALOG.find((e) => e.id === catalogId) ??
+      BROWSER_FALLBACK_OS_CATALOG[0];
+    hit.availability = sourcePath.endsWith(".iso") ? "installer_ready" : "ready";
+    return { ...hit };
+  }
+  const raw = await invoke<Record<string, unknown>>(
+    "catalog_import_local_file",
+    {
+      request: { catalogId, sourcePath },
+    }
+  );
+  return normalizeCatalogEntryDto(raw);
+}
+
+export async function deleteCatalogImage(
+  catalogId: string,
+  force = false
+): Promise<DeleteCatalogImageResult> {
+  if (!isTauriRuntime()) {
+    const hit = BROWSER_FALLBACK_OS_CATALOG.find((e) => e.id === catalogId);
+    if (hit) {
+      hit.availability = "not_downloaded";
+      hit.templateId = null;
+      hit.templatePath = null;
+      hit.templateSizeBytes = null;
+      hit.installerPath = null;
+      hit.installerSizeBytes = null;
+    }
+    return {
+      catalogId,
+      deletedFiles: [],
+      bytesFreed: 0,
+      referencingProjects: [],
+      blockedByReferences: false,
+    };
+  }
+  const raw = await invoke<Record<string, unknown>>("catalog_delete_image", {
+    catalogId,
+    force,
+  });
+  const refs = Array.isArray(raw.referencingProjects)
+    ? raw.referencingProjects.map(String)
+    : [];
+  const deleted = Boolean(raw.deleted ?? true);
+  return {
+    catalogId: String(raw.catalogId ?? catalogId),
+    deletedFiles: Array.isArray(raw.deletedFiles)
+      ? raw.deletedFiles.map(String)
+      : Array.isArray(raw.removedPaths)
+      ? raw.removedPaths.map(String)
+      : [],
+    bytesFreed: Number(raw.bytesFreed ?? 0),
+    referencingProjects: refs,
+    blockedByReferences:
+      typeof raw.blockedByReferences === "boolean"
+        ? raw.blockedByReferences
+        : !deleted && refs.length > 0,
+  };
+}
+
+export async function launchCatalogGuidedSetup(
+  catalogId: string
+): Promise<VmInstanceInfo> {
+  return invoke<VmInstanceInfo>("catalog_launch_guided_setup", { catalogId });
+}
+
+export async function revealInFinder(path: string): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("reveal_in_finder", { path });
+}
+
+export async function onCatalogDownloadProgress(
+  handler: (event: CatalogDownloadProgressEvent) => void
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) return () => {};
+  return listen<Record<string, unknown>>("catalog://download-progress", (e) => {
+    const p = e.payload;
+    const rawStage = String(p.stage ?? "downloading");
+    const stageLower = rawStage.toLowerCase();
+    const normalizedStage =
+      stageLower === "ready" || stageLower === "installerready"
+        ? "ready"
+        : stageLower === "cancelled"
+        ? "cancelled"
+        : stageLower === "error"
+        ? "error"
+        : stageLower;
+    handler({
+      catalogId: String(p.catalogId ?? ""),
+      stage: normalizedStage,
+      bytesDownloaded: Number(p.bytesDownloaded ?? 0),
+      totalBytes: typeof p.totalBytes === "number" ? p.totalBytes : null,
+      percent: typeof p.percent === "number" ? p.percent : 0,
+      message: String(p.message ?? ""),
+      error: typeof p.error === "string" ? p.error : null,
+    });
   });
 }

@@ -40,6 +40,21 @@ const BUILTIN_LAB_ASSETS: &[EmbeddedLabAsset] = &[
         lab_toml: include_str!("../../labs/05-tcp-handshakes-window-loss/lab.toml"),
         guide_md: include_str!("../../labs/05-tcp-handshakes-window-loss/guide.md"),
     },
+    EmbeddedLabAsset {
+        id: "06-freedos-mtcp-zero-noise",
+        lab_toml: include_str!("../../labs/06-freedos-mtcp-zero-noise/lab.toml"),
+        guide_md: include_str!("../../labs/06-freedos-mtcp-zero-noise/guide.md"),
+    },
+    EmbeddedLabAsset {
+        id: "07-openwrt-8021q-vlans",
+        lab_toml: include_str!("../../labs/07-openwrt-8021q-vlans/lab.toml"),
+        guide_md: include_str!("../../labs/07-openwrt-8021q-vlans/guide.md"),
+    },
+    EmbeddedLabAsset {
+        id: "08-mikrotik-openbsd-ebgp",
+        lab_toml: include_str!("../../labs/08-mikrotik-openbsd-ebgp/lab.toml"),
+        guide_md: include_str!("../../labs/08-mikrotik-openbsd-ebgp/guide.md"),
+    },
 ];
 
 fn default_lab_schema() -> u32 {
@@ -77,6 +92,10 @@ pub struct RawLabManifest {
     pub estimated_minutes: u32,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Phase 6/7 OS Catalog IDs required by this lab (e.g. `["freedos", "alpine"]`, `["openwrt", "alpine"]`).
+    #[serde(default)]
+    pub required_catalog_ids: Vec<String>,
+    /// Backward-compatible Phase 5 OS Profile IDs (`["alpine-linux"]`, `["openbsd", "alpine-linux"]`).
     #[serde(default)]
     pub required_os_profiles: Vec<String>,
     #[serde(default)]
@@ -96,9 +115,11 @@ pub struct LabStepDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabTemplateRequirementStatus {
+    pub catalog_id: String,
     pub os_profile_id: String,
     pub os_profile_name: String,
     pub guest_family: String,
+    pub arch: String,
     pub satisfied: bool,
     pub matched_template_id: Option<String>,
     pub matched_template_name: Option<String>,
@@ -117,6 +138,7 @@ pub struct AcademyLabSummary {
     pub node_count: usize,
     pub link_count: usize,
     pub step_count: usize,
+    pub required_catalog_ids: Vec<String>,
     pub required_templates: Vec<LabTemplateRequirementStatus>,
     pub all_templates_ready: bool,
     pub source_kind: String,
@@ -206,42 +228,69 @@ fn load_all_lab_packages(custom_labs_dir: Option<&Path>) -> Result<Vec<LoadedLab
     Ok(list)
 }
 
-/// Finds the best registered Golden Base Template matching `os_profile_id` (or same `guest_family` fallback for Linux).
+/// Generic Linux userland host profiles that can safely substitute for one another (`eth{n}` + `ip`/`nc`).
+/// Specialized router appliances (`openwrt`, `mikrotik-chr`, `vyos`) NEVER substitute for generic hosts!
+const GENERIC_LINUX_HOST_PROFILES: &[&str] = &["alpine-linux", "debian-linux"];
+
+/// Normalizes shorthand OS / catalog aliases (`"alpine"` -> `"alpine-linux"`, `"mikrotik"` -> `"mikrotik-chr"`)
+/// into canonical Phase 6 `catalog_id` / `os_profile_id` identifiers.
+pub fn normalize_catalog_id(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "alpine" | "alpine-linux" => "alpine-linux".to_string(),
+        "debian" | "debian-linux" | "linux" => "debian-linux".to_string(),
+        "mikrotik" | "chr" | "routeros" | "mikrotik-chr" => "mikrotik-chr".to_string(),
+        "plan9" | "9front" => "9front".to_string(),
+        "dos" | "freedos-mtcp" | "freedos" => "freedos".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Finds the best registered Golden Base Template matching `os_profile_id` (or generic Linux host fallback).
 fn match_template_for_profile<'a>(
     os_profile_id: &str,
     templates: &'a [BaseTemplateInfo],
 ) -> Option<&'a BaseTemplateInfo> {
-    if let Some(exact) = templates.iter().find(|t| t.os_profile_id == os_profile_id) {
+    let canonical = normalize_catalog_id(os_profile_id);
+    if let Some(exact) = templates
+        .iter()
+        .find(|t| normalize_catalog_id(&t.os_profile_id) == canonical)
+    {
         return Some(exact);
     }
 
-    // Friendly Linux compatibility fallback: e.g. if a lab specifies `alpine-linux` and the user
-    // already built a `debian-linux` Golden Template (both `guest_family == "linux"` using `eth{n}`).
-    let profiles = builtin_os_profiles();
-    let req_family = profiles
-        .iter()
-        .find(|p| p.id == os_profile_id)
-        .map(|p| p.guest_family.as_str());
-
-    if req_family == Some("linux") {
+    // Friendly generic Linux host fallback (`alpine-linux` <-> `debian-linux` ONLY; never matches
+    // router appliances like `openwrt`, `mikrotik-chr`, or `vyos`).
+    if GENERIC_LINUX_HOST_PROFILES.contains(&canonical.as_str()) {
         return templates.iter().find(|t| {
-            profiles
-                .iter()
-                .find(|p| p.id == t.os_profile_id)
-                .map(|p| p.guest_family == "linux")
-                .unwrap_or(false)
+            let candidate = normalize_catalog_id(&t.os_profile_id);
+            GENERIC_LINUX_HOST_PROFILES.contains(&candidate.as_str())
         });
     }
 
     None
 }
 
+fn collect_required_catalog_ids(manifest: &RawLabManifest) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
+    for raw in manifest
+        .required_catalog_ids
+        .iter()
+        .chain(manifest.required_os_profiles.iter())
+    {
+        let norm = normalize_catalog_id(raw);
+        if !norm.is_empty() && seen.insert(norm.clone()) {
+            ordered.push(norm);
+        }
+    }
+    ordered
+}
+
 fn build_lab_detail(pkg: LoadedLabPackage, templates: &[BaseTemplateInfo]) -> AcademyLabDetail {
     let os_profiles = builtin_os_profiles();
+    let required_catalog_ids = collect_required_catalog_ids(&pkg.manifest);
 
-    let required_templates: Vec<LabTemplateRequirementStatus> = pkg
-        .manifest
-        .required_os_profiles
+    let required_templates: Vec<LabTemplateRequirementStatus> = required_catalog_ids
         .iter()
         .map(|prof_id| {
             let prof_meta = os_profiles.iter().find(|p| &p.id == prof_id);
@@ -251,12 +300,17 @@ fn build_lab_detail(pkg: LoadedLabPackage, templates: &[BaseTemplateInfo]) -> Ac
             let guest_family = prof_meta
                 .map(|p| p.guest_family.clone())
                 .unwrap_or_else(|| "linux".to_string());
+            let arch = prof_meta
+                .map(|p| p.arch.as_str().to_string())
+                .unwrap_or_else(|| "aarch64".to_string());
             let matched = match_template_for_profile(prof_id, templates);
 
             LabTemplateRequirementStatus {
+                catalog_id: prof_id.clone(),
                 os_profile_id: prof_id.clone(),
                 os_profile_name,
                 guest_family,
+                arch,
                 satisfied: matched.is_some(),
                 matched_template_id: matched.map(|t| t.id.clone()),
                 matched_template_name: matched.map(|t| t.name.clone()),
@@ -289,6 +343,7 @@ fn build_lab_detail(pkg: LoadedLabPackage, templates: &[BaseTemplateInfo]) -> Ac
         node_count: pkg.manifest.topology.nodes.len(),
         link_count: pkg.manifest.topology.links.len(),
         step_count: steps.len(),
+        required_catalog_ids,
         required_templates,
         all_templates_ready,
         source_kind: pkg.source_kind,
@@ -375,15 +430,35 @@ pub async fn instantiate_academy_lab(
         }
     }
 
-    // Auto-bind matching Golden Base Templates onto VM nodes so 1-click "Start Lab" boots CoW overlays immediately
+    // Auto-bind matching Golden Base Templates onto VM nodes so 1-click "Start Lab" boots CoW overlays immediately,
+    // while preserving multi-arch overrides (`arch`, `nic_model`, `firmware`, `disk_bus`) or defaulting from OsProfile.
+    let os_profiles = builtin_os_profiles();
     let mut auto_bound_templates = 0usize;
     for node in &mut detail.topology.nodes {
         if node.kind != "vm" {
             continue;
         }
-        if node.template_id.is_none() {
-            if let Some(ref prof_id) = node.os_profile_id {
-                if let Some(tpl) = match_template_for_profile(prof_id, &templates) {
+        if let Some(raw_prof) = node.os_profile_id.clone() {
+            let canonical_prof = normalize_catalog_id(&raw_prof);
+            node.os_profile_id = Some(canonical_prof.clone());
+
+            if let Some(prof_meta) = os_profiles.iter().find(|p| p.id == canonical_prof) {
+                if node.arch.is_none() {
+                    node.arch = Some(prof_meta.arch.as_str().to_string());
+                }
+                if node.nic_model.is_none() {
+                    node.nic_model = Some(prof_meta.default_nic_model.as_qemu_device().to_string());
+                }
+                if node.firmware.is_none() {
+                    node.firmware = Some(prof_meta.default_firmware.as_str().to_string());
+                }
+                if node.disk_bus.is_none() {
+                    node.disk_bus = Some(prof_meta.default_disk_bus.as_str().to_string());
+                }
+            }
+
+            if node.template_id.is_none() {
+                if let Some(tpl) = match_template_for_profile(&canonical_prof, &templates) {
                     node.template_id = Some(tpl.id.clone());
                     auto_bound_templates += 1;
                 }
@@ -477,13 +552,18 @@ mod tests {
     use crate::storage::StorageManager;
 
     #[test]
-    fn all_five_builtin_labs_parse_and_validate_topology_graph() {
+    fn all_eight_builtin_labs_parse_and_validate_topology_graph() {
         let summaries = list_academy_labs(&[], None).expect("builtin labs must parse");
-        assert_eq!(summaries.len(), 5, "expected all 5 foundational labs");
+        assert_eq!(summaries.len(), 8, "expected all 8 built-in Academy labs");
 
         for (idx, summary) in summaries.iter().enumerate() {
             assert_eq!(summary.number, (idx + 1) as u32);
             assert!(!summary.all_templates_ready);
+            assert!(
+                !summary.required_catalog_ids.is_empty(),
+                "lab {} must declare required_catalog_ids",
+                summary.id
+            );
 
             let detail = get_academy_lab_detail(&summary.id, &[], None)
                 .expect("detail must load for builtin lab");
@@ -505,6 +585,61 @@ mod tests {
         let wan_link = &lab5.topology.links[0];
         assert_eq!(wan_link.impairments.latency_ms, 80);
         assert!((wan_link.impairments.loss_percent - 5.0).abs() < f64::EPSILON);
+
+        // Verify Lab 06 multi-arch FreeDOS i386 TCG overrides + normalized catalog IDs
+        let lab6 = get_academy_lab_detail("06-freedos-mtcp-zero-noise", &[], None).unwrap();
+        assert_eq!(
+            lab6.summary.required_catalog_ids,
+            vec!["freedos".to_string(), "alpine-linux".to_string()]
+        );
+        let dos_node = lab6
+            .topology
+            .nodes
+            .iter()
+            .find(|n| n.id == "node-dos-client")
+            .unwrap();
+        assert_eq!(dos_node.arch.as_deref(), Some("i386"));
+        assert_eq!(dos_node.nic_model.as_deref(), Some("pcnet"));
+        assert_eq!(dos_node.firmware.as_deref(), Some("bios"));
+        assert_eq!(dos_node.disk_bus.as_deref(), Some("ide"));
+        assert_eq!(dos_node.memory_mb, Some(32));
+
+        // Verify having ONLY `alpine-linux` Ready does NOT falsely satisfy `openwrt`, `mikrotik-chr`, or `freedos`
+        let mock_alpine = BaseTemplateInfo {
+            id: "alpine-aarch64-base".to_string(),
+            name: "Alpine Linux ARM64".to_string(),
+            filename: "alpine-aarch64-base.qcow2".to_string(),
+            os_profile_id: "alpine-linux".to_string(),
+            arch: crate::vm_manager::GuestArch::Aarch64,
+            default_nic_model: crate::vm_manager::NicModel::VirtioNetPci,
+            default_firmware: crate::vm_manager::FirmwareType::Uefi,
+            default_disk_bus: crate::vm_manager::DiskBus::VirtioBlk,
+            path: "/tmp/alpine-aarch64-base.qcow2".to_string(),
+            actual_size_bytes: 60_000_000,
+            virtual_size_bytes: 4_294_967_296,
+            read_only: true,
+            created_at_ms: 1,
+            description: None,
+        };
+        let with_alpine = list_academy_labs(&[mock_alpine], None).unwrap();
+        let l1 = with_alpine.iter().find(|l| l.number == 1).unwrap();
+        assert!(l1.all_templates_ready, "Lab 01 only needs Alpine");
+
+        for num in [6u32, 7, 8] {
+            let lab = with_alpine.iter().find(|l| l.number == num).unwrap();
+            assert!(
+                !lab.all_templates_ready,
+                "Lab {num} must report missing non-Alpine OS images"
+            );
+            let alpine_req = lab
+                .required_templates
+                .iter()
+                .find(|r| r.catalog_id == "alpine-linux")
+                .unwrap();
+            assert!(alpine_req.satisfied);
+            let missing_count = lab.required_templates.iter().filter(|r| !r.satisfied).count();
+            assert!(missing_count >= 1);
+        }
     }
 
     #[tokio::test]

@@ -28,8 +28,12 @@ import {
 import type {
   BaseTemplateInfo,
   BootMediaBus,
+  DiskBus,
+  FirmwareType,
+  GuestArch,
   GuestFamily,
   InstallerMediaInfo,
+  NicModel,
   NodeDiskStatusDto,
   NodePort,
   OsProfile,
@@ -76,6 +80,10 @@ export function NodeConfigModal({
   const [label, setLabel] = useState("");
   const [osProfileId, setOsProfileId] = useState<string>("openbsd");
   const [guestFamily, setGuestFamily] = useState<GuestFamily>("openbsd");
+  const [arch, setArch] = useState<GuestArch>("aarch64");
+  const [nicModel, setNicModel] = useState<NicModel>("virtio-net-pci");
+  const [firmware, setFirmware] = useState<FirmwareType>("uefi");
+  const [diskBus, setDiskBus] = useState<DiskBus>("virtio-blk");
   const [vcpus, setVcpus] = useState<number>(2);
   const [memoryMb, setMemoryMb] = useState<number>(512);
   const [displayMode, setDisplayMode] = useState<VmDisplayMode>("vnc");
@@ -116,11 +124,17 @@ export function NodeConfigModal({
 
     setLabel(d.label);
     const fam = d.guestFamily ?? "linux";
+    const resolvedProfId =
+      d.osProfileId || (fam === "linux" ? "alpine-linux" : fam);
+    const matchedProf = osProfiles.find((p) => p.id === resolvedProfId);
     setGuestFamily(fam);
-    setOsProfileId(
-      d.osProfileId ||
-        (fam === "linux" ? "alpine-linux" : fam)
+    setOsProfileId(resolvedProfId);
+    setArch(d.arch ?? matchedProf?.arch ?? "aarch64");
+    setNicModel(
+      d.nicModel ?? matchedProf?.defaultNicModel ?? "virtio-net-pci"
     );
+    setFirmware(d.firmware ?? matchedProf?.defaultFirmware ?? "uefi");
+    setDiskBus(d.diskBus ?? matchedProf?.defaultDiskBus ?? "virtio-blk");
     setVcpus(d.vcpus ?? 2);
     setMemoryMb(d.memoryMb ?? 512);
     setDisplayMode(d.displayMode ?? "vnc");
@@ -175,19 +189,49 @@ export function NodeConfigModal({
     setOsProfileId(profileId);
     const prof = osProfiles.find((p) => p.id === profileId);
     if (prof) {
+      const nextNic: NicModel = prof.defaultNicModel ?? "virtio-net-pci";
       setGuestFamily(prof.guestFamily);
+      setArch(prof.arch ?? "aarch64");
+      setNicModel(nextNic);
+      setFirmware(prof.defaultFirmware ?? "uefi");
+      setDiskBus(prof.defaultDiskBus ?? "virtio-blk");
       setVcpus(prof.defaultCpus);
       setMemoryMb(prof.defaultRamMb);
       setDiskSizeGb(prof.recommendedDiskGb);
-      // Relabel standard guest NICs accurately per OS profile
+      // Relabel standard guest NICs accurately per OS profile + NIC model
       setPorts((prev) =>
         prev.map((p, idx) => ({
           ...p,
           index: idx,
-          label: formatInterfaceLabel("vm", prof.guestFamily, idx),
+          nicModel: nextNic,
+          label: formatInterfaceLabel(
+            "vm",
+            prof.guestFamily,
+            idx,
+            prof.id,
+            nextNic
+          ),
         }))
       );
     }
+  };
+
+  const handleChangeNicModel = (nextModel: NicModel) => {
+    setNicModel(nextModel);
+    setPorts((prev) =>
+      prev.map((p, idx) => ({
+        ...p,
+        index: idx,
+        nicModel: nextModel,
+        label: formatInterfaceLabel(
+          "vm",
+          guestFamily,
+          idx,
+          osProfileId,
+          nextModel
+        ),
+      }))
+    );
   };
 
   const handleAddPort = () => {
@@ -201,9 +245,12 @@ export function NodeConfigModal({
           label: formatInterfaceLabel(
             node.data.kind,
             isVm ? guestFamily : null,
-            nextIdx
+            nextIdx,
+            isVm ? osProfileId : null,
+            isVm ? nicModel : null
           ),
           mac: generateQemuMac(),
+          nicModel: isVm ? nicModel : null,
           ipLabel: null,
           notes: null,
         },
@@ -222,7 +269,9 @@ export function NodeConfigModal({
           label: formatInterfaceLabel(
             node.data.kind,
             isVm ? guestFamily : null,
-            idx
+            idx,
+            isVm ? osProfileId : null,
+            isVm ? nicModel : null
           ),
         }))
     );
@@ -322,8 +371,12 @@ export function NodeConfigModal({
         label: cleanName,
         guestFamily,
         osProfileId,
+        arch,
+        nicModel,
+        firmware,
+        diskBus,
         vcpus: Math.max(1, vcpus),
-        memoryMb: Math.max(128, memoryMb),
+        memoryMb: Math.max(16, memoryMb),
         displayMode,
         notes: notes.trim() || null,
         ports,
@@ -492,6 +545,119 @@ export function NodeConfigModal({
 
               {isVm && (
                 <>
+                  {/* Multi-Architecture QEMU Emulation & Hardware Emulation Matrix */}
+                  <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
+                        CPU Architecture, NIC Driver &amp; System Bus
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300">
+                        qemu-system-{arch}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          Guest CPU Architecture
+                        </span>
+                        <select
+                          value={arch}
+                          disabled={isRunning}
+                          onChange={(e) => setArch(e.target.value as GuestArch)}
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        >
+                          <option value="aarch64">
+                            ARM64 (aarch64 • -M virt • HVF on Apple Silicon)
+                          </option>
+                          <option value="x86_64">
+                            x86_64 (amd64 • -M q35 • HVF on Intel / TCG MTTCG)
+                          </option>
+                          <option value="i386">
+                            i386 (32-bit x86 • -M pc • Retro / FreeDOS)
+                          </option>
+                          <option value="riscv64">
+                            RISC-V 64 (riscv64 • -M virt • Research)
+                          </option>
+                        </select>
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          NIC Hardware Model (Auto-Relabels Ports)
+                        </span>
+                        <select
+                          value={nicModel}
+                          disabled={isRunning}
+                          onChange={(e) =>
+                            handleChangeNicModel(e.target.value as NicModel)
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        >
+                          <option value="virtio-net-pci">
+                            virtio-net-pci (eth / vtnet / vio / vioif)
+                          </option>
+                          <option value="e1000">
+                            Intel e1000 Gigabit (em / wm / e1000g / ipro1000)
+                          </option>
+                          <option value="rtl8139">
+                            Realtek RTL8139 Fast Ethernet (rl / rtk / re)
+                          </option>
+                          <option value="pcnet">
+                            AMD PCnet-PCI II (pcn / le / FreeDOS PCNTPK)
+                          </option>
+                          <option value="ne2k_pci">
+                            NE2000 PCI Classic (ne / ed / Crynwr NE2000)
+                          </option>
+                        </select>
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          Boot Firmware
+                        </span>
+                        <select
+                          value={firmware}
+                          disabled={isRunning}
+                          onChange={(e) =>
+                            setFirmware(e.target.value as FirmwareType)
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        >
+                          <option value="uefi">
+                            UEFI (EDK2 pflash / OpenSBI)
+                          </option>
+                          <option value="bios">
+                            SeaBIOS / Legacy BIOS (OPNsense nano, VyOS, FreeDOS)
+                          </option>
+                        </select>
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          Primary Disk Bus
+                        </span>
+                        <select
+                          value={diskBus}
+                          disabled={isRunning}
+                          onChange={(e) =>
+                            setDiskBus(e.target.value as DiskBus)
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        >
+                          <option value="virtio-blk">
+                            VirtIO Block (virtio-blk-pci — Fastest)
+                          </option>
+                          <option value="ahci">
+                            AHCI SATA (DragonFly BSD / Haiku / OmniOS)
+                          </option>
+                          <option value="ide">
+                            Legacy IDE (FreeDOS / Retro OSes)
+                          </option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <label className="block space-y-1">
                       <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
@@ -516,20 +682,20 @@ export function NodeConfigModal({
                       </span>
                       <input
                         type="number"
-                        min={128}
+                        min={16}
                         max={16384}
-                        step={128}
+                        step={32}
                         disabled={isRunning}
                         value={memoryMb}
                         onChange={(e) =>
                           setMemoryMb(
-                            Math.max(128, Number(e.target.value) || 256)
+                            Math.max(16, Number(e.target.value) || 256)
                           )
                         }
                         className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
                       />
                       <div className="flex flex-wrap gap-1 pt-1">
-                        {[256, 512, 1024, 2048, 4096].map((mb) => (
+                        {[32, 128, 256, 512, 1024, 2048, 4096].map((mb) => (
                           <button
                             key={mb}
                             type="button"

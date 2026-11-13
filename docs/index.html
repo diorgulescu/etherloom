@@ -331,9 +331,9 @@ npm run tauri dev</code></pre>
       <section id="academy">
         <div class="section-header">
           <div class="section-eyebrow">Interactive Networking Academy</div>
-          <h2>Five Built-in Vendor-Neutral Guided Labs</h2>
+          <h2>Eight Built-in Multi-OS Guided Labs</h2>
           <p>
-            Each lab instantiates a clean sandbox workspace (<code>academy-&lt;id&gt;.etherloom</code>), highlights target wires on the canvas, and pairs Markdown protocol diagrams with 1-click <strong>Send to Serial</strong> commands.
+            Each lab instantiates a clean sandbox workspace (<code>academy-&lt;id&gt;.etherloom</code>), checks OS Library prerequisites with 1-click download handoffs, highlights target wires on the canvas, and pairs Markdown protocol diagrams with <strong>Send to Serial</strong> commands.
           </p>
         </div>
 
@@ -359,9 +359,77 @@ npm run tauri dev</code></pre>
             <p>Run transfers across a pre-impaired WAN wire (<code>80 ms</code> latency, <code>5%</code> packet loss) to observe window scaling, fast retransmit, and RTO backoff.</p>
           </div>
           <div class="card">
+            <h3>06 • FreeDOS + <code>mTCP</code> Zero-Noise TCP</h3>
+            <p>Boot 32-bit FreeDOS (<code>PCNTPK 0x60</code> + <code>mTCP</code>) against an IPv6-quieted Alpine responder to capture the exact 4 frames of ARP+ICMP and pure TCP byte math.</p>
+          </div>
+          <div class="card">
+            <h3>07 • OpenWrt <code>802.1Q</code> VLANs &amp; <code>fw4</code></h3>
+            <p>Configure modern UCI <code>bridge-vlan</code> / DSA filtering, capture double-tagged <code>0x8100</code> frames on a trunk wire, and enforce <code>nftables</code> zone isolation.</p>
+          </div>
+          <div class="card">
+            <h3>08 • MikroTik CHR v7 ↔ OpenBSD eBGP</h3>
+            <p>Establish <strong>RFC 8212</strong> eBGP peering over <code>TCP/179</code> between RouterOS v7 and OpenBGPD, dissect <code>OPEN</code>/<code>UPDATE</code>/<code>KEEPALIVE</code>, and test live cable-cut failover.</p>
+          </div>
+          <div class="card">
             <h3>Custom Declarative Labs</h3>
             <p>Author new tutorials with just two plain-text files — <code>lab.toml</code> + <code>guide.md</code> — inside <code>labs/</code> or your external storage library.</p>
           </div>
+        </div>
+      </section>
+
+      <!-- SYSTEM REQUIREMENTS -->
+      <section id="requirements">
+        <div class="section-header">
+          <div class="section-eyebrow">Host Specifications</div>
+          <h2>System Requirements</h2>
+          <p>
+            Designed for Apple Silicon and Intel Macs running unprivileged in standard userspace — with optional external SSD media offload.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Minimum</th>
+                <th>Recommended</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>macOS Version</strong></td>
+                <td>macOS 13 (Ventura)</td>
+                <td>macOS 14 (Sonoma) / 15+ (Sequoia)</td>
+                <td>Unprivileged Apple <code>Hypervisor.framework</code> (<code>-accel hvf</code>) + multi-arch <code>TCG</code></td>
+              </tr>
+              <tr>
+                <td><strong>CPU</strong></td>
+                <td>Apple Silicon (<code>M1</code>+) or Intel <code>VT-x</code></td>
+                <td>Apple <code>M1 Pro</code> / <code>M2</code> / <code>M3</code> / <code>M4</code> (8+ cores)</td>
+                <td>Native ARM64 HVF on Apple Silicon; native <code>x86_64</code> HVF on Intel Macs</td>
+              </tr>
+              <tr>
+                <td><strong>Memory (RAM)</strong></td>
+                <td>8 GB</td>
+                <td>16 GB+</td>
+                <td>Guests range from 32 MB (FreeDOS) &amp; 128 MB (OpenWrt) up to 1.5 GB (OPNsense)</td>
+              </tr>
+              <tr>
+                <td><strong>Disk Storage</strong></td>
+                <td>500 MB local + 4 GB library</td>
+                <td>20–40 GB+ (Internal or <code>/Volumes</code> SSD)</td>
+                <td>Supports APFS sparse <code>qcow2</code> overlays and ExFAT external USB-C/Thunderbolt drives</td>
+              </tr>
+              <tr>
+                <td><strong>Host Packages</strong></td>
+                <td><code>brew install qemu</code></td>
+                <td><code>qemu</code> + <code>wireshark</code> + <code>python uv</code></td>
+                <td>Zero <code>root</code> / <code>sudo</code>, zero kernel extensions, verified live via <strong>Env Doctor</strong></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -369,9 +437,9 @@ npm run tauri dev</code></pre>
       <section id="credits">
         <div class="section-header">
           <div class="section-eyebrow">Free Software &amp; Attributions</div>
-          <h2>GNU GPLv3 Compliance &amp; Upstream Credits</h2>
+          <h2>Contributors, GNU GPLv3 Compliance &amp; Credits</h2>
           <p>
-            Etherloom is distributed under the <strong>GNU General Public License v3.0 or later (<code>GPL-3.0-or-later</code>)</strong> and proudly credits the open-source projects it builds upon and orchestrates:
+            Etherloom is created by <a href="https://github.com/diorgulescu" target="_blank" rel="noopener noreferrer"><strong>Dragoş Iorgulescu (@diorgulescu)</strong></a> with engineering contributions by <a href="https://antigravity.google/" target="_blank" rel="noopener noreferrer"><strong>Antigravity (Google DeepMind)</strong></a>, distributed under the <strong>GNU General Public License v3.0 or later (<code>GPL-3.0-or-later</code>)</strong>:
           </p>
         </div>
 

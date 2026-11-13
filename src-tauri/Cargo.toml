@@ -2,7 +2,10 @@
 name = "etherloom"
 version = "0.1.0"
 description = "macOS-native zero-root network orchestration and learning studio powered by QEMU + Hypervisor.framework"
-authors = ["Etherloom Contributors"]
+authors = [
+  "Dragoş Iorgulescu <32508790+diorgulescu@users.noreply.github.com>",
+  "Antigravity (Google DeepMind) <noreply@google.com>",
+]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/diorgulescu/etherloom"
 edition = "2021"

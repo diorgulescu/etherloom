@@ -25,6 +25,8 @@ pub struct WorkspacePort {
     pub label: String,
     pub mac: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nic_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -43,6 +45,14 @@ pub struct WorkspaceNode {
     pub os_profile_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nic_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_bus: Option<String>,
     /// Relative path inside bundle (e.g. `overlays/fw1.qcow2`) or absolute override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_path: Option<String>,
@@ -563,6 +573,10 @@ mod tests {
                     guest_family: Some("openbsd".to_string()),
                     os_profile_id: Some("openbsd".to_string()),
                     template_id: Some("openbsd-76".to_string()),
+                    arch: Some("aarch64".to_string()),
+                    nic_model: Some("virtio-net-pci".to_string()),
+                    firmware: Some("uefi".to_string()),
+                    disk_bus: Some("virtio-blk".to_string()),
                     disk_path: Some("overlays/node-fw1.qcow2".to_string()),
                     disk_size_gb: Some(8),
                     boot_media_path: None,
@@ -577,6 +591,7 @@ mod tests {
                         index: 0,
                         label: "vio0".to_string(),
                         mac: "52:54:00:10:01:00".to_string(),
+                        nic_model: None,
                         ip_label: Some("10.0.1.1/24".to_string()),
                         notes: Some("LAN trunk".to_string()),
                     }],
@@ -588,6 +603,10 @@ mod tests {
                     guest_family: None,
                     os_profile_id: None,
                     template_id: None,
+                    arch: None,
+                    nic_model: None,
+                    firmware: None,
+                    disk_bus: None,
                     disk_path: None,
                     disk_size_gb: None,
                     boot_media_path: None,
@@ -602,6 +621,7 @@ mod tests {
                         index: 0,
                         label: "p1".to_string(),
                         mac: "52:54:00:20:01:00".to_string(),
+                        nic_model: None,
                         ip_label: None,
                         notes: None,
                     }],
@@ -650,9 +670,47 @@ mod tests {
             reopened.topology.nodes[0].ports[0].ip_label.as_deref(),
             Some("10.0.1.1/24")
         );
+        assert_eq!(
+            reopened.topology.nodes[0].arch.as_deref(),
+            Some("aarch64")
+        );
         assert_eq!(reopened.topology.links[0].impairments.latency_ms, 12);
         assert_eq!(reopened.topology.links[0].impairments.loss_percent, 1.5);
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_phase2_topology_toml_without_multi_arch_fields_deserializes_cleanly() {
+        let legacy_toml = r#"
+schema_version = 1
+name = "Legacy Phase 2 Lab"
+
+[[nodes]]
+id = "n1"
+name = "alpine-1"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+vcpus = 1
+memory_mb = 256
+[nodes.position]
+x = 100.0
+y = 100.0
+
+[[nodes.ports]]
+id = "n1-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:aa:bb:01"
+"#;
+        let doc: TopologyDocument =
+            toml::from_str(legacy_toml).expect("legacy topology.toml must deserialize");
+        assert_eq!(doc.nodes.len(), 1);
+        assert_eq!(doc.nodes[0].arch, None);
+        assert_eq!(doc.nodes[0].nic_model, None);
+        assert_eq!(doc.nodes[0].firmware, None);
+        assert_eq!(doc.nodes[0].disk_bus, None);
+        assert_eq!(doc.nodes[0].ports[0].nic_model, None);
     }
 }

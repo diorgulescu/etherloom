@@ -1,7 +1,11 @@
 import type { Edge } from "@xyflow/react";
 import type { EtherloomFlowNode } from "../components/canvas/EtherloomNode";
 import type {
+  DiskBus,
+  FirmwareType,
+  GuestArch,
   GuestFamily,
+  NicModel,
   NodeKind,
   NodePort,
   TopologyDocument,
@@ -34,18 +38,51 @@ export function generateQemuMac(seed?: number, portIndex = 0): string {
  */
 export function nicPrefixForFamily(
   kind: NodeKind,
-  guestFamily: GuestFamily | null | undefined
+  guestFamily: GuestFamily | null | undefined,
+  osProfileId?: string | null,
+  nicModel?: NicModel | null
 ): string {
   if (kind === "l2_switch" || kind === "l1_hub") {
     return "p";
   }
+  const prof = (osProfileId ?? "").toLowerCase();
+  const model: NicModel = nicModel ?? "virtio-net-pci";
+
+  if (prof === "mikrotik-chr") return "ether";
+  if (prof === "9front") return "/net/ether";
+  if (prof === "omnios") return model === "virtio-net-pci" ? "vioif" : "e1000g";
+  if (prof === "dragonflybsd") {
+    if (model === "virtio-net-pci") return "vtnet";
+    if (model === "rtl8139") return "re";
+    return "em";
+  }
+  if (prof === "haiku") {
+    if (model === "virtio-net-pci") return "/dev/net/virtio/";
+    if (model === "rtl8139") return "/dev/net/rtl8139/";
+    if (model === "pcnet") return "/dev/net/pcnet/";
+    return "/dev/net/ipro1000/";
+  }
+  if (prof === "freedos") return "pkt";
+
   switch (guestFamily) {
     case "openbsd":
-      return "vio";
+      if (model === "virtio-net-pci") return "vio";
+      if (model === "e1000") return "em";
+      if (model === "rtl8139") return "rl";
+      if (model === "pcnet") return "pcn";
+      return "ne";
     case "freebsd":
-      return "vtnet";
+      if (model === "virtio-net-pci") return "vtnet";
+      if (model === "e1000") return "em";
+      if (model === "rtl8139") return "rl";
+      if (model === "pcnet") return "le";
+      return "ed";
     case "netbsd":
-      return "vioif";
+      if (model === "virtio-net-pci") return "vioif";
+      if (model === "e1000") return "wm";
+      if (model === "rtl8139") return "rtk";
+      if (model === "pcnet") return "pcn";
+      return "ne";
     case "linux":
     default:
       return "eth";
@@ -53,22 +90,43 @@ export function nicPrefixForFamily(
 }
 
 /**
- * Formats an accurate interface label per OS profile or switch/hub port index:
- * - OpenBSD: `vio0`, `vio1`...
- * - FreeBSD: `vtnet0`, `vtnet1`...
- * - NetBSD: `vioif0`, `vioif1`...
- * - Linux: `eth0`, `eth1`...
+ * Formats an accurate interface label per OS profile + NIC model or switch/hub port index:
+ * - OpenBSD: `vio0` (`virtio-net-pci`), `em0` (`e1000`), `rl0` (`rtl8139`), `pcn0` (`pcnet`)
+ * - FreeBSD / OPNsense / pfSense: `vtnet0` (`virtio-net-pci`), `em0` (`e1000`), `rl0` (`rtl8139`)
+ * - NetBSD: `vioif0` (`virtio-net-pci`), `wm0` (`e1000`), `rtk0` (`rtl8139`)
+ * - MikroTik RouterOS CHR: `ether1`, `ether2` (1-based)
+ * - 9front (Plan 9): `/net/ether0`, `/net/ether1`
+ * - OmniOS: `e1000g0` / `vioif0`
+ * - Haiku: `/dev/net/ipro1000/0`
+ * - FreeDOS + mTCP: `PCNTPK 0x60` (`pcnet`), `NE2000 0x60` (`ne2k_pci`), `PKT 0x60` (`e1000`)
+ * - Linux / OpenWrt / VyOS: `eth0`, `eth1`...
  * - Switch / Hub: `p1`..`p8` (1-based physical switch port numbering)
  */
 export function formatInterfaceLabel(
   kind: NodeKind,
   guestFamily: GuestFamily | null | undefined,
-  index: number
+  index: number,
+  osProfileId?: string | null,
+  nicModel?: NicModel | null
 ): string {
   if (kind === "l2_switch" || kind === "l1_hub") {
     return `p${index + 1}`;
   }
-  const prefix = nicPrefixForFamily(kind, guestFamily);
+  const prof = (osProfileId ?? "").toLowerCase();
+  const model: NicModel = nicModel ?? "virtio-net-pci";
+
+  if (prof === "mikrotik-chr") {
+    return `ether${index + 1}`;
+  }
+  if (prof === "freedos") {
+    const vec = `0x${(0x60 + index).toString(16)}`;
+    if (model === "pcnet") return `PCNTPK ${vec}`;
+    if (model === "ne2k_pci") return `NE2000 ${vec}`;
+    if (model === "rtl8139") return `RTSPKT ${vec}`;
+    return `PKT ${vec}`;
+  }
+
+  const prefix = nicPrefixForFamily(kind, guestFamily, osProfileId, nicModel);
   return `${prefix}${index}`;
 }
 
@@ -81,15 +139,19 @@ export function buildNodePorts(params: {
   nodeId: string;
   kind: NodeKind;
   guestFamily: GuestFamily | null;
+  osProfileId?: string | null;
+  nicModel?: NicModel | null;
   count: number;
   seed?: number;
 }): NodePort[] {
-  const { nodeId, kind, guestFamily, count, seed } = params;
+  const { nodeId, kind, guestFamily, osProfileId, nicModel, count, seed } =
+    params;
   return Array.from({ length: count }, (_, idx) => ({
     id: `${nodeId}-p${idx}`,
     index: idx,
-    label: formatInterfaceLabel(kind, guestFamily, idx),
+    label: formatInterfaceLabel(kind, guestFamily, idx, osProfileId, nicModel),
     mac: generateQemuMac(seed, idx),
+    nicModel: kind === "vm" ? nicModel ?? null : null,
     ipLabel: null,
     notes: null,
   }));
@@ -106,6 +168,10 @@ export function flowNodeToWorkspaceNode(node: EtherloomFlowNode): WorkspaceNode 
     kind: d.kind,
     guest_family: d.guestFamily ?? null,
     os_profile_id: d.osProfileId ?? null,
+    arch: (d.arch as GuestArch | null | undefined) ?? null,
+    nic_model: (d.nicModel as NicModel | null | undefined) ?? null,
+    firmware: (d.firmware as FirmwareType | null | undefined) ?? null,
+    disk_bus: (d.diskBus as DiskBus | null | undefined) ?? null,
     template_id: d.templateId ?? null,
     disk_path: d.diskPath ?? null,
     disk_size_gb: d.diskSizeGb ?? null,
@@ -124,6 +190,7 @@ export function flowNodeToWorkspaceNode(node: EtherloomFlowNode): WorkspaceNode 
       index: idx,
       label: p.label,
       mac: p.mac,
+      nic_model: p.nicModel ?? null,
       ip_label: p.ipLabel?.trim() ? p.ipLabel.trim() : null,
       notes: p.notes?.trim() ? p.notes.trim() : null,
     })),
@@ -196,6 +263,7 @@ export function topologyDocumentToFlow(doc: TopologyDocument): {
         index: wp.index ?? idx,
         label: wp.label,
         mac: wp.mac,
+        nicModel: wp.nic_model ?? null,
         ipLabel: wp.ip_label ?? null,
         notes: wp.notes ?? null,
       };
@@ -210,6 +278,10 @@ export function topologyDocumentToFlow(doc: TopologyDocument): {
         kind: wn.kind,
         guestFamily: wn.guest_family ?? null,
         osProfileId: wn.os_profile_id ?? null,
+        arch: wn.arch ?? (wn.kind === "vm" ? "aarch64" : null),
+        nicModel: wn.nic_model ?? (wn.kind === "vm" ? "virtio-net-pci" : null),
+        firmware: wn.firmware ?? (wn.kind === "vm" ? "uefi" : null),
+        diskBus: wn.disk_bus ?? (wn.kind === "vm" ? "virtio-blk" : null),
         templateId: wn.template_id ?? null,
         diskPath: wn.disk_path ?? null,
         diskSizeGb: wn.disk_size_gb ?? 8,

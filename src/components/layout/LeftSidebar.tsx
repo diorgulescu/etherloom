@@ -4,6 +4,7 @@ import {
   Disc,
   GripVertical,
   HardDrive,
+  HardDriveDownload,
   Layers,
   Network,
   Plus,
@@ -39,13 +40,29 @@ interface LeftSidebarProps {
     position?: { x: number; y: number }
   ) => void;
   onOpenCustomVmWizard: () => void;
+  onOpenStorageLibraryModal: () => void;
 }
 
 function resolveFamilyFromProfileId(profileId: string): GuestFamily {
   const lower = profileId.toLowerCase();
   if (lower.includes("openbsd")) return "openbsd";
-  if (lower.includes("freebsd")) return "freebsd";
+  if (
+    lower.includes("freebsd") ||
+    lower.includes("opnsense") ||
+    lower.includes("pfsense") ||
+    lower.includes("dragonfly")
+  ) {
+    return "freebsd";
+  }
   if (lower.includes("netbsd")) return "netbsd";
+  if (
+    lower.includes("9front") ||
+    lower.includes("omnios") ||
+    lower.includes("haiku") ||
+    lower.includes("freedos")
+  ) {
+    return "other";
+  }
   return "linux";
 }
 
@@ -88,6 +105,7 @@ export function LeftSidebar({
   onAddComponent,
   onAddFromTemplate,
   onOpenCustomVmWizard,
+  onOpenStorageLibraryModal,
 }: LeftSidebarProps) {
   const [query, setQuery] = useState("");
 
@@ -126,15 +144,24 @@ export function LeftSidebar({
 
   return (
     <aside className="w-72 shrink-0 border-r border-slate-200/80 dark:border-zinc-800/90 bg-slate-50/90 dark:bg-zinc-900/60 backdrop-blur-sm flex flex-col h-full select-none">
-      {/* Search Box + Custom VM / ISO Installer Wizard CTA */}
-      <div className="p-3 space-y-2.5 border-b border-slate-200/70 dark:border-zinc-800/80">
+      {/* Search Box + OS Library Downloader + Custom VM Wizard CTA */}
+      <div className="p-3 space-y-2 border-b border-slate-200/70 dark:border-zinc-800/80">
+        <button
+          type="button"
+          onClick={onOpenStorageLibraryModal}
+          className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5"
+        >
+          <HardDriveDownload className="w-3.5 h-3.5 shrink-0" />
+          <span>+ Get More OS Images (15)</span>
+        </button>
+
         <button
           type="button"
           onClick={onOpenCustomVmWizard}
-          className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5"
+          className="w-full py-1.5 px-3 rounded-lg bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-200 text-xs font-medium transition-all flex items-center justify-center gap-1.5"
         >
-          <Disc className="w-3.5 h-3.5 shrink-0" />
-          <span>New Custom VM / Install OS</span>
+          <Disc className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+          <span>New Custom VM / Install ISO</span>
         </button>
 
         <div className="relative">
@@ -235,7 +262,12 @@ export function LeftSidebar({
             <div className="space-y-1.5">
               {filteredTemplates.map((tpl) => {
                 const fam = resolveFamilyFromProfileId(tpl.osProfileId);
-                const nicPrefix = nicPrefixForFamily("vm", fam);
+                const nicPrefix = nicPrefixForFamily(
+                  "vm",
+                  fam,
+                  tpl.osProfileId,
+                  tpl.defaultNicModel
+                );
                 return (
                   <div
                     key={tpl.id}
@@ -299,7 +331,7 @@ export function LeftSidebar({
                 Guest OS Profiles
               </h2>
               <span className="text-[10px] text-slate-400 dark:text-zinc-500">
-                HVF + UEFI
+                ARM64 HVF • x86
               </span>
             </div>
             <div className="space-y-1.5">
@@ -361,15 +393,20 @@ export function LeftSidebar({
         )}
       </div>
 
-      {/* Base Template Store Footer */}
-      <div className="p-3 border-t border-slate-200/80 dark:border-zinc-800/90 bg-slate-100/60 dark:bg-zinc-950/40">
+      {/* Base Template Store Footer (Clickable shortcut to Storage & OS Library Manager) */}
+      <button
+        type="button"
+        onClick={onOpenStorageLibraryModal}
+        title="Click to manage OS Library & External SSD Storage"
+        className="w-full text-left p-3 border-t border-slate-200/80 dark:border-zinc-800/90 bg-slate-100/60 hover:bg-slate-200/60 dark:bg-zinc-950/40 dark:hover:bg-zinc-900/70 transition-colors"
+      >
         <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-zinc-300">
           <span className="inline-flex items-center gap-1.5">
             <HardDrive className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-            <span>CoW Base Templates</span>
+            <span>OS Library &amp; Storage</span>
           </span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300">
-            {baseTemplates.length}
+            {baseTemplates.length} Ready
           </span>
         </div>
         <p
@@ -378,7 +415,7 @@ export function LeftSidebar({
         >
           {templatesDir}
         </p>
-      </div>
+      </button>
     </aside>
   );
 }

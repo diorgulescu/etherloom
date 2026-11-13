@@ -6,6 +6,7 @@ import {
   FolderDown,
   FolderOpen,
   GraduationCap,
+  HardDriveDownload,
   Laptop,
   Moon,
   PanelBottom,
@@ -27,8 +28,10 @@ interface TopToolbarProps {
   projectBusy: boolean;
   activeLabNumber: number | null;
   labDrawerOpen: boolean;
+  readyTemplateCount?: number;
   onOpenWelcomeModal: () => void;
   onOpenAcademyModal: () => void;
+  onOpenStorageLibraryModal: () => void;
   onToggleLabDrawer: () => void;
   onNewProject: () => void;
   onOpenProject: () => void;
@@ -55,8 +58,10 @@ export function TopToolbar({
   projectBusy,
   activeLabNumber,
   labDrawerOpen,
+  readyTemplateCount = 0,
   onOpenWelcomeModal,
   onOpenAcademyModal,
+  onOpenStorageLibraryModal,
   onToggleLabDrawer,
   onNewProject,
   onOpenProject,
@@ -208,8 +213,23 @@ export function TopToolbar({
         </button>
       </div>
 
-      {/* Right section: Academy Browser, Env Doctor Status Pill, Theme Selector, Settings, Docks */}
+      {/* Right section: OS Library, Academy Browser, Env Doctor Status Pill, Theme Selector, Settings, Docks */}
       <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={onOpenStorageLibraryModal}
+          title="Open Storage & 15-OS Library Manager (Download / Import / External SSD)"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-sky-500/10 hover:bg-sky-500/20 border-sky-500/30 text-sky-700 dark:text-sky-300 transition-colors"
+        >
+          <HardDriveDownload className="w-3.5 h-3.5" />
+          <span>OS Library</span>
+          {readyTemplateCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-sky-500/20 text-sky-800 dark:text-sky-200">
+              {readyTemplateCount}
+            </span>
+          )}
+        </button>
+
         <button
           type="button"
           onClick={onOpenAcademyModal}

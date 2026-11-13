@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   BookOpen,
   Cable,
   CheckCircle2,
@@ -23,10 +24,16 @@ interface AcademyModalProps {
   loading: boolean;
   launchingLabId: string | null;
   activeLabId: string | null;
+  initialPromptLabId?: string | null;
+  onClearInitialPromptLab?: () => void;
   onClose: () => void;
   onRefresh: () => void;
   onLaunchLab: (labId: string) => void;
   onOpenTemplateWizard: () => void;
+  onOpenOsLibraryForCatalogIds?: (
+    catalogIds: string[],
+    labTitle?: string
+  ) => void;
 }
 
 function difficultyBadgeClass(difficulty: string): string {
@@ -42,26 +49,55 @@ function difficultyBadgeClass(difficulty: string): string {
   }
 }
 
+function getMissingCatalogIds(lab: AcademyLabSummary): string[] {
+  return lab.requiredTemplates
+    .filter((r) => !r.satisfied)
+    .map((r) => r.catalogId ?? r.osProfileId);
+}
+
 export function AcademyModal({
   open,
   labs,
   loading,
   launchingLabId,
   activeLabId,
+  initialPromptLabId = null,
+  onClearInitialPromptLab,
   onClose,
   onRefresh,
   onLaunchLab,
   onOpenTemplateWizard,
+  onOpenOsLibraryForCatalogIds,
 }: AcademyModalProps) {
   const [difficultyFilter, setDifficultyFilter] = useState<string>("All");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [missingPromptLabId, setMissingPromptLabId] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     if (open) {
       onRefresh();
+    } else {
+      setMissingPromptLabId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    if (open && initialPromptLabId) {
+      setMissingPromptLabId(initialPromptLabId);
+      onClearInitialPromptLab?.();
+    }
+  }, [initialPromptLabId, onClearInitialPromptLab, open]);
+
+  const promptLab = useMemo(
+    () =>
+      missingPromptLabId
+        ? labs.find((l) => l.id === missingPromptLabId) ?? null
+        : null,
+    [labs, missingPromptLabId]
+  );
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -90,6 +126,29 @@ export function AcademyModal({
 
   if (!open) return null;
 
+  const handleDeepLinkMissingImages = (lab: AcademyLabSummary) => {
+    const missingIds = getMissingCatalogIds(lab);
+    setMissingPromptLabId(null);
+    if (onOpenOsLibraryForCatalogIds && missingIds.length > 0) {
+      onOpenOsLibraryForCatalogIds(
+        missingIds,
+        `Lab ${String(lab.number).padStart(2, "0")}: ${lab.title}`
+      );
+    } else {
+      onClose();
+      onOpenTemplateWizard();
+    }
+  };
+
+  const handleClickStartLab = (lab: AcademyLabSummary) => {
+    const isActive = activeLabId === lab.id;
+    if (!isActive && !lab.allTemplatesReady) {
+      setMissingPromptLabId(lab.id);
+      return;
+    }
+    onLaunchLab(lab.id);
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 dark:bg-black/70 backdrop-blur-xs"
@@ -97,7 +156,7 @@ export function AcademyModal({
       aria-modal="true"
       aria-labelledby="etherloom-academy-title"
     >
-      <div className="w-full max-w-4xl max-h-[88vh] rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-4xl max-h-[88vh] rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col overflow-hidden">
         {/* Modal Header */}
         <div className="px-5 py-4 border-b border-slate-200/80 dark:border-zinc-800 bg-gradient-to-r from-indigo-500/[0.08] via-sky-500/[0.05] to-transparent flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -115,9 +174,9 @@ export function AcademyModal({
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                Hands-on Linux &amp; OpenBSD labs powered by zero-root QEMU HVF,
-                live Wireshark wiretaps, and{" "}
-                <code className="font-mono">tcpflowy</code> stream dissection.
+                Multi-OS guided labs across Alpine Linux, OpenBSD, OpenWrt,
+                MikroTik CHR v7 &amp; FreeDOS — powered by QEMU HVF/TCG,
+                Wireshark wiretaps, and <code className="font-mono">tcpflowy</code>.
               </p>
             </div>
           </div>
@@ -268,11 +327,11 @@ export function AcademyModal({
 
                       {lab.requiredTemplates.map((req) => (
                         <span
-                          key={req.osProfileId}
+                          key={req.catalogId ?? req.osProfileId}
                           title={
                             req.satisfied
                               ? `Matched Golden Template: ${req.matchedTemplateName}`
-                              : `No Golden Template found yet for ${req.osProfileName} — you can still launch the topology & guide immediately or build a template via the ISO Wizard.`
+                              : `Required OS image '${req.osProfileName}' (${req.catalogId ?? req.osProfileId}) is not in your active templates folder yet.`
                           }
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10.5px] font-medium ${
                             req.satisfied
@@ -287,46 +346,44 @@ export function AcademyModal({
                           )}
                           <span>
                             {req.osProfileName}
-                            {req.satisfied ? " Ready" : " Template Needed"}
+                            {req.arch && req.arch !== "aarch64"
+                              ? ` (${req.arch})`
+                              : ""}
+                            {req.satisfied ? " • Ready" : " • Missing"}
                           </span>
                         </span>
                       ))}
                     </div>
 
-                    {/* Friendly Missing-Template Prompt */}
+                    {/* Inline Actionable Missing-OS Callout */}
                     {missingTemplates.length > 0 && (
                       <div className="mt-1.5 rounded-lg bg-amber-500/[0.08] border border-amber-500/25 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-900 dark:text-amber-200">
                         <span>
-                          Requires{" "}
-                          <strong>
-                            {missingTemplates
-                              .map((m) => m.osProfileName)
-                              .join(" + ")}
-                          </strong>{" "}
-                          Golden Template to boot VMs (you can still launch the
-                          blueprint &amp; interactive guide right now).
+                          <strong>Required OS Images Missing:</strong>{" "}
+                          {missingTemplates
+                            .map((m) => m.osProfileName)
+                            .join(" + ")}{" "}
+                          not downloaded/built in active{" "}
+                          <code className="font-mono">templates/</code> yet.
                         </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            onClose();
-                            onOpenTemplateWizard();
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-medium shrink-0"
+                          onClick={() => handleDeepLinkMissingImages(lab)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-semibold shrink-0 shadow-2xs transition-colors"
                         >
                           <HardDriveDownload className="w-3 h-3" />
-                          <span>Install / Create Template…</span>
+                          <span>Download / Setup in OS Library</span>
                         </button>
                       </div>
                     )}
                   </div>
 
-                  {/* Right Launch / Reset Action Column */}
+                  {/* Right Start / Reset Action Column */}
                   <div className="flex md:flex-col items-center md:items-end justify-end gap-2 shrink-0">
                     <button
                       type="button"
                       disabled={Boolean(launchingLabId)}
-                      onClick={() => onLaunchLab(lab.id)}
+                      onClick={() => handleClickStartLab(lab)}
                       className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 ${
                         isActive
                           ? "bg-amber-600 hover:bg-amber-500 text-white"
@@ -345,7 +402,7 @@ export function AcademyModal({
                           ? "Provisioning…"
                           : isActive
                           ? "Reset Sandbox"
-                          : "Launch Lab"}
+                          : "Start Lab"}
                       </span>
                     </button>
 
@@ -377,6 +434,120 @@ export function AcademyModal({
             Close
           </button>
         </div>
+
+        {/* Focused "Required OS Images Missing" Prompt Overlay when clicking Start Lab */}
+        {promptLab && !promptLab.allTemplatesReady && (
+          <div className="absolute inset-0 z-20 bg-slate-950/55 dark:bg-black/75 backdrop-blur-xs flex items-center justify-center p-5">
+            <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-zinc-900 border border-amber-500/40 shadow-2xl overflow-hidden">
+              <div className="px-5 py-4 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border-b border-slate-200 dark:border-zinc-800 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/35 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100">
+                      Required OS Images Missing
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5">
+                      LAB {String(promptLab.number).padStart(2, "0")} —{" "}
+                      <span className="font-medium text-slate-800 dark:text-zinc-200">
+                        {promptLab.title}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMissingPromptLabId(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-3.5">
+                <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed">
+                  One or more Golden OS Templates required to boot this lab’s
+                  virtual machines are not yet present in your active{" "}
+                  <code className="font-mono">templates/</code> directory:
+                </p>
+
+                <div className="space-y-2">
+                  {promptLab.requiredTemplates.map((req) => {
+                    const catId = req.catalogId ?? req.osProfileId;
+                    return (
+                      <div
+                        key={catId}
+                        className={`rounded-xl border px-3.5 py-2.5 flex items-center justify-between gap-3 ${
+                          req.satisfied
+                            ? "bg-emerald-500/[0.06] border-emerald-500/25"
+                            : "bg-amber-500/[0.08] border-amber-500/35"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {req.satisfied ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
+                              <span>{req.osProfileName}</span>
+                              {req.arch && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300">
+                                  {req.arch}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                              {req.satisfied
+                                ? `Ready (${req.matchedTemplateName ?? catId})`
+                                : `Catalog ID: ${catId} — needs download or Guided Template Setup`}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                            req.satisfied
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                              : "bg-amber-500/20 text-amber-800 dark:text-amber-200"
+                          }`}
+                        >
+                          {req.satisfied ? "Ready" : "Missing"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = promptLab.id;
+                      setMissingPromptLabId(null);
+                      onLaunchLab(id);
+                    }}
+                    className="px-3 py-2 rounded-lg border border-slate-200 dark:border-zinc-700 text-xs font-medium text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    Preview Blueprint &amp; Guide Anyway
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeepLinkMissingImages(promptLab)}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors"
+                  >
+                    <HardDriveDownload className="w-3.5 h-3.5" />
+                    <span>Download / Setup in OS Library</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

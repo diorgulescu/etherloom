@@ -31,6 +31,7 @@ import {
   SettingsModal,
   type SettingsSectionId,
 } from "./components/modals/SettingsModal";
+import { StorageLibraryModal } from "./components/modals/StorageLibraryModal";
 import { WelcomeModal } from "./components/modals/WelcomeModal";
 import { useTheme } from "./hooks/useTheme";
 import {
@@ -78,6 +79,7 @@ import type {
   ConsoleTabSession,
   EnvDoctorReport,
   GuestFamily,
+  OsCatalogEntryDto,
   OsProfile,
   PortLinkState,
   StorageMigrationProgress,
@@ -88,6 +90,7 @@ import type {
   UpdateStorageRequest,
   VmConsoleSubMode,
   VmDisplayMode,
+  VmInstanceInfo,
   WireEdgeData,
 } from "./types/studio";
 import {
@@ -299,6 +302,17 @@ export function App() {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionId>("storage");
+  const [storageLibraryOpen, setStorageLibraryOpen] = useState(false);
+  const [libraryFocusedCatalogIds, setLibraryFocusedCatalogIds] = useState<
+    string[] | null
+  >(null);
+  const [libraryFocusedLabTitle, setLibraryFocusedLabTitle] = useState<
+    string | null
+  >(null);
+  const [academyPromptLabId, setAcademyPromptLabId] = useState<string | null>(
+    null
+  );
+  const [guidedSetupVms, setGuidedSetupVms] = useState<EtherloomFlowNode[]>([]);
   const [customVmWizardOpen, setCustomVmWizardOpen] = useState(false);
   const [newProjectModalOpen, setNewProjectModalOpen] = useState(false);
   const [configNodeId, setConfigNodeId] = useState<string | null>(null);
@@ -529,15 +543,36 @@ export function App() {
     });
 
     void onVmStateChanged((ev) => {
+      const mappedStatus =
+        ev.status === "starting"
+          ? "booting"
+          : ev.status === "running"
+          ? "running"
+          : "stopped";
+
+      if (ev.nodeId.startsWith("setup-")) {
+        setGuidedSetupVms((curr) =>
+          curr.map((vm) =>
+            vm.id === ev.nodeId
+              ? { ...vm, data: { ...vm.data, status: mappedStatus } }
+              : vm
+          )
+        );
+        if (ev.status === "stopped") {
+          void fetchComponentCatalog().then(setCatalog);
+          void refreshTemplates();
+          if (ev.message?.includes("Golden Template")) {
+            showToast("ok", ev.message, "OS Library", () =>
+              setStorageLibraryOpen(true)
+            );
+          }
+        }
+        return;
+      }
+
       setNodes((curr) =>
         curr.map((n) => {
           if (n.id !== ev.nodeId) return n;
-          const mappedStatus =
-            ev.status === "starting"
-              ? "booting"
-              : ev.status === "running"
-              ? "running"
-              : "stopped";
           return {
             ...n,
             data: {
@@ -1003,6 +1038,17 @@ export function App() {
   // Node Start/Stop, Console & Settings Quick Actions
   const handleToggleNodeRun = useCallback(
     async (nodeId: string) => {
+      if (nodeId.startsWith("setup-")) {
+        try {
+          await stopVm(nodeId, false);
+        } catch (err) {
+          showToast(
+            "error",
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+        return;
+      }
       const target = nodes.find((n) => n.id === nodeId);
       if (!target || target.data.kind !== "vm") return;
 
@@ -1191,9 +1237,15 @@ export function App() {
             ? "sw"
             : component.kind === "l1_hub"
             ? "hub"
-            : component.guestFamily ?? "vm";
+            : component.osProfileId?.split("-")[0] ??
+              component.guestFamily ??
+              "vm";
         const label = `${shortBase}${index}`;
         const nodeId = `node-${label}-${Date.now().toString(36).slice(-4)}`;
+        const nicModel =
+          component.kind === "vm"
+            ? component.defaultNicModel ?? "virtio-net-pci"
+            : null;
 
         const newNode: EtherloomFlowNode = {
           id: nodeId,
@@ -1207,6 +1259,17 @@ export function App() {
             kind: component.kind,
             guestFamily: component.guestFamily,
             osProfileId: component.osProfileId ?? null,
+            arch:
+              component.kind === "vm" ? component.arch ?? "aarch64" : null,
+            nicModel,
+            firmware:
+              component.kind === "vm"
+                ? component.defaultFirmware ?? "uefi"
+                : null,
+            diskBus:
+              component.kind === "vm"
+                ? component.defaultDiskBus ?? "virtio-blk"
+                : null,
             templateId: null,
             diskSizeGb: 8,
             status: "stopped",
@@ -1217,6 +1280,8 @@ export function App() {
               nodeId,
               kind: component.kind,
               guestFamily: component.guestFamily,
+              osProfileId: component.osProfileId ?? null,
+              nicModel,
               count: component.defaultPorts,
             }),
           },
@@ -1236,15 +1301,31 @@ export function App() {
         prof?.guestFamily ??
         (template.osProfileId.includes("openbsd")
           ? "openbsd"
-          : template.osProfileId.includes("freebsd")
+          : template.osProfileId.includes("freebsd") ||
+            template.osProfileId.includes("opnsense") ||
+            template.osProfileId.includes("pfsense") ||
+            template.osProfileId.includes("dragonfly")
           ? "freebsd"
           : template.osProfileId.includes("netbsd")
           ? "netbsd"
+          : template.osProfileId.includes("9front") ||
+            template.osProfileId.includes("omnios") ||
+            template.osProfileId.includes("haiku") ||
+            template.osProfileId.includes("freedos")
+          ? "other"
           : "linux");
+      const arch = template.arch ?? prof?.arch ?? "aarch64";
+      const nicModel =
+        template.defaultNicModel ?? prof?.defaultNicModel ?? "virtio-net-pci";
+      const firmware =
+        template.defaultFirmware ?? prof?.defaultFirmware ?? "uefi";
+      const diskBus =
+        template.defaultDiskBus ?? prof?.defaultDiskBus ?? "virtio-blk";
 
       setNodes((current) => {
         const index = current.length + 1;
-        const label = `${fam}${index}`;
+        const shortSlug = template.osProfileId.split("-")[0] || fam;
+        const label = `${shortSlug}${index}`;
         const nodeId = `node-${label}-${Date.now().toString(36).slice(-4)}`;
         const newNode: EtherloomFlowNode = {
           id: nodeId,
@@ -1258,6 +1339,10 @@ export function App() {
             kind: "vm",
             guestFamily: fam,
             osProfileId: template.osProfileId,
+            arch,
+            nicModel,
+            firmware,
+            diskBus,
             templateId: template.id,
             diskSizeGb: prof?.recommendedDiskGb ?? 8,
             status: "stopped",
@@ -1268,6 +1353,8 @@ export function App() {
               nodeId,
               kind: "vm",
               guestFamily: fam,
+              osProfileId: template.osProfileId,
+              nicModel,
               count: 2,
             }),
           },
@@ -1278,6 +1365,100 @@ export function App() {
       setIsDirty(true);
     },
     [osProfiles, setNodes]
+  );
+
+  const handleAddCatalogOsNode = useCallback(
+    (entry: OsCatalogEntryDto) => {
+      setNodes((current) => {
+        const index = current.length + 1;
+        const shortSlug = entry.id.split("-")[0] || "vm";
+        const label = `${shortSlug}${index}`;
+        const nodeId = `node-${label}-${Date.now().toString(36).slice(-4)}`;
+        const newNode: EtherloomFlowNode = {
+          id: nodeId,
+          type: "etherloomNode",
+          position: {
+            x: 220 + ((index * 55) % 360),
+            y: 120 + ((index * 45) % 240),
+          },
+          data: {
+            label,
+            kind: "vm",
+            guestFamily: entry.guestFamily,
+            osProfileId: entry.osProfileId,
+            arch: entry.arch,
+            nicModel: entry.nicModel,
+            firmware: entry.firmware,
+            diskBus: entry.diskBus,
+            templateId: entry.templateId,
+            diskSizeGb: entry.recommendedDiskGb,
+            notes: `${entry.name} ${entry.version}`,
+            status: "stopped",
+            vcpus: entry.defaultCpus,
+            memoryMb: entry.defaultRamMb,
+            displayMode: "vnc",
+            ports: buildNodePorts({
+              nodeId,
+              kind: "vm",
+              guestFamily: entry.guestFamily,
+              osProfileId: entry.osProfileId,
+              nicModel: entry.nicModel,
+              count: 2,
+            }),
+          },
+        };
+        setSelectedNodeId(nodeId);
+        return [...current, newNode];
+      });
+      setIsDirty(true);
+      showToast("ok", `Added ${entry.name} (${entry.arch}) node to topology`);
+    },
+    [setNodes, showToast]
+  );
+
+  const handleGuidedSetupStarted = useCallback(
+    (entry: OsCatalogEntryDto, vm: VmInstanceInfo) => {
+      const setupNode: EtherloomFlowNode = {
+        id: vm.nodeId,
+        type: "etherloomNode",
+        position: { x: 0, y: 0 },
+        data: {
+          label: `${entry.id}-setup`,
+          kind: "vm",
+          guestFamily: entry.guestFamily,
+          osProfileId: entry.osProfileId,
+          arch: entry.arch,
+          nicModel: entry.nicModel,
+          firmware: entry.firmware,
+          diskBus: entry.diskBus,
+          bootMediaPath: vm.bootMediaPath,
+          status: "running",
+          vcpus: vm.cpus,
+          memoryMb: vm.ramMb,
+          displayMode: vm.displayMode,
+          ports: [],
+        },
+      };
+      setGuidedSetupVms((prev) => {
+        const filtered = prev.filter((item) => item.id !== vm.nodeId);
+        return [...filtered, setupNode];
+      });
+      const initialMode: VmConsoleSubMode =
+        entry.id === "openbsd" || entry.id === "vyos" ? "serial" : "display";
+      setConsoleTabs((prev) => {
+        const filtered = prev.filter((t) => t.nodeId !== vm.nodeId);
+        return [...filtered, { nodeId: vm.nodeId, mode: initialMode }];
+      });
+      setActiveWorkspaceTab(`vm:${vm.nodeId}`);
+      setDockOpen(true);
+      setDockExpanded(true);
+      setStorageLibraryOpen(false);
+      showToast(
+        "ok",
+        `Guided Setup started for ${entry.name}! Complete OS install in the Console below, then run halt -p / poweroff to auto-create your Golden Template.`
+      );
+    },
+    [showToast]
   );
 
   const handleCreateCustomVm = useCallback(
@@ -1303,6 +1484,10 @@ export function App() {
             kind: "vm",
             guestFamily: spec.guestFamily,
             osProfileId: spec.osProfileId,
+            arch: spec.arch,
+            nicModel: spec.nicModel,
+            firmware: spec.firmware,
+            diskBus: spec.diskBus,
             templateId: spec.templateId,
             bootMediaPath: spec.bootMediaPath,
             bootMediaBus: spec.bootMediaBus,
@@ -1316,6 +1501,8 @@ export function App() {
               nodeId,
               kind: "vm",
               guestFamily: spec.guestFamily,
+              osProfileId: spec.osProfileId,
+              nicModel: spec.nicModel,
               count: spec.nicCount,
             }),
           },
@@ -1469,11 +1656,20 @@ export function App() {
         );
         if (missingReqs.length > 0) {
           const names = missingReqs.map((r) => r.osProfileName).join(", ");
+          const missingIds = missingReqs.map(
+            (r) => r.catalogId ?? r.osProfileId
+          );
           showToast(
             "ok",
-            `Loaded Lab ${String(inst.lab.summary.number).padStart(2, "0")} sandbox. Create/import ${names} template before starting VMs.`,
-            "Create Template",
-            () => setCustomVmWizardOpen(true)
+            `Loaded Lab ${String(inst.lab.summary.number).padStart(2, "0")} sandbox. Download or import ${names} in OS Library before starting VMs.`,
+            "OS Library",
+            () => {
+              setLibraryFocusedCatalogIds(missingIds);
+              setLibraryFocusedLabTitle(
+                `Lab ${String(inst.lab.summary.number).padStart(2, "0")}: ${inst.lab.summary.title}`
+              );
+              setStorageLibraryOpen(true);
+            }
           );
         } else {
           const boundNote =
@@ -1736,6 +1932,7 @@ export function App() {
         ...node,
         data: {
           ...node.data,
+          hostArch: envReport?.hostArch ?? "aarch64",
           portStates,
           onToggleRun: handleToggleNodeRun,
           onOpenConsole: handleOpenNodeConsole,
@@ -1745,6 +1942,7 @@ export function App() {
     });
   }, [
     edges,
+    envReport?.hostArch,
     handleOpenNodeConsole,
     handleOpenNodeSettings,
     handleToggleNodeRun,
@@ -1752,8 +1950,11 @@ export function App() {
   ]);
 
   const vmNodes = useMemo(
-    () => enrichedNodes.filter((n) => n.data.kind === "vm"),
-    [enrichedNodes]
+    () => [
+      ...enrichedNodes.filter((n) => n.data.kind === "vm"),
+      ...guidedSetupVms,
+    ],
+    [enrichedNodes, guidedSetupVms]
   );
 
   const configNode = useMemo(
@@ -1821,8 +2022,10 @@ export function App() {
         projectBusy={projectBusy}
         activeLabNumber={activeLab?.summary.number ?? null}
         labDrawerOpen={labDrawerOpen}
+        readyTemplateCount={baseTemplates.length}
         onOpenWelcomeModal={() => setWelcomeModalOpen(true)}
         onOpenAcademyModal={() => setAcademyModalOpen(true)}
+        onOpenStorageLibraryModal={() => setStorageLibraryOpen(true)}
         onToggleLabDrawer={() => setLabDrawerOpen((v) => !v)}
         onNewProject={() => setNewProjectModalOpen(true)}
         onOpenProject={() => void handleOpenProject()}
@@ -1866,6 +2069,7 @@ export function App() {
             onAddComponent={handleAddComponent}
             onAddFromTemplate={handleAddFromTemplate}
             onOpenCustomVmWizard={() => setCustomVmWizardOpen(true)}
+            onOpenStorageLibraryModal={() => setStorageLibraryOpen(true)}
           />
         )}
 
@@ -1975,10 +2179,7 @@ export function App() {
         storageState={storageState}
         nodeCount={nodes.length}
         linkCount={edges.length}
-        onOpenStorageSettings={() => {
-          setSettingsInitialSection("storage");
-          setSettingsModalOpen(true);
-        }}
+        onOpenStorageSettings={() => setStorageLibraryOpen(true)}
       />
 
       {/* Non-blocking Toast Notification */}
@@ -2019,6 +2220,41 @@ export function App() {
       )}
 
       {/* Modals */}
+      <StorageLibraryModal
+        open={storageLibraryOpen}
+        hostArch={envReport?.hostArch ?? "aarch64"}
+        storageState={storageState}
+        migrationProgress={migrationProgress}
+        focusedCatalogIds={libraryFocusedCatalogIds}
+        focusedLabTitle={libraryFocusedLabTitle}
+        onClearFocusedCatalogIds={() => {
+          setLibraryFocusedCatalogIds(null);
+          setLibraryFocusedLabTitle(null);
+        }}
+        onReturnToAcademy={
+          libraryFocusedCatalogIds
+            ? () => {
+                setStorageLibraryOpen(false);
+                setLibraryFocusedCatalogIds(null);
+                setLibraryFocusedLabTitle(null);
+                setAcademyModalOpen(true);
+              }
+            : undefined
+        }
+        onClose={() => {
+          setStorageLibraryOpen(false);
+          setLibraryFocusedCatalogIds(null);
+          setLibraryFocusedLabTitle(null);
+        }}
+        onApplyStorageUpdate={handleApplyStorageUpdate}
+        onRetryDetection={handleRetryStorage}
+        onFallbackInternal={handleFallbackInternalStorage}
+        onAddCatalogOsNode={handleAddCatalogOsNode}
+        onGuidedSetupStarted={handleGuidedSetupStarted}
+        onTemplatesChanged={refreshTemplates}
+        onNotify={(kind, text) => showToast(kind, text)}
+      />
+
       <WelcomeModal
         open={welcomeModalOpen}
         labs={academyLabs}
@@ -2029,7 +2265,22 @@ export function App() {
           setWelcomeModalOpen(false);
           setAcademyModalOpen(true);
         }}
-        onLaunchLab={(labId) => void handleLaunchAcademyLab(labId)}
+        onOpenStorageLibrary={() => {
+          setWelcomeModalOpen(false);
+          setLibraryFocusedCatalogIds(null);
+          setLibraryFocusedLabTitle(null);
+          setStorageLibraryOpen(true);
+        }}
+        onLaunchLab={(labId) => {
+          const summary = academyLabs.find((l) => l.id === labId);
+          if (summary && !summary.allTemplatesReady) {
+            setWelcomeModalOpen(false);
+            setAcademyPromptLabId(labId);
+            setAcademyModalOpen(true);
+            return;
+          }
+          void handleLaunchAcademyLab(labId);
+        }}
         onNewProject={() => setNewProjectModalOpen(true)}
         onOpenProject={() => void handleOpenProject()}
         onOpenCustomVmWizard={() => setCustomVmWizardOpen(true)}
@@ -2041,12 +2292,22 @@ export function App() {
         loading={academyLoading}
         launchingLabId={launchingLabId}
         activeLabId={activeLab?.summary.id ?? null}
+        initialPromptLabId={academyPromptLabId}
+        onClearInitialPromptLab={() => setAcademyPromptLabId(null)}
         onClose={() => setAcademyModalOpen(false)}
         onRefresh={() => void refreshAcademyLabs()}
         onLaunchLab={(labId) => void handleLaunchAcademyLab(labId)}
         onOpenTemplateWizard={() => {
           setAcademyModalOpen(false);
-          setCustomVmWizardOpen(true);
+          setLibraryFocusedCatalogIds(null);
+          setLibraryFocusedLabTitle(null);
+          setStorageLibraryOpen(true);
+        }}
+        onOpenOsLibraryForCatalogIds={(catalogIds, labTitle) => {
+          setAcademyModalOpen(false);
+          setLibraryFocusedCatalogIds(catalogIds);
+          setLibraryFocusedLabTitle(labTitle ?? null);
+          setStorageLibraryOpen(true);
         }}
       />
 

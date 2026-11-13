@@ -22,6 +22,7 @@ import {
   fabricGetSwitchMacTable,
 } from "../../services/tauriBridge";
 import type {
+  GuestArch,
   MacTableEntry,
   NodePort,
   PortLinkState,
@@ -45,6 +46,93 @@ function resolveHeaderBadge(data: TopologyNodeData) {
       accent: "bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30",
     };
   }
+
+  const prof = (data.osProfileId ?? "").toLowerCase();
+  if (prof === "openwrt") {
+    return {
+      icon: Radio,
+      tag: "OpenWrt",
+      accent: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30",
+    };
+  }
+  if (prof === "mikrotik-chr") {
+    return {
+      icon: Network,
+      tag: "RouterOS CHR",
+      accent: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+    };
+  }
+  if (prof === "vyos") {
+    return {
+      icon: Network,
+      tag: "VyOS",
+      accent: "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30",
+    };
+  }
+  if (prof === "opnsense") {
+    return {
+      icon: Shield,
+      tag: "OPNsense",
+      accent: "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
+    };
+  }
+  if (prof === "pfsense") {
+    return {
+      icon: Shield,
+      tag: "pfSense CE",
+      accent: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+    };
+  }
+  if (prof === "9front") {
+    return {
+      icon: Terminal,
+      tag: "9front Plan 9",
+      accent: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    };
+  }
+  if (prof === "omnios") {
+    return {
+      icon: Server,
+      tag: "OmniOS Illumos",
+      accent: "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/30",
+    };
+  }
+  if (prof === "dragonflybsd") {
+    return {
+      icon: Server,
+      tag: "DragonFly BSD",
+      accent: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+    };
+  }
+  if (prof === "haiku") {
+    return {
+      icon: Monitor,
+      tag: "Haiku OS",
+      accent: "bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-500/30",
+    };
+  }
+  if (prof === "freedos") {
+    return {
+      icon: Terminal,
+      tag: "FreeDOS mTCP",
+      accent: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    };
+  }
+  if (prof === "alpine-linux") {
+    return {
+      icon: Cpu,
+      tag: "Alpine Linux",
+      accent: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
+    };
+  }
+  if (prof === "debian-linux") {
+    return {
+      icon: Server,
+      tag: "Debian Linux",
+      accent: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30",
+    };
+  }
+
   switch (data.guestFamily) {
     case "openbsd":
       return {
@@ -75,6 +163,26 @@ function resolveHeaderBadge(data: TopologyNodeData) {
           "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30",
       };
   }
+}
+
+function resolveArchAccelBadge(archRaw?: GuestArch | null, hostArchRaw?: string | null) {
+  const arch: GuestArch = archRaw ?? "aarch64";
+  const hostArch = hostArchRaw ?? "aarch64";
+  const isNativeHvf =
+    (arch === "aarch64" && hostArch === "aarch64") ||
+    (arch === "x86_64" && hostArch === "x86_64");
+  const archShort =
+    arch === "aarch64"
+      ? "ARM64"
+      : arch === "x86_64"
+      ? "x86_64"
+      : arch === "i386"
+      ? "i386"
+      : "RISC-V";
+  return {
+    label: `${archShort} ${isNativeHvf ? "HVF" : "TCG"}`,
+    isNativeHvf,
+  };
 }
 
 function PortStatusLed({ state }: { state: PortLinkState }) {
@@ -259,7 +367,7 @@ export function EtherloomNode({
 
   return (
     <div
-      className={`relative min-w-[238px] rounded-xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border transition-all shadow-md ${
+      className={`relative min-w-[254px] rounded-xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border transition-all shadow-md ${
         selected
           ? "border-sky-500 ring-2 ring-sky-500/30"
           : "border-slate-200/90 dark:border-zinc-700/90 hover:border-slate-300 dark:hover:border-zinc-600"
@@ -406,14 +514,31 @@ export function EtherloomNode({
       {/* Quick Action Bar & Resource / MAC Table Footer */}
       <div className="px-2.5 py-1.5 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/40 rounded-b-xl flex items-center justify-between gap-1.5">
         {isVm ? (
-          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-zinc-400 truncate">
-            <span>
-              {data.vcpus ?? 2}c • {data.memoryMb ?? 512}M
+          <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-zinc-400 truncate">
+            {(() => {
+              const archBadge = resolveArchAccelBadge(data.arch, data.hostArch);
+              return (
+                <span
+                  title={`Architecture: ${data.arch ?? "aarch64"} • NIC: ${
+                    data.nicModel ?? "virtio-net-pci"
+                  }`}
+                  className={`px-1.5 py-0.2 rounded font-mono text-[9px] font-medium border shrink-0 ${
+                    archBadge.isNativeHvf
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25"
+                      : "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/25"
+                  }`}
+                >
+                  {archBadge.label}
+                </span>
+              );
+            })()}
+            <span className="truncate">
+              {data.vcpus ?? 2}c•{data.memoryMb ?? 512}M
             </span>
             {data.bootMediaPath && (
               <span
                 title={`Installer attached: ${data.bootMediaPath}`}
-                className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-medium"
+                className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-medium shrink-0"
               >
                 <Disc className="w-2.5 h-2.5" />
                 ISO

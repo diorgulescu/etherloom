@@ -1,5 +1,6 @@
 use crate::env_doctor::resolve_qemu_img;
 use crate::storage::StorageManager;
+use crate::vm_manager::{DiskBus, FinalizeTemplateOnExit, FirmwareType, GuestArch, NicModel};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -9,13 +10,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use uuid::Uuid;
 
-/// Built-in Guest OS Profile preset defining NIC naming conventions and default compute sizing.
+/// Built-in Guest OS Profile preset defining NIC naming conventions, architecture, and default compute sizing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OsProfile {
     pub id: String,
     pub name: String,
     pub guest_family: String,
+    #[serde(default)]
+    pub arch: GuestArch,
+    #[serde(default)]
+    pub default_nic_model: NicModel,
+    #[serde(default)]
+    pub default_firmware: FirmwareType,
+    #[serde(default)]
+    pub default_disk_bus: DiskBus,
     pub nic_prefix: String,
     pub nic_naming_pattern: String,
     pub alt_nic_naming_pattern: Option<String>,
@@ -26,77 +35,408 @@ pub struct OsProfile {
 }
 
 impl OsProfile {
-    /// Formats the canonical guest interface name for NIC index `n` (0-based).
+    /// Formats the canonical guest interface name for NIC index `n` (0-based) using the profile's default NIC model.
     pub fn format_nic(&self, index: usize) -> String {
-        format!("{}{}", self.nic_prefix, index)
+        format_guest_interface(
+            Some(&self.id),
+            Some(&self.guest_family),
+            self.default_nic_model,
+            index,
+        )
+    }
+
+    /// Formats the guest interface name for NIC index `n` under a specific `nic_model` override.
+    pub fn format_nic_for_model(&self, nic_model: NicModel, index: usize) -> String {
+        format_guest_interface(
+            Some(&self.id),
+            Some(&self.guest_family),
+            nic_model,
+            index,
+        )
     }
 }
 
-/// Returns the 5 built-in OS Profile presets defined in Phase 1.
+/// Computes the exact in-guest network interface label given the OS profile, guest family, emulated NIC model, and 0-based slot index.
+pub fn format_guest_interface(
+    os_profile_id: Option<&str>,
+    guest_family: Option<&str>,
+    nic_model: NicModel,
+    index: usize,
+) -> String {
+    match os_profile_id.unwrap_or("") {
+        "mikrotik-chr" => return format!("ether{}", index + 1),
+        "9front" => return format!("/net/ether{index}"),
+        "omnios" => {
+            return match nic_model {
+                NicModel::VirtioNetPci => format!("vioif{index}"),
+                NicModel::Rtl8139 => format!("rtls{index}"),
+                _ => format!("e1000g{index}"),
+            };
+        }
+        "haiku" => {
+            return match nic_model {
+                NicModel::VirtioNetPci => format!("/dev/net/virtio/{index}"),
+                NicModel::Rtl8139 => format!("/dev/net/rtl8139/{index}"),
+                NicModel::Pcnet => format!("/dev/net/pcnet/{index}"),
+                _ => format!("/dev/net/ipro1000/{index}"),
+            };
+        }
+        "freedos" => {
+            let vec_int = 0x60 + index;
+            return match nic_model {
+                NicModel::Ne2kPci => format!("NE2000 0x{vec_int:02x}"),
+                NicModel::E1000 => format!("E1000PKT 0x{vec_int:02x}"),
+                NicModel::Rtl8139 => format!("RTSPKT 0x{vec_int:02x}"),
+                _ => format!("PCNTPK 0x{vec_int:02x}"),
+            };
+        }
+        "freebsd" | "opnsense" | "pfsense" | "dragonflybsd" => {
+            return format_freebsd_family_nic(nic_model, index);
+        }
+        "openbsd" => {
+            return format_openbsd_nic(nic_model, index);
+        }
+        "netbsd" => {
+            return format_netbsd_nic(nic_model, index);
+        }
+        _ => {}
+    }
+
+    match guest_family.unwrap_or("linux") {
+        "freebsd" => format_freebsd_family_nic(nic_model, index),
+        "openbsd" => format_openbsd_nic(nic_model, index),
+        "netbsd" => format_netbsd_nic(nic_model, index),
+        _ => format!("eth{index}"),
+    }
+}
+
+fn format_freebsd_family_nic(nic_model: NicModel, index: usize) -> String {
+    match nic_model {
+        NicModel::VirtioNetPci => format!("vtnet{index}"),
+        NicModel::E1000 => format!("em{index}"),
+        NicModel::Rtl8139 => format!("re{index}"),
+        NicModel::Pcnet => format!("le{index}"),
+        NicModel::Ne2kPci => format!("ed{index}"),
+    }
+}
+
+fn format_openbsd_nic(nic_model: NicModel, index: usize) -> String {
+    match nic_model {
+        NicModel::VirtioNetPci => format!("vio{index}"),
+        NicModel::E1000 => format!("em{index}"),
+        NicModel::Rtl8139 => format!("rl{index}"),
+        NicModel::Pcnet => format!("pcn{index}"),
+        NicModel::Ne2kPci => format!("ne{index}"),
+    }
+}
+
+fn format_netbsd_nic(nic_model: NicModel, index: usize) -> String {
+    match nic_model {
+        NicModel::VirtioNetPci => format!("vioif{index}"),
+        NicModel::E1000 => format!("wm{index}"),
+        NicModel::Rtl8139 => format!("rtk{index}"),
+        NicModel::Pcnet => format!("pcn{index}"),
+        NicModel::Ne2kPci => format!("ne{index}"),
+    }
+}
+
+/// Returns all 15 built-in OS Profile presets spanning ARM64 HVF, x86_64, and i386 guests.
 pub fn builtin_os_profiles() -> Vec<OsProfile> {
     vec![
+        // --- Core 5 Foundational Profiles (100% ID-compatible with Phases 1-5 & Academy Labs) ---
         OsProfile {
             id: "alpine-linux".to_string(),
             name: "Alpine Linux".to_string(),
             guest_family: "linux".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
             nic_prefix: "eth".to_string(),
             nic_naming_pattern: "eth{n}".to_string(),
             alt_nic_naming_pattern: None,
             default_ram_mb: 256,
             default_cpus: 1,
             recommended_disk_gb: 4,
-            notes: "Lightweight musl/BusyBox Linux router & host (virtio-net eth0..n)".to_string(),
+            notes: "Lightweight musl/BusyBox ARM64 Linux host & router (virtio-net eth0..n)".to_string(),
         },
         OsProfile {
             id: "debian-linux".to_string(),
             name: "Debian / Generic Linux".to_string(),
             guest_family: "linux".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
             nic_prefix: "eth".to_string(),
             nic_naming_pattern: "enp0s{n} / eth{n}".to_string(),
             alt_nic_naming_pattern: Some("enp0s{n}".to_string()),
             default_ram_mb: 512,
             default_cpus: 2,
             recommended_disk_gb: 10,
-            notes: "Systemd / FRRouting / Linux network stack (predictable enp0s* or eth*)"
+            notes: "Debian Cloud ARM64 / FRRouting / nftables / namespaces (enp0s* or eth*)"
                 .to_string(),
         },
         OsProfile {
             id: "freebsd".to_string(),
             name: "FreeBSD".to_string(),
             guest_family: "freebsd".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
             nic_prefix: "vtnet".to_string(),
             nic_naming_pattern: "vtnet{n}".to_string(),
-            alt_nic_naming_pattern: None,
+            alt_nic_naming_pattern: Some("em{n} (e1000)".to_string()),
             default_ram_mb: 512,
             default_cpus: 2,
             recommended_disk_gb: 12,
-            notes: "FreeBSD ARM64 UEFI guest with virtio vtnet0..n & VNET jails".to_string(),
+            notes: "FreeBSD ARM64 UEFI guest with virtio vtnet0..n (or em0..n on e1000) & VNET jails".to_string(),
         },
         OsProfile {
             id: "openbsd".to_string(),
             name: "OpenBSD".to_string(),
             guest_family: "openbsd".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
             nic_prefix: "vio".to_string(),
             nic_naming_pattern: "vio{n}".to_string(),
-            alt_nic_naming_pattern: None,
+            alt_nic_naming_pattern: Some("em{n} (e1000)".to_string()),
             default_ram_mb: 512,
             default_cpus: 2,
             recommended_disk_gb: 8,
-            notes: "OpenBSD ARM64 UEFI guest with pf, bgpd, ospfd & vio0..n".to_string(),
+            notes: "OpenBSD ARM64 UEFI guest with pf, CARP, pfsync, OpenBGPD & vio0..n".to_string(),
         },
         OsProfile {
             id: "netbsd".to_string(),
             name: "NetBSD".to_string(),
             guest_family: "netbsd".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
             nic_prefix: "vioif".to_string(),
             nic_naming_pattern: "vioif{n}".to_string(),
-            alt_nic_naming_pattern: None,
+            alt_nic_naming_pattern: Some("wm{n} (e1000)".to_string()),
             default_ram_mb: 256,
             default_cpus: 1,
             recommended_disk_gb: 6,
-            notes: "NetBSD evbarm-aarch64 UEFI guest with npf & vioif0..n".to_string(),
+            notes: "NetBSD evbarm-aarch64 UEFI guest with NPF, rumpkernels & vioif0..n".to_string(),
+        },
+        // --- Routers & Firewalls ---
+        OsProfile {
+            id: "openwrt".to_string(),
+            name: "OpenWrt".to_string(),
+            guest_family: "linux".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
+            nic_prefix: "eth".to_string(),
+            nic_naming_pattern: "eth{n}".to_string(),
+            alt_nic_naming_pattern: None,
+            default_ram_mb: 128,
+            default_cpus: 1,
+            recommended_disk_gb: 2,
+            notes: "Embedded ARM64 home/SOHO router OS (armsr/armv8 EFI, LuCI web UI & nftables fw4)".to_string(),
+        },
+        OsProfile {
+            id: "mikrotik-chr".to_string(),
+            name: "MikroTik RouterOS CHR".to_string(),
+            guest_family: "linux".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
+            nic_prefix: "ether".to_string(),
+            nic_naming_pattern: "ether{n+1}".to_string(),
+            alt_nic_naming_pattern: None,
+            default_ram_mb: 256,
+            default_cpus: 2,
+            recommended_disk_gb: 2,
+            notes: "Cloud Hosted Router v7 ARM64 (1-indexed ether1..n, OSPF, BGP, MPLS, VXLAN)".to_string(),
+        },
+        OsProfile {
+            id: "vyos".to_string(),
+            name: "VyOS (Stream / Rolling)".to_string(),
+            guest_family: "linux".to_string(),
+            arch: GuestArch::X86_64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::VirtioBlk,
+            nic_prefix: "eth".to_string(),
+            nic_naming_pattern: "eth{n}".to_string(),
+            alt_nic_naming_pattern: None,
+            default_ram_mb: 1024,
+            default_cpus: 2,
+            recommended_disk_gb: 10,
+            notes: "Enterprise Junos-style commit/rollback CLI router powered by FRRouting (eth0..n)".to_string(),
+        },
+        OsProfile {
+            id: "opnsense".to_string(),
+            name: "OPNsense (nano Serial)".to_string(),
+            guest_family: "freebsd".to_string(),
+            arch: GuestArch::X86_64,
+            default_nic_model: NicModel::E1000,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::Ahci,
+            nic_prefix: "em".to_string(),
+            nic_naming_pattern: "em{n}".to_string(),
+            alt_nic_naming_pattern: Some("vtnet{n} (virtio-net-pci)".to_string()),
+            default_ram_mb: 1536,
+            default_cpus: 2,
+            recommended_disk_gb: 16,
+            notes: "Hardened FreeBSD x86_64 firewall appliance (nano pre-installed serial image, em0 WAN / em1 LAN)".to_string(),
+        },
+        OsProfile {
+            id: "pfsense".to_string(),
+            name: "pfSense CE".to_string(),
+            guest_family: "freebsd".to_string(),
+            arch: GuestArch::X86_64,
+            default_nic_model: NicModel::E1000,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::Ahci,
+            nic_prefix: "em".to_string(),
+            nic_naming_pattern: "em{n}".to_string(),
+            alt_nic_naming_pattern: Some("vtnet{n} (virtio-net-pci)".to_string()),
+            default_ram_mb: 1024,
+            default_cpus: 2,
+            recommended_disk_gb: 16,
+            notes: "Classic FreeBSD x86_64 enterprise firewall & VPN gateway (em0..n or vtnet0..n)".to_string(),
+        },
+        // --- Research, UNIX & Retro ---
+        OsProfile {
+            id: "9front".to_string(),
+            name: "9front (Plan 9)".to_string(),
+            guest_family: "other".to_string(),
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
+            nic_prefix: "/net/ether".to_string(),
+            nic_naming_pattern: "/net/ether{n}".to_string(),
+            alt_nic_naming_pattern: None,
+            default_ram_mb: 512,
+            default_cpus: 2,
+            recommended_disk_gb: 6,
+            notes: "Plan 9 from Bell Labs (ARM64 HVF) — everything-is-a-file /net stack & 9P".to_string(),
+        },
+        OsProfile {
+            id: "omnios".to_string(),
+            name: "OmniOS (Illumos)".to_string(),
+            guest_family: "other".to_string(),
+            arch: GuestArch::X86_64,
+            default_nic_model: NicModel::E1000,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::Ahci,
+            nic_prefix: "e1000g".to_string(),
+            nic_naming_pattern: "e1000g{n}".to_string(),
+            alt_nic_naming_pattern: Some("vioif{n} (virtio-net-pci)".to_string()),
+            default_ram_mb: 1024,
+            default_cpus: 2,
+            recommended_disk_gb: 16,
+            notes: "OpenSolaris / Illumos x86_64 server with Crossbow VNICs (dladm/ipadm), Zones & DTrace".to_string(),
+        },
+        OsProfile {
+            id: "dragonflybsd".to_string(),
+            name: "DragonFly BSD".to_string(),
+            guest_family: "freebsd".to_string(),
+            arch: GuestArch::X86_64,
+            default_nic_model: NicModel::E1000,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::Ahci,
+            nic_prefix: "em".to_string(),
+            nic_naming_pattern: "em{n}".to_string(),
+            alt_nic_naming_pattern: None,
+            default_ram_mb: 512,
+            default_cpus: 2,
+            recommended_disk_gb: 12,
+            notes: "DragonFly BSD x86_64 with lockless per-CPU LWKT packet routing & HAMMER2".to_string(),
+        },
+        OsProfile {
+            id: "haiku".to_string(),
+            name: "Haiku OS".to_string(),
+            guest_family: "other".to_string(),
+            arch: GuestArch::X86_64,
+            default_nic_model: NicModel::E1000,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::Ahci,
+            nic_prefix: "/dev/net/ipro1000/".to_string(),
+            nic_naming_pattern: "/dev/net/ipro1000/{n}".to_string(),
+            alt_nic_naming_pattern: None,
+            default_ram_mb: 512,
+            default_cpus: 2,
+            recommended_disk_gb: 8,
+            notes: "Modern BeOS desktop UNIX-like OS (x86_64 Intel PRO/1000 /dev/net/ipro1000/0)".to_string(),
+        },
+        OsProfile {
+            id: "freedos".to_string(),
+            name: "FreeDOS + mTCP".to_string(),
+            guest_family: "other".to_string(),
+            arch: GuestArch::I386,
+            default_nic_model: NicModel::Pcnet,
+            default_firmware: FirmwareType::Bios,
+            default_disk_bus: DiskBus::Ide,
+            nic_prefix: "PCNTPK 0x6".to_string(),
+            nic_naming_pattern: "PCNTPK 0x6{n}".to_string(),
+            alt_nic_naming_pattern: Some("NE2000 0x6{n} (ne2k_pci)".to_string()),
+            default_ram_mb: 32,
+            default_cpus: 1,
+            recommended_disk_gb: 1,
+            notes: "Single-tasking 32-bit DOS with Crynwr packet driver & mTCP — zero background packet noise!".to_string(),
         },
     ]
+}
+
+/// Looks up a built-in `OsProfile` by `id`.
+pub fn find_os_profile(profile_id: &str) -> Option<OsProfile> {
+    builtin_os_profiles()
+        .into_iter()
+        .find(|p| p.id == profile_id)
+}
+
+/// Infers `(os_profile_id, human_name)` from a `.qcow2` filename stem when `.template.json` is absent
+/// (such as templates created by `scripts/prepare-library.sh`).
+pub fn infer_profile_from_stem(stem: &str) -> (&'static str, String) {
+    let lower = stem.to_ascii_lowercase();
+    let profile_id = if lower.starts_with("alpine") {
+        "alpine-linux"
+    } else if lower.starts_with("freebsd") {
+        "freebsd"
+    } else if lower.starts_with("openbsd") {
+        "openbsd"
+    } else if lower.starts_with("netbsd") {
+        "netbsd"
+    } else if lower.starts_with("openwrt") {
+        "openwrt"
+    } else if lower.starts_with("mikrotik") || lower.starts_with("chr") || lower.contains("routeros") {
+        "mikrotik-chr"
+    } else if lower.starts_with("vyos") {
+        "vyos"
+    } else if lower.starts_with("9front") || lower.starts_with("plan9") {
+        "9front"
+    } else if lower.starts_with("opnsense") {
+        "opnsense"
+    } else if lower.starts_with("pfsense") {
+        "pfsense"
+    } else if lower.starts_with("omnios") || lower.starts_with("illumos") {
+        "omnios"
+    } else if lower.starts_with("dragonfly") {
+        "dragonflybsd"
+    } else if lower.starts_with("haiku") {
+        "haiku"
+    } else if lower.starts_with("freedos") || lower.starts_with("mtcp") {
+        "freedos"
+    } else {
+        "debian-linux"
+    };
+
+    let display_name = find_os_profile(profile_id)
+        .map(|p| format!("{} ({})", p.name, stem))
+        .unwrap_or_else(|| stem.to_string());
+    (profile_id, display_name)
 }
 
 /// Metadata stored alongside a Golden Image inside active `templates_dir`.
@@ -106,6 +446,14 @@ pub struct BaseTemplateInfo {
     pub id: String,
     pub name: String,
     pub os_profile_id: String,
+    #[serde(default)]
+    pub arch: GuestArch,
+    #[serde(default)]
+    pub default_nic_model: NicModel,
+    #[serde(default)]
+    pub default_firmware: FirmwareType,
+    #[serde(default)]
+    pub default_disk_bus: DiskBus,
     pub path: String,
     pub filename: String,
     pub virtual_size_bytes: u64,
@@ -163,6 +511,14 @@ pub struct PromoteTemplateRequest {
     pub source_disk_path: String,
     pub template_name: String,
     pub os_profile_id: String,
+    #[serde(default)]
+    pub arch: Option<GuestArch>,
+    #[serde(default)]
+    pub default_nic_model: Option<NicModel>,
+    #[serde(default)]
+    pub default_firmware: Option<FirmwareType>,
+    #[serde(default)]
+    pub default_disk_bus: Option<DiskBus>,
     pub description: Option<String>,
 }
 
@@ -237,17 +593,17 @@ impl ImageStore {
         &self.storage
     }
 
-    fn resolve_qemu_img_bin(&self) -> Option<PathBuf> {
+    pub(crate) fn resolve_qemu_img_bin(&self) -> Option<PathBuf> {
         self.qemu_img_override.clone().or_else(resolve_qemu_img)
     }
 
-    fn require_qemu_img(&self) -> Result<PathBuf, String> {
+    pub(crate) fn require_qemu_img(&self) -> Result<PathBuf, String> {
         self.resolve_qemu_img_bin().ok_or_else(|| {
             "qemu-img was not found in /opt/homebrew/bin, /usr/local/bin, or PATH. Install QEMU via `brew install qemu`.".to_string()
         })
     }
 
-    async fn run_qemu_img(&self, args: &[String]) -> Result<String, String> {
+    pub(crate) async fn run_qemu_img(&self, args: &[String]) -> Result<String, String> {
         let bin = self.require_qemu_img()?;
         let output = Command::new(&bin)
             .args(args)
@@ -329,7 +685,6 @@ impl ImageStore {
         let target = PathBuf::from(&req.disk_path);
         self.assert_not_template_path(&paths.templates_dir, &target)?;
 
-        // Also guard against unmounted `/Volumes/...` destination paths
         if let Err(unmounted) =
             crate::storage::verify_volume_mounted_under(Path::new("/Volumes"), &target)
         {
@@ -411,10 +766,32 @@ impl ImageStore {
             .unwrap_or("template.qcow2")
             .to_string();
 
+        let prof = find_os_profile(&req.os_profile_id);
+        let arch = req
+            .arch
+            .or_else(|| prof.as_ref().map(|p| p.arch))
+            .unwrap_or_default();
+        let default_nic_model = req
+            .default_nic_model
+            .or_else(|| prof.as_ref().map(|p| p.default_nic_model))
+            .unwrap_or_default();
+        let default_firmware = req
+            .default_firmware
+            .or_else(|| prof.as_ref().map(|p| p.default_firmware))
+            .unwrap_or_default();
+        let default_disk_bus = req
+            .default_disk_bus
+            .or_else(|| prof.as_ref().map(|p| p.default_disk_bus))
+            .unwrap_or_default();
+
         let template = BaseTemplateInfo {
             id: template_id.clone(),
             name: req.template_name.trim().to_string(),
             os_profile_id: req.os_profile_id,
+            arch,
+            default_nic_model,
+            default_firmware,
+            default_disk_bus,
             path: target_qcow2.display().to_string(),
             filename,
             virtual_size_bytes: info.virtual_size_bytes,
@@ -437,6 +814,60 @@ impl ImageStore {
         Ok(template)
     }
 
+    /// Marks an already-placed `.qcow2` file inside `templates_dir` read-only (`0444`) and writes its
+    /// `.template.json` sidecar manifest (used by Catalog downloads & Guided Template Setup).
+    pub async fn finalize_in_place_template(
+        &self,
+        target_qcow2: &Path,
+        fin: &FinalizeTemplateOnExit,
+    ) -> Result<BaseTemplateInfo, String> {
+        if !target_qcow2.is_file() {
+            return Err(format!(
+                "Template qcow2 file does not exist: {}",
+                target_qcow2.display()
+            ));
+        }
+
+        if let Ok(meta) = fs::metadata(target_qcow2) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o444);
+            let _ = fs::set_permissions(target_qcow2, perms);
+        }
+
+        let info = self.inspect_disk(target_qcow2).await?;
+        let filename = target_qcow2
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("template.qcow2")
+            .to_string();
+
+        let template = BaseTemplateInfo {
+            id: fin.template_id.clone(),
+            name: fin.template_name.clone(),
+            os_profile_id: fin.os_profile_id.clone(),
+            arch: fin.arch,
+            default_nic_model: fin.default_nic_model,
+            default_firmware: fin.default_firmware,
+            default_disk_bus: fin.default_disk_bus,
+            path: target_qcow2.display().to_string(),
+            filename,
+            virtual_size_bytes: info.virtual_size_bytes,
+            actual_size_bytes: info.actual_size_bytes,
+            read_only: true,
+            created_at_ms: now_epoch_ms(),
+            description: fin.description.clone(),
+        };
+
+        if let Some(parent) = target_qcow2.parent() {
+            let manifest_path = parent.join(format!("{}.template.json", fin.template_id));
+            if let Ok(json_text) = serde_json::to_string_pretty(&template) {
+                let _ = fs::write(&manifest_path, json_text);
+            }
+        }
+
+        Ok(template)
+    }
+
     /// Resolves a logical `template_id` / filename (or explicit `.qcow2` path) against the active `templates_dir`.
     pub async fn resolve_template_backing_path(&self, id_or_path: &str) -> Result<PathBuf, String> {
         let ready_paths = self.storage.require_ready_paths().await?;
@@ -447,7 +878,8 @@ impl ImageStore {
     /// inside a project's `overlays/` folder.
     pub async fn create_node_overlay(&self, req: CreateOverlayRequest) -> Result<DiskInfo, String> {
         let ready_paths = self.storage.require_ready_paths().await?;
-        let backing_path = resolve_template_in_dir(&ready_paths.templates_dir, &req.template_id_or_path)?;
+        let backing_path =
+            resolve_template_in_dir(&ready_paths.templates_dir, &req.template_id_or_path)?;
 
         let overlays_dir = PathBuf::from(&req.overlays_dir);
         if let Err(unmounted) =
@@ -487,8 +919,7 @@ impl ImageStore {
     /// Portable `qcow2` Backing-File Auto-Rebase:
     /// Inspects `<overlay.qcow2>` with `qemu-img info --output=json`. If its recorded `backing-filename`
     /// differs from `<active_templates_dir>/<template_filename>`, automatically runs:
-    /// `qemu-img rebase -u -b <resolved_template_path> -F qcow2 <overlay_path>`
-    /// so moved libraries, external SSD mount changes, or cross-Mac lab sharing work seamlessly.
+    /// `qemu-img rebase -u -b <resolved_template_path> -F qcow2 <overlay_path>`.
     pub async fn ensure_overlay_rebased(
         &self,
         overlay_path: &Path,
@@ -505,7 +936,6 @@ impl ImageStore {
         let templates_dir = &ready_paths.templates_dir;
         let disk_info = self.inspect_disk(overlay_path).await?;
 
-        // Determine logical template filename from explicit node metadata or existing qcow2 header
         let candidate_template_ref: Option<String> = logical_template_id
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -520,7 +950,6 @@ impl ImageStore {
             });
 
         let Some(template_ref) = candidate_template_ref else {
-            // Standalone non-CoW VM disk (e.g. direct ISO install disk without a backing template)
             return Ok(OverlayRebaseReport {
                 overlay_path: overlay_path.display().to_string(),
                 rebased: false,
@@ -551,7 +980,6 @@ impl ImageStore {
             });
         }
 
-        // Execute unsafe header-only rebase (`-u`) so `qemu-img` does not attempt to open the stale/missing path
         let args = vec![
             "rebase".to_string(),
             "-u".to_string(),
@@ -723,10 +1151,35 @@ impl ImageStore {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
 
+            let (inferred_profile_id, inferred_name) = infer_profile_from_stem(&stem);
+            let prof = find_os_profile(inferred_profile_id);
+            let inferred_arch = if stem.contains("x86_64") || stem.contains("amd64") {
+                GuestArch::X86_64
+            } else if stem.contains("i386") || stem.contains("i686") {
+                GuestArch::I386
+            } else if stem.contains("riscv64") {
+                GuestArch::Riscv64
+            } else {
+                prof.as_ref().map(|p| p.arch).unwrap_or(GuestArch::Aarch64)
+            };
+
             templates.push(BaseTemplateInfo {
                 id: stem.clone(),
-                name: stem,
-                os_profile_id: "debian-linux".to_string(),
+                name: inferred_name,
+                os_profile_id: inferred_profile_id.to_string(),
+                arch: inferred_arch,
+                default_nic_model: prof
+                    .as_ref()
+                    .map(|p| p.default_nic_model)
+                    .unwrap_or_default(),
+                default_firmware: prof
+                    .as_ref()
+                    .map(|p| p.default_firmware)
+                    .unwrap_or_default(),
+                default_disk_bus: prof
+                    .as_ref()
+                    .map(|p| p.default_disk_bus)
+                    .unwrap_or_default(),
                 path: path.display().to_string(),
                 filename: path
                     .file_name()
@@ -796,6 +1249,50 @@ impl ImageStore {
         Ok(media)
     }
 
+    /// Scans saved `*.etherloom` project bundles inside active `workspaces_dir` and returns the names
+    /// of any projects whose `topology.toml` references `template_stem` (or `template_stem.qcow2`).
+    pub async fn find_referencing_projects(&self, template_stem: &str) -> Vec<String> {
+        let ready_paths = match self.storage.require_ready_paths().await {
+            Ok(p) => p,
+            Err(_) => return Vec::new(),
+        };
+        let ws_dir = ready_paths.workspaces_dir;
+        let Ok(entries) = fs::read_dir(&ws_dir) else {
+            return Vec::new();
+        };
+
+        let stem = template_stem.trim_end_matches(".qcow2");
+        let with_ext = format!("{stem}.qcow2");
+        let mut refs = Vec::new();
+
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let topo_file = p.join("topology.toml");
+            if !topo_file.is_file() {
+                continue;
+            }
+            if let Ok(raw) = fs::read_to_string(&topo_file) {
+                if let Ok(doc) = toml::from_str::<crate::workspace::TopologyDocument>(&raw) {
+                    let matched = doc.nodes.iter().any(|n| {
+                        n.template_id
+                            .as_deref()
+                            .map(|tid| tid == stem || tid == with_ext)
+                            .unwrap_or(false)
+                    });
+                    if matched {
+                        refs.push(doc.name);
+                    }
+                }
+            }
+        }
+        refs.sort();
+        refs.dedup();
+        refs
+    }
+
     fn assert_not_template_path(&self, tpl_dir: &Path, candidate: &Path) -> Result<(), String> {
         if let (Ok(canon_tpl), Ok(canon_cand)) =
             (fs::canonicalize(tpl_dir), fs::canonicalize(candidate))
@@ -823,7 +1320,6 @@ fn resolve_template_in_dir(templates_dir: &Path, id_or_path: &str) -> Result<Pat
             .map_err(|e| format!("Failed to canonicalize {}: {e}", direct.display()));
     }
 
-    // If an old relocated absolute path was passed, fall back to its filename inside `templates_dir`
     let file_part = if direct.is_absolute() {
         direct
             .file_name()
@@ -861,7 +1357,7 @@ fn backing_paths_match(recorded: &Path, resolved_active: &Path) -> bool {
     }
 }
 
-fn slugify_name(input: &str) -> String {
+pub(crate) fn slugify_name(input: &str) -> String {
     let mut slug = String::new();
     let mut prev_dash = false;
     for ch in input.trim().chars() {
@@ -913,9 +1409,9 @@ mod tests {
     use crate::storage::{StorageMigrationMode, UpdateStorageRequest};
 
     #[test]
-    fn os_profiles_match_architecture_conventions() {
+    fn os_profiles_match_multi_arch_and_nic_conventions() {
         let profiles = builtin_os_profiles();
-        assert_eq!(profiles.len(), 5);
+        assert_eq!(profiles.len(), 15);
 
         let alpine = profiles.iter().find(|p| p.id == "alpine-linux").unwrap();
         assert_eq!(alpine.default_ram_mb, 256);
@@ -928,14 +1424,53 @@ mod tests {
         let freebsd = profiles.iter().find(|p| p.id == "freebsd").unwrap();
         assert_eq!(freebsd.default_ram_mb, 512);
         assert_eq!(freebsd.format_nic(1), "vtnet1");
+        assert_eq!(freebsd.format_nic_for_model(NicModel::E1000, 0), "em0");
 
         let openbsd = profiles.iter().find(|p| p.id == "openbsd").unwrap();
         assert_eq!(openbsd.default_ram_mb, 512);
         assert_eq!(openbsd.format_nic(2), "vio2");
+        assert_eq!(openbsd.format_nic_for_model(NicModel::E1000, 1), "em1");
 
         let netbsd = profiles.iter().find(|p| p.id == "netbsd").unwrap();
         assert_eq!(netbsd.default_ram_mb, 256);
         assert_eq!(netbsd.format_nic(0), "vioif0");
+        assert_eq!(netbsd.format_nic_for_model(NicModel::E1000, 0), "wm0");
+
+        let chr = profiles.iter().find(|p| p.id == "mikrotik-chr").unwrap();
+        assert_eq!(chr.format_nic(0), "ether1");
+        assert_eq!(chr.format_nic(1), "ether2");
+
+        let plan9 = profiles.iter().find(|p| p.id == "9front").unwrap();
+        assert_eq!(plan9.format_nic(0), "/net/ether0");
+
+        let opnsense = profiles.iter().find(|p| p.id == "opnsense").unwrap();
+        assert_eq!(opnsense.arch, GuestArch::X86_64);
+        assert_eq!(opnsense.format_nic(0), "em0");
+        assert_eq!(
+            opnsense.format_nic_for_model(NicModel::VirtioNetPci, 0),
+            "vtnet0"
+        );
+
+        let omnios = profiles.iter().find(|p| p.id == "omnios").unwrap();
+        assert_eq!(omnios.format_nic(0), "e1000g0");
+
+        let haiku = profiles.iter().find(|p| p.id == "haiku").unwrap();
+        assert_eq!(haiku.format_nic(0), "/dev/net/ipro1000/0");
+
+        let freedos = profiles.iter().find(|p| p.id == "freedos").unwrap();
+        assert_eq!(freedos.arch, GuestArch::I386);
+        assert_eq!(freedos.default_ram_mb, 32);
+        assert_eq!(freedos.format_nic(0), "PCNTPK 0x60");
+    }
+
+    #[test]
+    fn prepare_library_sh_template_stems_infer_accurate_os_profiles() {
+        assert_eq!(infer_profile_from_stem("alpine-aarch64-base").0, "alpine-linux");
+        assert_eq!(infer_profile_from_stem("freebsd-aarch64-base").0, "freebsd");
+        assert_eq!(infer_profile_from_stem("netbsd-aarch64-base").0, "netbsd");
+        assert_eq!(infer_profile_from_stem("openbsd-aarch64-base").0, "openbsd");
+        assert_eq!(infer_profile_from_stem("opnsense-x86_64-base").0, "opnsense");
+        assert_eq!(infer_profile_from_stem("freedos-i386-base").0, "freedos");
     }
 
     #[tokio::test]
@@ -957,15 +1492,11 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
-    /// End-to-end portable `qcow2` relocation & `qemu-img rebase -u` verification test.
-    /// Uses a deterministic mock `qemu-img` script that strictly enforces `-u` unsafe mode
-    /// when the previous backing file path has been deleted/unmounted!
     #[tokio::test]
     async fn portable_qcow2_auto_rebases_when_templates_move_to_external_drive() {
         let tmp = std::env::temp_dir().join(format!("etherloom-rebase-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&tmp).unwrap();
 
-        // Create a self-contained mock `qemu-img` python3 script supporting `create`, `info --output=json`, and `rebase -u`
         let mock_qemu_img = tmp.join("mock-qemu-img");
         let script = r#"#!/usr/bin/env python3
 import json, os, sys
@@ -1001,7 +1532,6 @@ elif cmd == "rebase":
     with open(target, "r", encoding="utf-8") as f:
         meta = json.load(f)
     old_backing = meta.get("backing")
-    # Real `qemu-img rebase` WITHOUT `-u` tries to open `old_backing` and fails if it moved!
     if not unsafe_mode and old_backing and not os.path.exists(old_backing):
         sys.stderr.write(f"Could not open old backing file '{old_backing}' without -u\n")
         sys.exit(1)
@@ -1020,12 +1550,11 @@ else:
         let initial_snap = storage.refresh_and_snapshot().await;
         let store = ImageStore::with_qemu_img_binary(storage.clone(), mock_qemu_img);
 
-        // 1. Create a base template in the initial internal `templates_dir`
-        let old_tpl_path = PathBuf::from(&initial_snap.resolved_templates_dir).join("openbsd-76.qcow2");
+        let old_tpl_path =
+            PathBuf::from(&initial_snap.resolved_templates_dir).join("openbsd-76.qcow2");
         fs::write(&old_tpl_path, r#"{"virtual_size": 8589934592}"#).unwrap();
         let canon_old_tpl = fs::canonicalize(&old_tpl_path).unwrap();
 
-        // 2. Create a per-node CoW overlay inside a project folder
         let project_overlays = tmp.join("campus-lab.etherloom/overlays");
         let overlay = store
             .create_node_overlay(CreateOverlayRequest {
@@ -1036,9 +1565,12 @@ else:
             .await
             .unwrap();
         let overlay_path = PathBuf::from(&overlay.path);
-        assert!(overlay.backing_file.as_ref().unwrap().ends_with("openbsd-76.qcow2"));
+        assert!(overlay
+            .backing_file
+            .as_ref()
+            .unwrap()
+            .ends_with("openbsd-76.qcow2"));
 
-        // 3. Relocate the entire template library to a simulated external SSD AND delete the old internal path!
         let external_ssd_root = tmp.join("MountedExternalSSD/EtherloomLibrary");
         storage
             .update_storage_location(UpdateStorageRequest {
@@ -1053,19 +1585,20 @@ else:
             .unwrap();
         assert!(!old_tpl_path.exists(), "old internal template was removed");
 
-        // 4. Before rebase, the overlay still points to the deleted internal path
         let stale_info = store.inspect_disk(&overlay_path).await.unwrap();
         assert_eq!(
             PathBuf::from(stale_info.backing_file.unwrap()),
             canon_old_tpl
         );
 
-        // 5. Run `ensure_overlay_rebased` (called automatically before VM start & on project load)
         let report = store
             .ensure_overlay_rebased(&overlay_path, Some("openbsd-76"))
             .await
             .unwrap();
-        assert!(report.rebased, "overlay should be auto-rebased via qemu-img rebase -u");
+        assert!(
+            report.rebased,
+            "overlay should be auto-rebased via qemu-img rebase -u"
+        );
 
         let expected_new_tpl =
             fs::canonicalize(external_ssd_root.join("templates/openbsd-76.qcow2")).unwrap();
@@ -1074,7 +1607,6 @@ else:
             expected_new_tpl
         );
 
-        // 6. Calling `ensure_overlay_rebased` a second time is an idempotent no-op (`rebased == false`)
         let second = store
             .ensure_overlay_rebased(&overlay_path, Some("openbsd-76"))
             .await

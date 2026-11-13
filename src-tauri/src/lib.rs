@@ -1,4 +1,5 @@
 pub mod academy;
+pub mod catalog;
 pub mod console_bridge;
 pub mod env_doctor;
 pub mod fabric;
@@ -13,6 +14,10 @@ use academy::{
     get_academy_lab_detail, instantiate_academy_lab, list_academy_labs, AcademyLabDetail,
     AcademyLabSummary, InstantiatedLabDto,
 };
+use catalog::{
+    reveal_path_in_finder, CatalogDownloadRequest, CatalogImportLocalRequest, CatalogManager,
+    DeleteCatalogImageResult, OsCatalogEntryDto,
+};
 use console_bridge::{ConsoleBridge, ConsoleSessionEndpoints};
 use env_doctor::EnvDoctorReport;
 use fabric::{
@@ -20,9 +25,9 @@ use fabric::{
     UpdateLinkRequest, VirtualDeviceInfo,
 };
 use images::{
-    builtin_os_profiles, BaseTemplateInfo, CreateBlankDiskRequest, CreateOverlayRequest, DiskInfo,
-    ImageStore, InstallerMediaInfo, OsProfile, OverlayRebaseReport, OverlayTemplateBinding,
-    PromoteTemplateRequest, ResetOverlayRequest,
+    builtin_os_profiles, find_os_profile, BaseTemplateInfo, CreateBlankDiskRequest,
+    CreateOverlayRequest, DiskInfo, ImageStore, InstallerMediaInfo, OsProfile, OverlayRebaseReport,
+    OverlayTemplateBinding, PromoteTemplateRequest, ResetOverlayRequest,
 };
 use pcap_tap::{
     list_captures_in_dir, open_pcap_file_in_wireshark, CaptureFileInfo, LiveWiresharkSessionInfo,
@@ -41,7 +46,8 @@ use tcpflowy_bridge::{
 };
 use tokio::sync::RwLock;
 use vm_manager::{
-    BootMediaBus, SpawnVmRequest, VmDisplayMode, VmInstanceInfo, VmManager, VmNicConfig,
+    BootMediaBus, DiskBus, FirmwareType, GuestArch, NicModel, SpawnVmRequest, VmDisplayMode,
+    VmInstanceInfo, VmManager, VmNicConfig,
 };
 use workspace::{ProjectBundleDto, SaveProjectRequest, TopologyDocument, WorkspaceNode};
 
@@ -49,6 +55,7 @@ pub struct StudioState {
     pub last_env_report: RwLock<Option<EnvDoctorReport>>,
     pub storage: StorageManager,
     pub image_store: ImageStore,
+    pub catalog: CatalogManager,
     pub fabric: PacketFabric,
     pub vm_manager: VmManager,
     pub console_bridge: ConsoleBridge,
@@ -64,6 +71,7 @@ impl Default for StudioState {
             last_env_report: RwLock::new(None),
             storage,
             image_store,
+            catalog: CatalogManager::new(),
             fabric: PacketFabric::new(),
             vm_manager: VmManager::new(),
             console_bridge: ConsoleBridge::new(),
@@ -82,6 +90,14 @@ pub struct CatalogComponent {
     pub kind: String,
     pub guest_family: Option<String>,
     pub os_profile_id: Option<String>,
+    #[serde(default)]
+    pub arch: Option<GuestArch>,
+    #[serde(default)]
+    pub default_nic_model: Option<NicModel>,
+    #[serde(default)]
+    pub default_firmware: Option<FirmwareType>,
+    #[serde(default)]
+    pub default_disk_bus: Option<DiskBus>,
     pub nic_prefix: String,
     pub default_ports: u8,
     pub default_vcpus: Option<u8>,
@@ -127,14 +143,20 @@ fn get_component_catalog() -> Vec<CatalogComponent> {
             id: format!("guest-{}", profile.id),
             name: profile.name,
             subtitle: format!(
-                "{} • {} MB RAM",
-                profile.nic_naming_pattern, profile.default_ram_mb
+                "{} • {} • {} MB",
+                profile.arch.as_str(),
+                profile.nic_naming_pattern,
+                profile.default_ram_mb
             ),
             kind: "vm".to_string(),
             guest_family: Some(profile.guest_family),
             os_profile_id: Some(profile.id),
+            arch: Some(profile.arch),
+            default_nic_model: Some(profile.default_nic_model),
+            default_firmware: Some(profile.default_firmware),
+            default_disk_bus: Some(profile.default_disk_bus),
             nic_prefix: profile.nic_prefix,
-            default_ports: 2,
+            default_ports: if profile.arch == GuestArch::I386 { 1 } else { 2 },
             default_vcpus: Some(profile.default_cpus),
             default_memory_mb: Some(profile.default_ram_mb),
             console_modes: vec![
@@ -152,6 +174,10 @@ fn get_component_catalog() -> Vec<CatalogComponent> {
         kind: "l2_switch".to_string(),
         guest_family: None,
         os_profile_id: None,
+        arch: None,
+        default_nic_model: None,
+        default_firmware: None,
+        default_disk_bus: None,
         nic_prefix: "p".to_string(),
         default_ports: 8,
         default_vcpus: None,
@@ -166,6 +192,10 @@ fn get_component_catalog() -> Vec<CatalogComponent> {
         kind: "l1_hub".to_string(),
         guest_family: None,
         os_profile_id: None,
+        arch: None,
+        default_nic_model: None,
+        default_firmware: None,
+        default_disk_bus: None,
         nic_prefix: "p".to_string(),
         default_ports: 6,
         default_vcpus: None,
@@ -693,12 +723,53 @@ async fn start_topology_vm_node(
         _ => BootMediaBus::Auto,
     };
 
+    // Resolve multi-architecture hardware defaults from explicit node config -> OS profile -> sensible defaults
+    let prof_meta = node.os_profile_id.as_deref().and_then(find_os_profile);
+    let arch = node
+        .arch
+        .as_deref()
+        .map(GuestArch::from_str_lossy)
+        .or_else(|| prof_meta.as_ref().map(|p| p.arch))
+        .unwrap_or(GuestArch::Aarch64);
+    let nic_model = node
+        .nic_model
+        .as_deref()
+        .map(NicModel::from_str_lossy)
+        .or_else(|| prof_meta.as_ref().map(|p| p.default_nic_model))
+        .unwrap_or(NicModel::VirtioNetPci);
+    let firmware = node
+        .firmware
+        .as_deref()
+        .map(FirmwareType::from_str_lossy)
+        .or_else(|| prof_meta.as_ref().map(|p| p.default_firmware))
+        .unwrap_or_else(|| match arch {
+            GuestArch::Aarch64 => FirmwareType::Uefi,
+            _ => FirmwareType::Bios,
+        });
+    let disk_bus = node
+        .disk_bus
+        .as_deref()
+        .map(DiskBus::from_str_lossy)
+        .or_else(|| prof_meta.as_ref().map(|p| p.default_disk_bus))
+        .unwrap_or(DiskBus::VirtioBlk);
+
+    let default_ram = prof_meta
+        .as_ref()
+        .map(|p| p.default_ram_mb)
+        .unwrap_or(512);
+    let default_cpus = prof_meta.as_ref().map(|p| p.default_cpus).unwrap_or(2);
+
     let nics: Vec<VmNicConfig> = node
         .ports
         .iter()
         .map(|p| VmNicConfig {
             port_id: Some(p.id.clone()),
             mac: p.mac.clone(),
+            nic_model: p
+                .nic_model
+                .as_deref()
+                .map(NicModel::from_str_lossy)
+                .or(Some(nic_model)),
             fabric_port: None,
             vm_port: None,
         })
@@ -710,16 +781,21 @@ async fn start_topology_vm_node(
             SpawnVmRequest {
                 node_id: node.id,
                 name: node.name,
-                cpus: node.vcpus.unwrap_or(2).max(1),
-                ram_mb: node.memory_mb.unwrap_or(512).max(128),
+                cpus: node.vcpus.unwrap_or(default_cpus).max(1),
+                ram_mb: node.memory_mb.unwrap_or(default_ram).max(16),
                 disk_path: disk_path.display().to_string(),
                 template_id,
                 boot_media_path,
                 boot_media_bus,
                 display_mode,
                 vnc_port_offset: None,
+                arch,
+                nic_model,
+                firmware,
+                disk_bus,
                 nics,
                 bios_path_override: None,
+                finalize_template_on_exit: None,
             },
             &state.fabric,
             &state.image_store,
@@ -1019,6 +1095,99 @@ async fn academy_instantiate_lab(
     Ok(instantiated)
 }
 
+// -----------------------------------------------------------------------------
+// Phase 6: Supported OS Catalog, On-Demand Download Engine & Finder Helpers
+// -----------------------------------------------------------------------------
+
+#[tauri::command]
+async fn catalog_list_entries(
+    state: tauri::State<'_, StudioState>,
+) -> Result<Vec<OsCatalogEntryDto>, String> {
+    let (host_arch, hvf_supported) = {
+        let guard = state.last_env_report.read().await;
+        match guard.as_ref() {
+            Some(rep) => (rep.host_arch.clone(), rep.hvf_supported),
+            None => (
+                std::env::consts::ARCH.to_string(),
+                std::env::consts::OS == "macos",
+            ),
+        }
+    };
+    state
+        .catalog
+        .list_catalog(&state.image_store, &host_arch, hvf_supported)
+        .await
+}
+
+#[tauri::command]
+async fn catalog_start_download(
+    state: tauri::State<'_, StudioState>,
+    request: CatalogDownloadRequest,
+) -> Result<(), String> {
+    state
+        .catalog
+        .start_download(request, state.storage.clone(), state.image_store.clone())
+        .await
+}
+
+#[tauri::command]
+async fn catalog_cancel_download(
+    state: tauri::State<'_, StudioState>,
+    catalog_id: String,
+) -> Result<bool, String> {
+    state.catalog.cancel_download(&catalog_id).await
+}
+
+#[tauri::command]
+async fn catalog_import_local_file(
+    state: tauri::State<'_, StudioState>,
+    request: CatalogImportLocalRequest,
+) -> Result<OsCatalogEntryDto, String> {
+    state
+        .catalog
+        .import_local_file(request, &state.storage, &state.image_store)
+        .await
+}
+
+#[tauri::command]
+async fn catalog_delete_image(
+    state: tauri::State<'_, StudioState>,
+    catalog_id: String,
+    force: Option<bool>,
+) -> Result<DeleteCatalogImageResult, String> {
+    state
+        .catalog
+        .delete_image(
+            &catalog_id,
+            force.unwrap_or(false),
+            &state.image_store,
+            &state.vm_manager,
+        )
+        .await
+}
+
+#[tauri::command]
+async fn catalog_launch_guided_setup(
+    state: tauri::State<'_, StudioState>,
+    catalog_id: String,
+) -> Result<VmInstanceInfo, String> {
+    state
+        .catalog
+        .launch_guided_setup(
+            &catalog_id,
+            &state.storage,
+            &state.image_store,
+            &state.fabric,
+            &state.vm_manager,
+        )
+        .await
+}
+
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    reveal_path_in_finder(&path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1031,11 +1200,13 @@ pub fn run() {
 
             let vm_mgr = state.vm_manager.clone();
             let storage_mgr = state.storage.clone();
+            let catalog_mgr = state.catalog.clone();
             let console_br = state.console_bridge.clone();
             let tcpflowy_mgr = state.tcpflowy.clone();
             tauri::async_runtime::spawn(async move {
                 vm_mgr.bind_app_handle(handle.clone()).await;
                 storage_mgr.bind_app_handle(handle.clone()).await;
+                catalog_mgr.bind_app_handle(handle.clone()).await;
                 tcpflowy_mgr.bind_app_handle(handle).await;
                 let _ = console_br.ensure_started(vm_mgr).await;
                 // Gracefully evaluate storage mount state on startup (never panics if external SSD is unplugged!)
@@ -1104,6 +1275,13 @@ pub fn run() {
             academy_list_labs,
             academy_get_lab,
             academy_instantiate_lab,
+            catalog_list_entries,
+            catalog_start_download,
+            catalog_cancel_download,
+            catalog_import_local_file,
+            catalog_delete_image,
+            catalog_launch_guided_setup,
+            reveal_in_finder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Etherloom Tauri application");

@@ -1,8 +1,9 @@
-use crate::env_doctor::{resolve_edk2_firmware, resolve_qemu_system_aarch64};
+use crate::env_doctor::{resolve_edk2_for_arch, resolve_qemu_for_arch};
 use crate::fabric::{PacketFabric, UdpPortBinding};
 use crate::images::ImageStore;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::os::unix::fs::PermissionsExt;
@@ -22,7 +23,182 @@ const QMP_CONNECT_TIMEOUT: Duration = Duration::from_millis(1200);
 const DEFAULT_POWERDOWN_TIMEOUT: Duration = Duration::from_millis(4500);
 const SIGTERM_GRACE_TIMEOUT: Duration = Duration::from_millis(1800);
 
-/// Graphical UEFI framebuffer output mode per VM node.
+/// Guest CPU / machine architecture supported by Etherloom's QEMU engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GuestArch {
+    #[serde(rename = "aarch64")]
+    Aarch64,
+    #[serde(rename = "x86_64")]
+    X86_64,
+    #[serde(rename = "i386")]
+    I386,
+    #[serde(rename = "riscv64")]
+    Riscv64,
+}
+
+impl Default for GuestArch {
+    fn default() -> Self {
+        Self::Aarch64
+    }
+}
+
+impl GuestArch {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Aarch64 => "aarch64",
+            Self::X86_64 => "x86_64",
+            Self::I386 => "i386",
+            Self::Riscv64 => "riscv64",
+        }
+    }
+
+    pub fn qemu_binary_name(&self) -> &'static str {
+        match self {
+            Self::Aarch64 => "qemu-system-aarch64",
+            Self::X86_64 => "qemu-system-x86_64",
+            Self::I386 => "qemu-system-i386",
+            Self::Riscv64 => "qemu-system-riscv64",
+        }
+    }
+
+    pub fn from_str_lossy(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "x86_64" | "amd64" => Self::X86_64,
+            "i386" | "i686" | "x86" => Self::I386,
+            "riscv64" | "riscv" => Self::Riscv64,
+            _ => Self::Aarch64,
+        }
+    }
+
+    /// Returns `"hvf"` when guest arch matches host Mac CPU architecture and HVF is supported, else `"tcg"`.
+    pub fn effective_accel(&self, host_arch: &str, hvf_available: bool) -> &'static str {
+        if !hvf_available {
+            return "tcg";
+        }
+        match (self, host_arch) {
+            (Self::Aarch64, "aarch64") => "hvf",
+            (Self::X86_64, "x86_64") => "hvf",
+            _ => "tcg",
+        }
+    }
+}
+
+/// Emulated PCI/PCIe Ethernet controller model attached to QEMU `-netdev socket`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NicModel {
+    /// Paravirtualized VirtIO 1.0 NIC (`eth*` / `enp*` / `vtnet*` / `vio*` / `vioif*` / `ether*`)
+    #[serde(rename = "virtio-net-pci")]
+    VirtioNetPci,
+    /// Intel PRO/1000 Gigabit Ethernet (`em*` / `wm*` / `e1000g*` / `ipro1000`)
+    #[serde(rename = "e1000")]
+    E1000,
+    /// Realtek RTL8139 Fast Ethernet (`re*` / `rl*` / `rtk*`)
+    #[serde(rename = "rtl8139")]
+    Rtl8139,
+    /// AMD PCnet-PCI II Am79C970A (`pcn*` / `le*` / FreeDOS `PCNTPK`)
+    #[serde(rename = "pcnet")]
+    Pcnet,
+    /// Classic NE2000 PCI (`ne*` / `ed*` — classic UNIX, Minix, retro BSDs)
+    #[serde(rename = "ne2k_pci")]
+    Ne2kPci,
+}
+
+impl Default for NicModel {
+    fn default() -> Self {
+        Self::VirtioNetPci
+    }
+}
+
+impl NicModel {
+    pub fn as_qemu_device(&self) -> &'static str {
+        match self {
+            Self::VirtioNetPci => "virtio-net-pci",
+            Self::E1000 => "e1000",
+            Self::Rtl8139 => "rtl8139",
+            Self::Pcnet => "pcnet",
+            Self::Ne2kPci => "ne2k_pci",
+        }
+    }
+
+    pub fn from_str_lossy(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "e1000" => Self::E1000,
+            "rtl8139" => Self::Rtl8139,
+            "pcnet" => Self::Pcnet,
+            "ne2k_pci" | "ne2k-pci" | "ne2000" => Self::Ne2kPci,
+            _ => Self::VirtioNetPci,
+        }
+    }
+}
+
+/// System boot firmware mode (`uefi` EDK2 vs legacy `bios` SeaBIOS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FirmwareType {
+    /// EDK2 UEFI firmware (`edk2-aarch64-code.fd` or `edk2-x86_64-code.fd`)
+    Uefi,
+    /// Legacy x86/i386 SeaBIOS (built into QEMU; omits `-bios`)
+    Bios,
+}
+
+impl Default for FirmwareType {
+    fn default() -> Self {
+        Self::Uefi
+    }
+}
+
+impl FirmwareType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Uefi => "uefi",
+            Self::Bios => "bios",
+        }
+    }
+
+    pub fn from_str_lossy(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "bios" | "seabios" | "legacy" => Self::Bios,
+            _ => Self::Uefi,
+        }
+    }
+}
+
+/// Primary block controller bus for the VM's `.qcow2` disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DiskBus {
+    #[serde(rename = "virtio-blk")]
+    VirtioBlk,
+    #[serde(rename = "ahci")]
+    Ahci,
+    #[serde(rename = "ide")]
+    Ide,
+}
+
+impl Default for DiskBus {
+    fn default() -> Self {
+        Self::VirtioBlk
+    }
+}
+
+impl DiskBus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::VirtioBlk => "virtio-blk",
+            Self::Ahci => "ahci",
+            Self::Ide => "ide",
+        }
+    }
+
+    pub fn from_str_lossy(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "ahci" | "sata" => Self::Ahci,
+            "ide" | "ata" => Self::Ide,
+            _ => Self::VirtioBlk,
+        }
+    }
+}
+
+/// Graphical UEFI/VGA framebuffer output mode per VM node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VmDisplayMode {
@@ -44,7 +220,7 @@ impl Default for VmDisplayMode {
 pub enum BootMediaBus {
     /// Automatically chooses `Cdrom` for `.iso` and `Usb` for `.img`/`.raw`
     Auto,
-    /// `virtio-scsi-pci` + `scsi-cd` (ideal for FreeBSD / NetBSD / Alpine / Debian `.iso`)
+    /// `virtio-scsi-pci` + `scsi-cd` (or AHCI/IDE ATAPI CD-ROM when `disk_bus` is `ahci`/`ide`)
     Cdrom,
     /// `usb-storage` attached to `qemu-xhci` (ideal for OpenBSD `installXX.img` & memstick `.img`)
     Usb,
@@ -67,6 +243,28 @@ pub enum VmStatus {
     Crashed,
 }
 
+/// Optional hook for 1-click Guided Template Setup VMs (e.g. OpenBSD, pfSense, VyOS):
+/// when the installer VM shuts down cleanly, Etherloom marks the newly installed disk read-only (`0444`)
+/// and writes its `.template.json` manifest inside `templates_dir`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinalizeTemplateOnExit {
+    pub catalog_id: String,
+    pub template_id: String,
+    pub template_name: String,
+    pub os_profile_id: String,
+    #[serde(default)]
+    pub arch: GuestArch,
+    #[serde(default)]
+    pub default_nic_model: NicModel,
+    #[serde(default)]
+    pub default_firmware: FirmwareType,
+    #[serde(default)]
+    pub default_disk_bus: DiskBus,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
 /// NIC specification passed when launching a VM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +273,9 @@ pub struct VmNicConfig {
     pub port_id: Option<String>,
     /// MAC address (e.g. `52:54:00:10:01:00`).
     pub mac: String,
+    /// Optional per-NIC model override; defaults to the node's `nic_model` (`virtio-net-pci`).
+    #[serde(default)]
+    pub nic_model: Option<NicModel>,
     /// Optional pre-allocated `PacketFabric` UDP port; if `None`, allocated automatically.
     pub fabric_port: Option<u16>,
     /// Optional pre-allocated guest `localaddr` UDP port; if `None`, allocated automatically.
@@ -88,11 +289,13 @@ pub struct ActiveVmNic {
     pub index: usize,
     pub port_id: String,
     pub mac: String,
+    #[serde(default)]
+    pub nic_model: NicModel,
     pub fabric_port: u16,
     pub vm_port: u16,
 }
 
-/// Request payload to spawn a QEMU HVF VM for a topology node.
+/// Request payload to spawn a QEMU VM (`aarch64`, `x86_64`, `i386`, or `riscv64`) for a topology node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpawnVmRequest {
@@ -109,8 +312,18 @@ pub struct SpawnVmRequest {
     #[serde(default)]
     pub display_mode: VmDisplayMode,
     pub vnc_port_offset: Option<u16>,
+    #[serde(default)]
+    pub arch: GuestArch,
+    #[serde(default)]
+    pub nic_model: NicModel,
+    #[serde(default)]
+    pub firmware: FirmwareType,
+    #[serde(default)]
+    pub disk_bus: DiskBus,
     pub nics: Vec<VmNicConfig>,
     pub bios_path_override: Option<String>,
+    #[serde(default)]
+    pub finalize_template_on_exit: Option<FinalizeTemplateOnExit>,
 }
 
 /// Public snapshot of a VM instance returned via IPC and lifecycle events.
@@ -123,6 +336,16 @@ pub struct VmInstanceInfo {
     pub pid: Option<u32>,
     pub cpus: u8,
     pub ram_mb: u32,
+    #[serde(default)]
+    pub arch: GuestArch,
+    #[serde(default)]
+    pub nic_model: NicModel,
+    #[serde(default)]
+    pub firmware: FirmwareType,
+    #[serde(default)]
+    pub disk_bus: DiskBus,
+    #[serde(default)]
+    pub accel: String,
     pub disk_path: String,
     pub boot_media_path: Option<String>,
     pub display_mode: VmDisplayMode,
@@ -156,7 +379,12 @@ pub struct ResolvedVmLaunchSpec {
     pub name: String,
     pub cpus: u8,
     pub ram_mb: u32,
-    pub bios_path: PathBuf,
+    pub arch: GuestArch,
+    pub host_arch: String,
+    pub hvf_available: bool,
+    pub firmware: FirmwareType,
+    pub disk_bus: DiskBus,
+    pub bios_path: Option<PathBuf>,
     pub disk_path: PathBuf,
     pub boot_media: Option<(PathBuf, BootMediaBus)>,
     pub display_mode: VmDisplayMode,
@@ -166,36 +394,125 @@ pub struct ResolvedVmLaunchSpec {
     pub nics: Vec<ActiveVmNic>,
 }
 
-/// Pure function constructing deterministic `qemu-system-aarch64` CLI arguments according to `ARCHITECTURE.md`.
+/// Pure function constructing deterministic multi-architecture QEMU CLI arguments (`aarch64`, `x86_64`, `i386`, `riscv64`)
+/// according to `ARCHITECTURE.md`.
 pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
-    let mut args = vec![
-        "-name".to_string(),
-        spec.name.clone(),
-        "-M".to_string(),
-        "virt,highmem=on".to_string(),
-        "-accel".to_string(),
-        "hvf".to_string(),
-        "-cpu".to_string(),
-        "host".to_string(),
+    let mut args = vec!["-name".to_string(), spec.name.clone()];
+
+    // 1. Machine type, hardware acceleration (HVF vs multi-threaded TCG), CPU model, SMP & RAM
+    match spec.arch {
+        GuestArch::Aarch64 => {
+            args.extend(["-M".to_string(), "virt,highmem=on".to_string()]);
+            if spec.host_arch == "aarch64" && spec.hvf_available {
+                args.extend([
+                    "-accel".to_string(),
+                    "hvf".to_string(),
+                    "-cpu".to_string(),
+                    "host".to_string(),
+                ]);
+            } else {
+                args.extend([
+                    "-accel".to_string(),
+                    "tcg,thread=multi".to_string(),
+                    "-cpu".to_string(),
+                    "max".to_string(),
+                ]);
+            }
+        }
+        GuestArch::X86_64 => {
+            args.extend(["-M".to_string(), "q35".to_string()]);
+            if spec.host_arch == "x86_64" && spec.hvf_available {
+                args.extend([
+                    "-accel".to_string(),
+                    "hvf".to_string(),
+                    "-cpu".to_string(),
+                    "host".to_string(),
+                ]);
+            } else {
+                args.extend([
+                    "-accel".to_string(),
+                    "tcg,thread=multi".to_string(),
+                    "-cpu".to_string(),
+                    "max".to_string(),
+                ]);
+            }
+        }
+        GuestArch::I386 => {
+            args.extend([
+                "-M".to_string(),
+                "pc".to_string(),
+                "-accel".to_string(),
+                "tcg,thread=multi".to_string(),
+                "-cpu".to_string(),
+                "pentium3".to_string(),
+            ]);
+        }
+        GuestArch::Riscv64 => {
+            args.extend([
+                "-M".to_string(),
+                "virt".to_string(),
+                "-accel".to_string(),
+                "tcg,thread=multi".to_string(),
+                "-cpu".to_string(),
+                "rv64".to_string(),
+            ]);
+        }
+    }
+
+    args.extend([
         "-smp".to_string(),
         spec.cpus.max(1).to_string(),
         "-m".to_string(),
-        spec.ram_mb.max(128).to_string(),
-        "-bios".to_string(),
-        spec.bios_path.display().to_string(),
-    ];
-
-    // Graphical UEFI framebuffer + XHCI USB input controller (always present for both VNC and Cocoa modes)
-    args.extend([
-        "-device".to_string(),
-        "ramfb".to_string(),
-        "-device".to_string(),
-        "qemu-xhci".to_string(),
-        "-device".to_string(),
-        "usb-kbd".to_string(),
-        "-device".to_string(),
-        "usb-tablet".to_string(),
+        spec.ram_mb.max(16).to_string(),
     ]);
+
+    // 2. Firmware: emit `-bios <edk2-...>` for UEFI guests (or when explicitly supplied);
+    //    omit `-bios` for SeaBIOS (`x86_64` / `i386` with `FirmwareType::Bios`) or OpenSBI (`riscv64`).
+    let should_emit_bios = match (spec.arch, spec.firmware) {
+        (GuestArch::Aarch64, _) => true,
+        (GuestArch::X86_64, FirmwareType::Uefi) => true,
+        (GuestArch::I386, FirmwareType::Uefi) => true,
+        _ => false,
+    };
+    if should_emit_bios {
+        if let Some(ref bios) = spec.bios_path {
+            args.extend(["-bios".to_string(), bios.display().to_string()]);
+        }
+    }
+
+    // 3. Display & USB input peripherals per guest architecture
+    let mut has_xhci = false;
+    match spec.arch {
+        GuestArch::Aarch64 | GuestArch::Riscv64 => {
+            args.extend([
+                "-device".to_string(),
+                "ramfb".to_string(),
+                "-device".to_string(),
+                "qemu-xhci".to_string(),
+                "-device".to_string(),
+                "usb-kbd".to_string(),
+                "-device".to_string(),
+                "usb-tablet".to_string(),
+            ]);
+            has_xhci = true;
+        }
+        GuestArch::X86_64 => {
+            args.extend([
+                "-vga".to_string(),
+                "std".to_string(),
+                "-device".to_string(),
+                "qemu-xhci".to_string(),
+                "-device".to_string(),
+                "usb-kbd".to_string(),
+                "-device".to_string(),
+                "usb-tablet".to_string(),
+            ]);
+            has_xhci = true;
+        }
+        GuestArch::I386 => {
+            args.extend(["-vga".to_string(), "std".to_string()]);
+        }
+    }
 
     match spec.display_mode {
         VmDisplayMode::Vnc => {
@@ -209,7 +526,17 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         }
     }
 
-    // Storage: boot installer media (if attached) gets bootindex=1; primary qcow2 disk gets next bootindex
+    // 4. Storage: optional AHCI controller if requested (`DiskBus::Ahci`, or `Ide` on `virt` boards lacking ISA IDE)
+    let effective_disk_bus = match (spec.arch, spec.disk_bus) {
+        (GuestArch::Aarch64 | GuestArch::Riscv64, DiskBus::Ide) => DiskBus::Ahci,
+        (_, bus) => bus,
+    };
+
+    if effective_disk_bus == DiskBus::Ahci {
+        args.extend(["-device".to_string(), "ahci,id=ahci0".to_string()]);
+    }
+
+    // Boot installer media (if attached) gets bootindex=1; primary qcow2 disk gets next bootindex
     let hd_bootindex = if let Some((ref media_path, bus_mode)) = spec.boot_media {
         let effective_bus = match bus_mode {
             BootMediaBus::Auto => {
@@ -228,20 +555,47 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         };
 
         match effective_bus {
-            BootMediaBus::Cdrom => {
-                args.extend([
-                    "-device".to_string(),
-                    "virtio-scsi-pci,id=scsi0".to_string(),
-                    "-drive".to_string(),
-                    format!(
-                        "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
-                        media_path.display()
-                    ),
-                    "-device".to_string(),
-                    "scsi-cd,bus=scsi0.0,drive=install0,bootindex=1".to_string(),
-                ]);
-            }
+            BootMediaBus::Cdrom => match effective_disk_bus {
+                DiskBus::VirtioBlk => {
+                    args.extend([
+                        "-device".to_string(),
+                        "virtio-scsi-pci,id=scsi0".to_string(),
+                        "-drive".to_string(),
+                        format!(
+                            "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
+                            media_path.display()
+                        ),
+                        "-device".to_string(),
+                        "scsi-cd,bus=scsi0.0,drive=install0,bootindex=1".to_string(),
+                    ]);
+                }
+                DiskBus::Ahci => {
+                    args.extend([
+                        "-drive".to_string(),
+                        format!(
+                            "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
+                            media_path.display()
+                        ),
+                        "-device".to_string(),
+                        "ide-cd,bus=ahci0.1,drive=install0,bootindex=1".to_string(),
+                    ]);
+                }
+                DiskBus::Ide => {
+                    args.extend([
+                        "-drive".to_string(),
+                        format!(
+                            "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
+                            media_path.display()
+                        ),
+                        "-device".to_string(),
+                        "ide-cd,bus=ide.1,drive=install0,bootindex=1".to_string(),
+                    ]);
+                }
+            },
             BootMediaBus::Usb | BootMediaBus::Auto => {
+                if !has_xhci {
+                    args.extend(["-device".to_string(), "qemu-xhci".to_string()]);
+                }
                 args.extend([
                     "-drive".to_string(),
                     format!(
@@ -264,11 +618,29 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
             "file={},if=none,id=hd0,format=qcow2",
             spec.disk_path.display()
         ),
-        "-device".to_string(),
-        format!("virtio-blk-pci,drive=hd0,bootindex={hd_bootindex}"),
     ]);
+    match effective_disk_bus {
+        DiskBus::VirtioBlk => {
+            args.extend([
+                "-device".to_string(),
+                format!("virtio-blk-pci,drive=hd0,bootindex={hd_bootindex}"),
+            ]);
+        }
+        DiskBus::Ahci => {
+            args.extend([
+                "-device".to_string(),
+                format!("ide-hd,bus=ahci0.0,drive=hd0,bootindex={hd_bootindex}"),
+            ]);
+        }
+        DiskBus::Ide => {
+            args.extend([
+                "-device".to_string(),
+                format!("ide-hd,bus=ide.0,drive=hd0,bootindex={hd_bootindex}"),
+            ]);
+        }
+    }
 
-    // Zero-Root UDP Socket Netdevs (raw Ethernet II frames per datagram, no length prefix)
+    // 5. Zero-Root UDP Socket Netdevs (raw Ethernet II frames per datagram, no length prefix)
     for nic in &spec.nics {
         let net_id = format!("net{}", nic.index);
         args.extend([
@@ -278,11 +650,15 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
                 nic.fabric_port, nic.vm_port
             ),
             "-device".to_string(),
-            format!("virtio-net-pci,netdev={net_id},mac={}", nic.mac),
+            format!(
+                "{},netdev={net_id},mac={}",
+                nic.nic_model.as_qemu_device(),
+                nic.mac
+            ),
         ]);
     }
 
-    // Unix Domain Socket Serial Console (`xterm.js` target)
+    // 6. Unix Domain Socket Serial Console (`xterm.js` target)
     args.extend([
         "-chardev".to_string(),
         format!(
@@ -293,7 +669,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         "chardev:serial0".to_string(),
     ]);
 
-    // Unix Domain Socket QMP Control Monitor (for graceful `system_powerdown`)
+    // 7. Unix Domain Socket QMP Control Monitor (for graceful `system_powerdown`)
     args.extend([
         "-chardev".to_string(),
         format!(
@@ -323,7 +699,7 @@ struct VmManagerInner {
     app_handle: RwLock<Option<AppHandle>>,
 }
 
-/// Async supervisor managing `qemu-system-aarch64` HVF child processes per node ID / UUID.
+/// Async supervisor managing `qemu-system-{aarch64,x86_64,i386,riscv64}` child processes per node ID / UUID.
 #[derive(Clone)]
 pub struct VmManager {
     inner: Arc<VmManagerInner>,
@@ -337,7 +713,6 @@ impl Default for VmManager {
 
 impl Drop for VmManager {
     fn drop(&mut self) {
-        // Only act when the final Arc reference is dropped on process teardown
         if Arc::strong_count(&self.inner) == 1 {
             if let Ok(mut map) = self.inner.live_pids.lock() {
                 for (node_id, pid) in map.drain() {
@@ -369,14 +744,31 @@ impl VmManager {
         *guard = Some(handle);
     }
 
-    /// Previews the exact `qemu-system-aarch64` command line that `spawn_vm` would execute.
+    /// Previews the exact `qemu-system-{arch}` command line that `spawn_vm` would execute.
     pub fn preview_command(&self, req: &SpawnVmRequest) -> Result<Vec<String>, String> {
-        let qemu_bin = resolve_qemu_system_aarch64()
-            .unwrap_or_else(|| PathBuf::from("/opt/homebrew/bin/qemu-system-aarch64"));
+        let arch_str = req.arch.as_str();
+        let qemu_bin = resolve_qemu_for_arch(arch_str).unwrap_or_else(|| {
+            PathBuf::from(format!("/opt/homebrew/bin/{}", req.arch.qemu_binary_name()))
+        });
+
         let bios_path = match req.bios_path_override {
-            Some(ref p) => PathBuf::from(p),
-            None => resolve_edk2_firmware(Some(&qemu_bin))
-                .unwrap_or_else(|| PathBuf::from("/opt/homebrew/share/qemu/edk2-aarch64-code.fd")),
+            Some(ref p) if !p.trim().is_empty() => Some(PathBuf::from(p)),
+            _ => match (req.arch, req.firmware) {
+                (GuestArch::Aarch64, _) => Some(
+                    resolve_edk2_for_arch("aarch64", Some(&qemu_bin)).unwrap_or_else(|| {
+                        PathBuf::from("/opt/homebrew/share/qemu/edk2-aarch64-code.fd")
+                    }),
+                ),
+                (GuestArch::X86_64, FirmwareType::Uefi) => Some(
+                    resolve_edk2_for_arch("x86_64", Some(&qemu_bin)).unwrap_or_else(|| {
+                        PathBuf::from("/opt/homebrew/share/qemu/edk2-x86_64-code.fd")
+                    }),
+                ),
+                (GuestArch::I386, FirmwareType::Uefi) => {
+                    resolve_edk2_for_arch("i386", Some(&qemu_bin))
+                }
+                _ => None,
+            },
         };
 
         let safe_id = sanitize_socket_id(&req.node_id);
@@ -385,11 +777,17 @@ impl VmManager {
             name: req.name.clone(),
             cpus: req.cpus,
             ram_mb: req.ram_mb,
+            arch: req.arch,
+            host_arch: env::consts::ARCH.to_string(),
+            hvf_available: env::consts::OS == "macos",
+            firmware: req.firmware,
+            disk_bus: req.disk_bus,
             bios_path,
             disk_path: PathBuf::from(&req.disk_path),
             boot_media: req
                 .boot_media_path
                 .as_ref()
+                .filter(|p| !p.trim().is_empty())
                 .map(|p| (PathBuf::from(p), req.boot_media_bus)),
             display_mode: req.display_mode,
             vnc_port_offset: match req.display_mode {
@@ -410,6 +808,7 @@ impl VmManager {
                         .clone()
                         .unwrap_or_else(|| format!("{safe_id}-net{idx}")),
                     mac: n.mac.clone(),
+                    nic_model: n.nic_model.unwrap_or(req.nic_model),
                     fabric_port: n.fabric_port.unwrap_or(20000 + (idx as u16) * 2),
                     vm_port: n.vm_port.unwrap_or(20001 + (idx as u16) * 2),
                 })
@@ -421,7 +820,7 @@ impl VmManager {
         Ok(full)
     }
 
-    /// Spawns a supervised `qemu-system-aarch64` HVF child process for `req.node_id`,
+    /// Spawns a supervised `qemu-system-{arch}` child process for `req.node_id`,
     /// automatically rebasing the node's CoW `.qcow2` overlay if `templates_dir` moved.
     pub async fn spawn_vm(
         &self,
@@ -444,20 +843,39 @@ impl VmManager {
             }
         }
 
-        let qemu_bin = resolve_qemu_system_aarch64().ok_or_else(|| {
-            "qemu-system-aarch64 not found in /opt/homebrew/bin, /usr/local/bin, or PATH".to_string()
+        let bin_name = req.arch.qemu_binary_name();
+        let qemu_bin = resolve_qemu_for_arch(req.arch.as_str()).ok_or_else(|| {
+            format!(
+                "{bin_name} not found in /opt/homebrew/bin, /usr/local/bin, or PATH. Install QEMU via `brew install qemu`."
+            )
         })?;
+
         let bios_path = match req.bios_path_override {
-            Some(ref custom) => {
+            Some(ref custom) if !custom.trim().is_empty() => {
                 let p = PathBuf::from(custom);
                 if !p.is_file() {
                     return Err(format!("Custom UEFI firmware not found: {}", p.display()));
                 }
-                p
+                Some(p)
             }
-            None => resolve_edk2_firmware(Some(&qemu_bin)).ok_or_else(|| {
-                "UEFI firmware edk2-aarch64-code.fd not found in /opt/homebrew/share/qemu or /usr/local/share/qemu".to_string()
-            })?,
+            _ => match (req.arch, req.firmware) {
+                (GuestArch::Aarch64, _) => {
+                    let p = resolve_edk2_for_arch("aarch64", Some(&qemu_bin)).ok_or_else(|| {
+                        "UEFI firmware edk2-aarch64-code.fd not found in /opt/homebrew/share/qemu or /usr/local/share/qemu. Install QEMU via `brew install qemu`.".to_string()
+                    })?;
+                    Some(p)
+                }
+                (GuestArch::X86_64, FirmwareType::Uefi) => {
+                    let p = resolve_edk2_for_arch("x86_64", Some(&qemu_bin)).ok_or_else(|| {
+                        "UEFI firmware edk2-x86_64-code.fd not found in /opt/homebrew/share/qemu or /usr/local/share/qemu. Switch Firmware to 'SeaBIOS' or run `brew install qemu`.".to_string()
+                    })?;
+                    Some(p)
+                }
+                (GuestArch::I386, FirmwareType::Uefi) => {
+                    resolve_edk2_for_arch("i386", Some(&qemu_bin))
+                }
+                _ => None,
+            },
         };
 
         let disk_path = PathBuf::from(&req.disk_path);
@@ -465,10 +883,13 @@ impl VmManager {
             return Err(format!("VM disk file does not exist: {}", disk_path.display()));
         }
 
-        // Portable qcow2 Auto-Rebase: ensure backing-filename points to the active `templates_dir`
-        image_store
-            .ensure_overlay_rebased(&disk_path, req.template_id.as_deref())
-            .await?;
+        // Portable qcow2 Auto-Rebase: ensure backing-filename points to active `templates_dir`
+        // (Skipped when installing directly onto a fresh standalone template disk in Guided Setup mode.)
+        if req.finalize_template_on_exit.is_none() {
+            image_store
+                .ensure_overlay_rebased(&disk_path, req.template_id.as_deref())
+                .await?;
+        }
 
         let boot_media = match req.boot_media_path {
             Some(ref m) if !m.trim().is_empty() => {
@@ -502,6 +923,7 @@ impl VmManager {
         let mut active_nics = Vec::with_capacity(req.nics.len());
         let mut owned_fabric_ports: Vec<String> = Vec::new();
         for (idx, nic) in req.nics.iter().enumerate() {
+            let effective_nic_model = nic.nic_model.unwrap_or(req.nic_model);
             match (nic.fabric_port, nic.vm_port) {
                 (Some(fp), Some(vp)) => {
                     active_nics.push(ActiveVmNic {
@@ -511,6 +933,7 @@ impl VmManager {
                             .clone()
                             .unwrap_or_else(|| format!("{safe_id}-net{idx}")),
                         mac: nic.mac.clone(),
+                        nic_model: effective_nic_model,
                         fabric_port: fp,
                         vm_port: vp,
                     });
@@ -521,11 +944,11 @@ impl VmManager {
                         .clone()
                         .unwrap_or_else(|| format!("{safe_id}-net{idx}"));
                     if let Some(existing) = fabric.get_udp_port(&desired_id).await {
-                        // Reuse persistent canvas UDP port without marking as ephemeral-owned
                         active_nics.push(ActiveVmNic {
                             index: idx,
                             port_id: existing.port_id,
                             mac: nic.mac.clone(),
+                            nic_model: effective_nic_model,
                             fabric_port: existing.fabric_port,
                             vm_port: existing.vm_port,
                         });
@@ -551,6 +974,7 @@ impl VmManager {
                             index: idx,
                             port_id,
                             mac: nic.mac.clone(),
+                            nic_model: effective_nic_model,
                             fabric_port,
                             vm_port,
                         });
@@ -559,11 +983,26 @@ impl VmManager {
             }
         }
 
+        let host_arch = env::consts::ARCH.to_string();
+        let hvf_available = if (req.arch == GuestArch::Aarch64 && host_arch == "aarch64")
+            || (req.arch == GuestArch::X86_64 && host_arch == "x86_64")
+        {
+            crate::env_doctor::check_hvf_support().await
+        } else {
+            false
+        };
+        let accel_label = req.arch.effective_accel(&host_arch, hvf_available).to_string();
+
         let spec = ResolvedVmLaunchSpec {
             node_id: req.node_id.clone(),
             name: req.name.clone(),
             cpus: req.cpus.max(1),
-            ram_mb: req.ram_mb.max(128),
+            ram_mb: req.ram_mb.max(16),
+            arch: req.arch,
+            host_arch,
+            hvf_available,
+            firmware: req.firmware,
+            disk_bus: req.disk_bus,
             bios_path,
             disk_path: disk_path.clone(),
             boot_media: boot_media.clone(),
@@ -591,10 +1030,7 @@ impl VmManager {
                 if let Some(off) = vnc_port_offset {
                     self.release_vnc_offset(off);
                 }
-                return Err(format!(
-                    "Failed to spawn {}: {e}",
-                    qemu_bin.display()
-                ));
+                return Err(format!("Failed to spawn {}: {e}", qemu_bin.display()));
             }
         };
 
@@ -613,6 +1049,11 @@ impl VmManager {
             pid,
             cpus: spec.cpus,
             ram_mb: spec.ram_mb,
+            arch: req.arch,
+            nic_model: req.nic_model,
+            firmware: req.firmware,
+            disk_bus: req.disk_bus,
+            accel: accel_label.clone(),
             disk_path: disk_path.display().to_string(),
             boot_media_path: boot_media.map(|(p, _)| p.display().to_string()),
             display_mode: req.display_mode,
@@ -646,13 +1087,20 @@ impl VmManager {
             info.pid,
             info.vnc_tcp_port,
             &info.serial_socket_path,
-            Some("QEMU HVF instance running".to_string()),
+            Some(format!(
+                "QEMU {} ({}) instance running",
+                req.arch.as_str(),
+                accel_label.to_uppercase()
+            )),
         )
         .await;
 
         // Spawn async reaper task owning `child` until termination
         let mgr = self.clone();
         let fabric_clone = fabric.clone();
+        let image_store_clone = image_store.clone();
+        let finalize_hook = req.finalize_template_on_exit.clone();
+        let finalize_disk_path = disk_path.clone();
         let node_id = req.node_id.clone();
         let serial_str = info.serial_socket_path.clone();
         tokio::spawn(async move {
@@ -688,6 +1136,37 @@ impl VmManager {
 
             for p in ports_to_clean {
                 let _ = fabric_clone.remove_port(&p).await;
+            }
+
+            // If this VM was launched by 1-click Guided Template Setup and exited cleanly,
+            // auto-promote the installed `.qcow2` into a read-only (`0444`) Golden Base Template!
+            if let Some(fin) = finalize_hook {
+                if final_status == VmStatus::Stopped {
+                    if let Ok(meta) = fs::metadata(&finalize_disk_path) {
+                        // A freshly created empty qcow2 header is ~196 KB; an installed OS writes multiple MBs.
+                        if meta.len() > 2 * 1024 * 1024 {
+                            if let Ok(tpl) = image_store_clone
+                                .finalize_in_place_template(&finalize_disk_path, &fin)
+                                .await
+                            {
+                                let handle_opt = mgr.inner.app_handle.read().await.clone();
+                                if let Some(app) = handle_opt {
+                                    let _ = app.emit(
+                                        "catalog://download-progress",
+                                        serde_json::json!({
+                                            "catalogId": fin.catalog_id,
+                                            "stage": "Ready",
+                                            "bytesDownloaded": tpl.actual_size_bytes,
+                                            "totalBytes": tpl.actual_size_bytes,
+                                            "percent": 100.0,
+                                            "message": format!("{} promoted to Read-Only Base Template ({})", tpl.name, tpl.filename),
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             let _ = exit_tx.send(true);
@@ -738,7 +1217,6 @@ impl VmManager {
         .await;
 
         if !force {
-            // Attempt ACPI powerdown via QMP Unix socket
             if send_qmp_system_powerdown(&qmp_sock).await.is_ok()
                 && wait_for_exit_signal(&mut exit_rx, DEFAULT_POWERDOWN_TIMEOUT).await
             {
@@ -748,7 +1226,6 @@ impl VmManager {
             }
         }
 
-        // Fallback 1: SIGTERM
         if let Some(pid) = pid_opt {
             if !force {
                 unsafe {
@@ -761,7 +1238,6 @@ impl VmManager {
                 }
             }
 
-            // Fallback 2: SIGKILL
             unsafe {
                 libc::kill(pid as i32, libc::SIGKILL);
             }
@@ -795,7 +1271,6 @@ impl VmManager {
             let mgr = self.clone();
             let (tx, rx) = oneshot::channel();
             tokio::spawn(async move {
-                // Fast graceful attempt (800ms) during app quit, then immediate SIGTERM/SIGKILL
                 let _ = timeout(Duration::from_millis(900), mgr.stop_vm(&id, false)).await;
                 let _ = mgr.stop_vm(&id, true).await;
                 let _ = tx.send(());
@@ -837,7 +1312,6 @@ impl VmManager {
             }
         }
 
-        // Start at offset 1 (port 5901) to avoid macOS Screen Sharing daemon on 5900
         for offset in 1..=500u16 {
             if guard.contains(&offset) {
                 continue;
@@ -896,13 +1370,11 @@ async fn send_qmp_system_powerdown(qmp_socket_path: &Path) -> Result<(), String>
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 
-    // 1. Read QMP greeting banner
     let _greeting = timeout(QMP_CONNECT_TIMEOUT, lines.next_line())
         .await
         .map_err(|_| "Timed out awaiting QMP greeting".to_string())?
         .map_err(|e| e.to_string())?;
 
-    // 2. Negotiate capabilities
     writer
         .write_all(b"{\"execute\":\"qmp_capabilities\"}\r\n")
         .await
@@ -912,7 +1384,6 @@ async fn send_qmp_system_powerdown(qmp_socket_path: &Path) -> Result<(), String>
         .map_err(|_| "Timed out awaiting qmp_capabilities ack".to_string())?
         .map_err(|e| e.to_string())?;
 
-    // 3. Issue ACPI system_powerdown
     writer
         .write_all(b"{\"execute\":\"system_powerdown\"}\r\n")
         .await
@@ -978,13 +1449,23 @@ fn now_epoch_ms() -> u64 {
 mod tests {
     use super::*;
 
-    fn sample_spec(display_mode: VmDisplayMode, boot_media: Option<(PathBuf, BootMediaBus)>) -> ResolvedVmLaunchSpec {
+    fn sample_spec(
+        display_mode: VmDisplayMode,
+        boot_media: Option<(PathBuf, BootMediaBus)>,
+    ) -> ResolvedVmLaunchSpec {
         ResolvedVmLaunchSpec {
             node_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             name: "fw1-openbsd".to_string(),
             cpus: 2,
             ram_mb: 512,
-            bios_path: PathBuf::from("/opt/homebrew/share/qemu/edk2-aarch64-code.fd"),
+            arch: GuestArch::Aarch64,
+            host_arch: "aarch64".to_string(),
+            hvf_available: true,
+            firmware: FirmwareType::Uefi,
+            disk_bus: DiskBus::VirtioBlk,
+            bios_path: Some(PathBuf::from(
+                "/opt/homebrew/share/qemu/edk2-aarch64-code.fd",
+            )),
             disk_path: PathBuf::from("/tmp/lab.etherloom/overlays/fw1.qcow2"),
             boot_media,
             display_mode,
@@ -1000,6 +1481,7 @@ mod tests {
                     index: 0,
                     port_id: "fw1-net0".to_string(),
                     mac: "52:54:00:10:01:00".to_string(),
+                    nic_model: NicModel::VirtioNetPci,
                     fabric_port: 21000,
                     vm_port: 21001,
                 },
@@ -1007,6 +1489,7 @@ mod tests {
                     index: 1,
                     port_id: "fw1-net1".to_string(),
                     mac: "52:54:00:10:01:01".to_string(),
+                    nic_model: NicModel::VirtioNetPci,
                     fabric_port: 21002,
                     vm_port: 21003,
                 },
@@ -1061,5 +1544,66 @@ mod tests {
 
         assert!(joined.contains("scsi-cd,bus=scsi0.0,drive=install0,bootindex=1"));
         assert!(joined.contains("virtio-blk-pci,drive=hd0,bootindex=2"));
+    }
+
+    #[test]
+    fn builds_x86_64_q35_tcg_on_apple_silicon_and_hvf_on_intel_with_e1000_and_ahci() {
+        let mut spec = sample_spec(VmDisplayMode::Vnc, None);
+        spec.name = "opnsense-fw".to_string();
+        spec.arch = GuestArch::X86_64;
+        spec.host_arch = "aarch64".to_string();
+        spec.firmware = FirmwareType::Bios;
+        spec.disk_bus = DiskBus::Ahci;
+        spec.ram_mb = 1536;
+        spec.nics[0].nic_model = NicModel::E1000;
+        spec.nics[1].nic_model = NicModel::Rtl8139;
+
+        let args = build_qemu_args(&spec);
+        let joined = args.join(" ");
+
+        assert!(joined.contains("-M q35 -accel tcg,thread=multi -cpu max -smp 2 -m 1536"));
+        assert!(!joined.contains("-bios"), "SeaBIOS x86_64 omits -bios");
+        assert!(joined.contains("-vga std -device qemu-xhci -device usb-kbd -device usb-tablet"));
+        assert!(joined.contains("-device ahci,id=ahci0"));
+        assert!(joined.contains("ide-hd,bus=ahci0.0,drive=hd0,bootindex=1"));
+        assert!(joined.contains("-device e1000,netdev=net0,mac=52:54:00:10:01:00"));
+        assert!(joined.contains("-device rtl8139,netdev=net1,mac=52:54:00:10:01:01"));
+
+        // Verify Intel Mac (`host_arch == "x86_64"`) switches to `-accel hvf -cpu host` and UEFI emits `-bios`
+        spec.host_arch = "x86_64".to_string();
+        spec.firmware = FirmwareType::Uefi;
+        spec.bios_path = Some(PathBuf::from(
+            "/usr/local/share/qemu/edk2-x86_64-code.fd",
+        ));
+        let intel_joined = build_qemu_args(&spec).join(" ");
+        assert!(intel_joined.contains("-M q35 -accel hvf -cpu host"));
+        assert!(intel_joined.contains("-bios /usr/local/share/qemu/edk2-x86_64-code.fd"));
+    }
+
+    #[test]
+    fn builds_i386_freedos_pc_pentium3_ide_pcnet_with_32mb_ram_and_riscv64_virt() {
+        let mut dos = sample_spec(VmDisplayMode::Vnc, None);
+        dos.name = "freedos-mtcp".to_string();
+        dos.arch = GuestArch::I386;
+        dos.firmware = FirmwareType::Bios;
+        dos.disk_bus = DiskBus::Ide;
+        dos.cpus = 1;
+        dos.ram_mb = 32;
+        dos.nics.truncate(1);
+        dos.nics[0].nic_model = NicModel::Pcnet;
+
+        let dos_joined = build_qemu_args(&dos).join(" ");
+        assert!(dos_joined.contains("-M pc -accel tcg,thread=multi -cpu pentium3 -smp 1 -m 32"));
+        assert!(!dos_joined.contains("-bios"));
+        assert!(dos_joined.contains("-vga std"));
+        assert!(dos_joined.contains("ide-hd,bus=ide.0,drive=hd0,bootindex=1"));
+        assert!(dos_joined.contains("-device pcnet,netdev=net0,mac=52:54:00:10:01:00"));
+
+        let mut rv = sample_spec(VmDisplayMode::Vnc, None);
+        rv.arch = GuestArch::Riscv64;
+        rv.nics[0].nic_model = NicModel::Ne2kPci;
+        let rv_joined = build_qemu_args(&rv).join(" ");
+        assert!(rv_joined.contains("-M virt -accel tcg,thread=multi -cpu rv64"));
+        assert!(rv_joined.contains("-device ne2k_pci,netdev=net0"));
     }
 }

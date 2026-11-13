@@ -62,8 +62,12 @@ pub struct EnvDoctorReport {
     pub ok_count: usize,
     pub warning_count: usize,
     pub qemu_system_aarch64: ProbeDetail,
+    pub qemu_system_x86_64: ProbeDetail,
+    pub qemu_system_i386: ProbeDetail,
+    pub qemu_system_riscv64: ProbeDetail,
     pub qemu_img: ProbeDetail,
     pub edk2_aarch64_code: ProbeDetail,
+    pub edk2_x86_64_code: ProbeDetail,
     pub wireshark: ProbeDetail,
     pub python3: ProbeDetail,
     pub uv: ProbeDetail,
@@ -102,6 +106,22 @@ pub fn resolve_qemu_system_aarch64() -> Option<PathBuf> {
     resolve_macos_binary("qemu-system-aarch64")
 }
 
+/// Resolves `qemu-system-x86_64` on macOS.
+pub fn resolve_qemu_system_x86_64() -> Option<PathBuf> {
+    resolve_macos_binary("qemu-system-x86_64")
+}
+
+/// Resolves `qemu-system-{arch}` for `"aarch64"`, `"x86_64"`, `"i386"`, or `"riscv64"`.
+pub fn resolve_qemu_for_arch(arch: &str) -> Option<PathBuf> {
+    let bin = match arch {
+        "x86_64" => "qemu-system-x86_64",
+        "i386" => "qemu-system-i386",
+        "riscv64" => "qemu-system-riscv64",
+        _ => "qemu-system-aarch64",
+    };
+    resolve_macos_binary(bin)
+}
+
 /// Resolves `qemu-img` on macOS.
 pub fn resolve_qemu_img() -> Option<PathBuf> {
     resolve_macos_binary("qemu-img")
@@ -109,14 +129,28 @@ pub fn resolve_qemu_img() -> Option<PathBuf> {
 
 /// Resolves `edk2-aarch64-code.fd` across Homebrew Apple Silicon, Intel, and QEMU-relative prefixes.
 pub fn resolve_edk2_firmware(qemu_binary_path: Option<&Path>) -> Option<PathBuf> {
+    resolve_edk2_for_arch("aarch64", qemu_binary_path)
+}
+
+/// Resolves UEFI EDK2 firmware (`edk2-aarch64-code.fd`, `edk2-x86_64-code.fd`, or `edk2-i386-code.fd`)
+/// across Homebrew Apple Silicon (`/opt/homebrew/share/qemu`), Intel (`/usr/local/share/qemu`),
+/// and QEMU-relative prefixes.
+pub fn resolve_edk2_for_arch(arch: &str, qemu_binary_path: Option<&Path>) -> Option<PathBuf> {
+    let filename = match arch {
+        "x86_64" => "edk2-x86_64-code.fd",
+        "i386" => "edk2-i386-code.fd",
+        "riscv64" => return None,
+        _ => "edk2-aarch64-code.fd",
+    };
+
     let mut candidates = vec![
-        PathBuf::from("/opt/homebrew/share/qemu/edk2-aarch64-code.fd"),
-        PathBuf::from("/usr/local/share/qemu/edk2-aarch64-code.fd"),
+        PathBuf::from(format!("/opt/homebrew/share/qemu/{filename}")),
+        PathBuf::from(format!("/usr/local/share/qemu/{filename}")),
     ];
     if let Some(qemu_path) = qemu_binary_path {
         if let Some(bin_dir) = qemu_path.parent() {
             if let Some(prefix) = bin_dir.parent() {
-                let derived = prefix.join("share/qemu/edk2-aarch64-code.fd");
+                let derived = prefix.join("share/qemu").join(filename);
                 if !candidates.contains(&derived) {
                     candidates.push(derived);
                 }
@@ -226,18 +260,21 @@ async fn probe_cli_binary(
     }
 }
 
-/// Probes ARM64 UEFI firmware `edk2-aarch64-code.fd` in Homebrew Apple Silicon and Intel prefixes.
-fn probe_edk2_firmware(qemu_binary_path: Option<&str>) -> ProbeDetail {
+/// Probes an EDK2 UEFI firmware file (`edk2-aarch64-code.fd` or `edk2-x86_64-code.fd`) in Homebrew prefixes.
+fn probe_edk2_firmware_file(
+    filename: &str,
+    arch_label: &str,
+    qemu_binary_path: Option<&str>,
+) -> ProbeDetail {
     let mut candidates = vec![
-        PathBuf::from("/opt/homebrew/share/qemu/edk2-aarch64-code.fd"),
-        PathBuf::from("/usr/local/share/qemu/edk2-aarch64-code.fd"),
+        PathBuf::from(format!("/opt/homebrew/share/qemu/{filename}")),
+        PathBuf::from(format!("/usr/local/share/qemu/{filename}")),
     ];
 
-    // Also inspect `<prefix>/share/qemu/edk2-aarch64-code.fd` relative to resolved QEMU binary
     if let Some(qemu_path) = qemu_binary_path {
         if let Some(bin_dir) = Path::new(qemu_path).parent() {
             if let Some(prefix) = bin_dir.parent() {
-                let derived = prefix.join("share/qemu/edk2-aarch64-code.fd");
+                let derived = prefix.join("share/qemu").join(filename);
                 if !candidates.contains(&derived) {
                     candidates.push(derived);
                 }
@@ -252,19 +289,19 @@ fn probe_edk2_firmware(qemu_binary_path: Option<&str>) -> ProbeDetail {
             if meta.is_file() && meta.len() > 0 {
                 let size_mb = (meta.len() as f64) / (1024.0 * 1024.0);
                 return ProbeDetail {
-                    name: "edk2-aarch64-code.fd".to_string(),
+                    name: filename.to_string(),
                     found: true,
                     path: Some(candidate.display().to_string()),
-                    version: Some(format!("EDK2 ARM64 UEFI ({size_mb:.1} MB)")),
+                    version: Some(format!("EDK2 {arch_label} UEFI ({size_mb:.1} MB)")),
                     searched_paths,
-                    notes: Some("Read-only pflash0 UEFI firmware image".to_string()),
+                    notes: Some("Read-only UEFI firmware image".to_string()),
                 };
             }
         }
     }
 
     ProbeDetail {
-        name: "edk2-aarch64-code.fd".to_string(),
+        name: filename.to_string(),
         found: false,
         path: None,
         version: None,
@@ -348,7 +385,7 @@ async fn probe_wireshark(homebrew_dirs: &[PathBuf], home_dir: Option<&Path>) -> 
 }
 
 /// Checks Apple `Hypervisor.framework` availability via `sysctl -n kern.hv_support` (non-root).
-async fn check_hvf_support() -> bool {
+pub async fn check_hvf_support() -> bool {
     if env::consts::OS != "macos" {
         return false;
     }
@@ -379,10 +416,38 @@ pub async fn run_diagnostics() -> EnvDoctorReport {
         uv_dirs.push(home.join(".cargo/bin"));
     }
 
-    let (qemu_system_aarch64, qemu_img, wireshark, python3, uv, hvf_supported) = tokio::join!(
+    let (
+        qemu_system_aarch64,
+        qemu_system_x86_64,
+        qemu_system_i386,
+        qemu_system_riscv64,
+        qemu_img,
+        wireshark,
+        python3,
+        uv,
+        hvf_supported,
+    ) = tokio::join!(
         probe_cli_binary(
             "qemu-system-aarch64",
             "qemu-system-aarch64",
+            &homebrew_dirs,
+            &["--version"]
+        ),
+        probe_cli_binary(
+            "qemu-system-x86_64",
+            "qemu-system-x86_64",
+            &homebrew_dirs,
+            &["--version"]
+        ),
+        probe_cli_binary(
+            "qemu-system-i386",
+            "qemu-system-i386",
+            &homebrew_dirs,
+            &["--version"]
+        ),
+        probe_cli_binary(
+            "qemu-system-riscv64",
+            "qemu-system-riscv64",
             &homebrew_dirs,
             &["--version"]
         ),
@@ -393,7 +458,16 @@ pub async fn run_diagnostics() -> EnvDoctorReport {
         check_hvf_support(),
     );
 
-    let edk2_aarch64_code = probe_edk2_firmware(qemu_system_aarch64.path.as_deref());
+    let edk2_aarch64_code = probe_edk2_firmware_file(
+        "edk2-aarch64-code.fd",
+        "ARM64",
+        qemu_system_aarch64.path.as_deref(),
+    );
+    let edk2_x86_64_code = probe_edk2_firmware_file(
+        "edk2-x86_64-code.fd",
+        "x86_64",
+        qemu_system_x86_64.path.as_deref(),
+    );
 
     let app_support_base = home_dir
         .as_ref()
@@ -434,12 +508,42 @@ pub async fn run_diagnostics() -> EnvDoctorReport {
         }
     }
 
+    // Compose Multi-Architecture QEMU summary (x86_64, i386, riscv64 + edk2-x86_64)
+    let mut multi_arch_available = Vec::new();
+    if qemu_system_x86_64.found {
+        multi_arch_available.push(if edk2_x86_64_code.found {
+            "x86_64 (UEFI + SeaBIOS)"
+        } else {
+            "x86_64 (SeaBIOS)"
+        });
+    }
+    if qemu_system_i386.found {
+        multi_arch_available.push("i386");
+    }
+    if qemu_system_riscv64.found {
+        multi_arch_available.push("riscv64");
+    }
+    let multi_arch_found = qemu_system_x86_64.found;
+    let multi_arch_details = if multi_arch_available.is_empty() {
+        Some("Install Homebrew QEMU (`brew install qemu`) for OPNsense, pfSense, OmniOS, DragonFly BSD, Haiku & FreeDOS".to_string())
+    } else {
+        Some(format!(
+            "Detected targets: {} ({})",
+            multi_arch_available.join(", "),
+            if env::consts::ARCH == "x86_64" && hvf_supported {
+                "x86_64 HVF + TCG"
+            } else {
+                "multi-threaded TCG JIT"
+            }
+        ))
+    };
+
     let checks = vec![
         DependencyCheck {
             id: "qemu-system-aarch64".to_string(),
-            title: "QEMU System Emulator (qemu-system-aarch64)".to_string(),
+            title: "QEMU ARM64 Hypervisor Engine (qemu-system-aarch64)".to_string(),
             category: "Hypervisor & Compute".to_string(),
-            required_for: "Booting Linux, FreeBSD, OpenBSD & NetBSD guests with -accel hvf"
+            required_for: "Native Apple Silicon HVF guests (Linux, FreeBSD, OpenBSD, NetBSD, OpenWrt, RouterOS, 9front)"
                 .to_string(),
             badge: if qemu_system_aarch64.found {
                 CheckBadge::Ok
@@ -458,10 +562,28 @@ pub async fn run_diagnostics() -> EnvDoctorReport {
             searched_paths: qemu_system_aarch64.searched_paths.clone(),
         },
         DependencyCheck {
+            id: "qemu-multi-arch".to_string(),
+            title: "Multi-Arch QEMU Engines (x86_64 / i386 / riscv64)".to_string(),
+            category: "Hypervisor & Compute".to_string(),
+            required_for: "OPNsense, pfSense, OmniOS, DragonFly BSD, Haiku (x86_64) & FreeDOS + mTCP (i386)"
+                .to_string(),
+            badge: if multi_arch_found {
+                CheckBadge::Ok
+            } else {
+                CheckBadge::Warning
+            },
+            found: multi_arch_found,
+            path: qemu_system_x86_64.path.clone(),
+            version: qemu_system_x86_64.version.clone(),
+            remediation: (!multi_arch_found).then(|| "brew install qemu".to_string()),
+            details: multi_arch_details,
+            searched_paths: qemu_system_x86_64.searched_paths.clone(),
+        },
+        DependencyCheck {
             id: "qemu-img".to_string(),
             title: "QEMU Disk Image Utility (qemu-img)".to_string(),
             category: "Storage & Overlays".to_string(),
-            required_for: "Creating Copy-on-Write qcow2 lab overlays from base templates"
+            required_for: "Creating Copy-on-Write qcow2 lab overlays & converting OS catalog images"
                 .to_string(),
             badge: if qemu_img.found {
                 CheckBadge::Ok
@@ -477,16 +599,21 @@ pub async fn run_diagnostics() -> EnvDoctorReport {
         },
         DependencyCheck {
             id: "edk2-aarch64-code".to_string(),
-            title: "UEFI Firmware (edk2-aarch64-code.fd)".to_string(),
+            title: "UEFI Firmware (edk2-aarch64 & edk2-x86_64)".to_string(),
             category: "Boot Firmware".to_string(),
-            required_for: "UEFI pflash boot & graphical ramfb console on -M virt".to_string(),
+            required_for: "UEFI boot & graphical ramfb / VGA console on ARM64 & x86_64 guests".to_string(),
             badge: if edk2_aarch64_code.found {
                 CheckBadge::Ok
             } else {
                 CheckBadge::Warning
             },
             found: edk2_aarch64_code.found,
-            path: edk2_aarch64_code.path.clone(),
+            path: match (&edk2_aarch64_code.path, &edk2_x86_64_code.path) {
+                (Some(a), Some(x)) => Some(format!("ARM64: {a} • x86_64: {x}")),
+                (Some(a), None) => Some(a.clone()),
+                (None, Some(x)) => Some(x.clone()),
+                (None, None) => None,
+            },
             version: edk2_aarch64_code.version.clone(),
             remediation: (!edk2_aarch64_code.found).then(|| "brew install qemu".to_string()),
             details: edk2_aarch64_code.notes.clone(),
@@ -560,8 +687,12 @@ pub async fn run_diagnostics() -> EnvDoctorReport {
         ok_count,
         warning_count,
         qemu_system_aarch64,
+        qemu_system_x86_64,
+        qemu_system_i386,
+        qemu_system_riscv64,
         qemu_img,
         edk2_aarch64_code,
+        edk2_x86_64_code,
         wireshark,
         python3,
         uv,
@@ -593,9 +724,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn diagnostics_returns_all_five_checks() {
+    async fn diagnostics_returns_all_six_checks_including_multi_arch() {
         let report = run_diagnostics().await;
-        assert_eq!(report.checks.len(), 5);
-        assert_eq!(report.ok_count + report.warning_count, 5);
+        assert_eq!(report.checks.len(), 6);
+        assert_eq!(report.ok_count + report.warning_count, 6);
+        assert!(report.checks.iter().any(|c| c.id == "qemu-multi-arch"));
     }
 }

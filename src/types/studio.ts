@@ -36,8 +36,12 @@ export interface EnvDoctorReport {
   okCount: number;
   warningCount: number;
   qemuSystemAarch64: ProbeDetail;
+  qemuSystemX86_64?: ProbeDetail;
+  qemuSystemI386?: ProbeDetail;
+  qemuSystemRiscv64?: ProbeDetail;
   qemuImg: ProbeDetail;
   edk2Aarch64Code: ProbeDetail;
+  edk2X86_64Code?: ProbeDetail;
   wireshark: ProbeDetail;
   python3: ProbeDetail;
   uv: ProbeDetail;
@@ -135,11 +139,21 @@ export interface OverlayRebaseReport {
 }
 
 // -----------------------------------------------------------------------------
-// Phase 1: Images, VM Manager & PacketFabric Types
+// Phase 1 & Phase 6: Images, Multi-Arch VM Manager & PacketFabric Types
 // -----------------------------------------------------------------------------
 
-export type GuestFamily = "linux" | "freebsd" | "openbsd" | "netbsd";
+export type GuestFamily = "linux" | "freebsd" | "openbsd" | "netbsd" | "other";
 export type NodeKind = "vm" | "l2_switch" | "l1_hub";
+
+export type GuestArch = "aarch64" | "x86_64" | "i386" | "riscv64";
+export type NicModel =
+  | "virtio-net-pci"
+  | "e1000"
+  | "rtl8139"
+  | "pcnet"
+  | "ne2k_pci";
+export type FirmwareType = "uefi" | "bios";
+export type DiskBus = "virtio-blk" | "ahci" | "ide";
 
 export interface CatalogComponent {
   id: string;
@@ -148,6 +162,10 @@ export interface CatalogComponent {
   kind: NodeKind;
   guestFamily: GuestFamily | null;
   osProfileId?: string | null;
+  arch?: GuestArch | null;
+  defaultNicModel?: NicModel | null;
+  defaultFirmware?: FirmwareType | null;
+  defaultDiskBus?: DiskBus | null;
   nicPrefix: string;
   defaultPorts: number;
   defaultVcpus: number | null;
@@ -159,6 +177,10 @@ export interface OsProfile {
   id: string;
   name: string;
   guestFamily: GuestFamily;
+  arch?: GuestArch;
+  defaultNicModel?: NicModel;
+  defaultFirmware?: FirmwareType;
+  defaultDiskBus?: DiskBus;
   nicPrefix: string;
   nicNamingPattern: string;
   altNicNamingPattern: string | null;
@@ -172,6 +194,10 @@ export interface BaseTemplateInfo {
   id: string;
   name: string;
   osProfileId: string;
+  arch?: GuestArch;
+  defaultNicModel?: NicModel;
+  defaultFirmware?: FirmwareType;
+  defaultDiskBus?: DiskBus;
   path: string;
   filename: string;
   virtualSizeBytes: number;
@@ -205,6 +231,7 @@ export type VmStatus = "starting" | "running" | "stopping" | "stopped" | "crashe
 export interface VmNicConfig {
   portId?: string | null;
   mac: string;
+  nicModel?: NicModel | null;
   fabricPort?: number | null;
   vmPort?: number | null;
 }
@@ -213,6 +240,7 @@ export interface ActiveVmNic {
   index: number;
   portId: string;
   mac: string;
+  nicModel?: NicModel;
   fabricPort: number;
   vmPort: number;
 }
@@ -220,6 +248,10 @@ export interface ActiveVmNic {
 export interface SpawnVmRequest {
   nodeId: string;
   name: string;
+  arch?: GuestArch;
+  nicModel?: NicModel;
+  firmware?: FirmwareType;
+  diskBus?: DiskBus;
   cpus: number;
   ramMb: number;
   diskPath: string;
@@ -235,6 +267,11 @@ export interface SpawnVmRequest {
 export interface VmInstanceInfo {
   nodeId: string;
   name: string;
+  arch?: GuestArch;
+  accel?: string;
+  nicModel?: NicModel;
+  firmware?: FirmwareType;
+  diskBus?: DiskBus;
   status: VmStatus;
   pid: number | null;
   cpus: number;
@@ -318,6 +355,7 @@ export interface NodePort {
   index: number;
   label: string;
   mac: string;
+  nicModel?: NicModel | null;
   ipLabel?: string | null;
   notes?: string | null;
 }
@@ -327,6 +365,11 @@ export interface TopologyNodeData extends Record<string, unknown> {
   kind: NodeKind;
   guestFamily: GuestFamily | null;
   osProfileId?: string | null;
+  arch?: GuestArch | null;
+  nicModel?: NicModel | null;
+  firmware?: FirmwareType | null;
+  diskBus?: DiskBus | null;
+  hostArch?: string | null;
   templateId?: string | null;
   diskPath?: string | null;
   diskSizeGb?: number | null;
@@ -405,6 +448,7 @@ export interface WorkspacePort {
   index: number;
   label: string;
   mac: string;
+  nic_model?: NicModel | null;
   ip_label?: string | null;
   notes?: string | null;
 }
@@ -415,6 +459,10 @@ export interface WorkspaceNode {
   kind: NodeKind;
   guest_family?: GuestFamily | null;
   os_profile_id?: string | null;
+  arch?: GuestArch | null;
+  nic_model?: NicModel | null;
+  firmware?: FirmwareType | null;
+  disk_bus?: DiskBus | null;
   template_id?: string | null;
   disk_path?: string | null;
   disk_size_gb?: number | null;
@@ -718,9 +766,11 @@ export interface LabStepDto {
 }
 
 export interface LabTemplateRequirementStatus {
+  catalogId?: string;
   osProfileId: string;
   osProfileName: string;
   guestFamily: GuestFamily | string;
+  arch?: GuestArch | string;
   satisfied: boolean;
   matchedTemplateId: string | null;
   matchedTemplateName: string | null;
@@ -737,6 +787,7 @@ export interface AcademyLabSummary {
   nodeCount: number;
   linkCount: number;
   stepCount: number;
+  requiredCatalogIds?: string[];
   requiredTemplates: LabTemplateRequirementStatus[];
   allTemplatesReady: boolean;
   sourceKind: "builtin" | "custom" | string;
@@ -753,4 +804,75 @@ export interface InstantiatedLabDto {
   lab: AcademyLabDetail;
   bundle: ProjectBundleDto;
   autoBoundTemplates: number;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 6: Built-In 15-OS Curated Catalog & On-Demand Download Engine Types
+// -----------------------------------------------------------------------------
+
+export type CatalogCategory =
+  | "Linux"
+  | "BSD Family"
+  | "Routers & Firewalls"
+  | "Research, UNIX & Retro";
+
+export type CatalogDeliveryKind =
+  | "direct_template"
+  | "guided_installer"
+  | "local_import_only";
+
+export type CatalogAvailability =
+  | "not_downloaded"
+  | "downloading"
+  | "installer_ready"
+  | "ready";
+
+export interface OsCatalogEntryDto {
+  id: string;
+  name: string;
+  version: string;
+  category: CatalogCategory;
+  guestFamily: GuestFamily;
+  osProfileId: string;
+  arch: GuestArch;
+  nicModel: NicModel;
+  nicNamingHint: string;
+  firmware: FirmwareType;
+  diskBus: DiskBus;
+  defaultCpus: number;
+  defaultRamMb: number;
+  recommendedDiskGb: number;
+  estimatedDownloadMb: number;
+  deliveryKind: CatalogDeliveryKind;
+  downloadUrl: string | null;
+  checksumUrl: string | null;
+  officialSiteUrl: string;
+  defaultCredentials: string;
+  summary: string;
+  quirksAndTips: string[];
+  availability: CatalogAvailability;
+  templateId: string | null;
+  templatePath: string | null;
+  templateSizeBytes: number | null;
+  installerPath: string | null;
+  installerSizeBytes: number | null;
+  referencingProjects: string[];
+}
+
+export interface CatalogDownloadProgressEvent {
+  catalogId: string;
+  stage: string;
+  bytesDownloaded: number;
+  totalBytes: number | null;
+  percent: number;
+  message: string;
+  error: string | null;
+}
+
+export interface DeleteCatalogImageResult {
+  catalogId: string;
+  deletedFiles: string[];
+  bytesFreed: number;
+  referencingProjects: string[];
+  blockedByReferences: boolean;
 }

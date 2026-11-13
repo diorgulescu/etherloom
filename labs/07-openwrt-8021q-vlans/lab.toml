@@ -1,0 +1,186 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0-or-later)
+schema_version = 1
+id = "07-openwrt-8021q-vlans"
+number = 7
+title = "802.1Q VLAN Segmentation, Trunking & Inter-VLAN Routing on OpenWrt"
+subtitle = "Configure modern OpenWrt UCI bridge-vlan filtering (no legacy swconfig!), prove L2 broadcast isolation, capture double-tagged 802.1Q frames on a trunk wire, and enforce fw4/nftables zone rules."
+difficulty = "Intermediate"
+estimated_minutes = 30
+tags = ["802.1Q VLANs", "OpenWrt ARM64", "Bridge-VLAN / DSA", "L2 Isolation"]
+required_catalog_ids = ["openwrt", "alpine"]
+required_os_profiles = ["openwrt", "alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Modern OpenWrt UCI Bridge-VLAN Switch & Router-on-a-Stick"
+summary = "Configure vlan_filtering on openwrt-sw1 (eth0:u* VLAN 10, eth1:u* VLAN 20, eth2:t Trunk) and eth0.10 / eth0.20 on openwrt-rtr."
+highlight_links = ["link-eng-access", "link-guest-access", "link-dot1q-trunk"]
+
+[[steps]]
+id = "step-2"
+title = "Prove Layer-2 Broadcast Domain Isolation"
+summary = "Tap host-guest's VLAN 20 access wire while host-eng sends broadcast ARP/pings in VLAN 10—confirming strict L2 separation."
+highlight_links = ["link-eng-access", "link-guest-access"]
+
+[[steps]]
+id = "step-3"
+title = "Inspect Double-Tagged 802.1Q Frames on the Trunk Wire"
+summary = "Capture link-dot1q-trunk in Live Wireshark to watch cross-VLAN packets traverse the trunk twice (VLAN 10 -> Router -> VLAN 20 with TTL - 1)."
+highlight_links = ["link-dot1q-trunk"]
+
+[[steps]]
+id = "step-4"
+title = "Enforce fw4 / nftables Zone Policy & Verify in tcpflowy"
+summary = "Block Guest (VLAN 20) -> Eng (VLAN 10) initiation while allowing stateful return flows, dissecting the TCP SYN rejection in tcpflowy."
+highlight_links = ["link-dot1q-trunk", "link-guest-access"]
+
+[topology]
+schema_version = 1
+name = "Lab 07 — 802.1Q VLAN Segmentation, Trunking & Inter-VLAN Routing on OpenWrt"
+notes = "Academy Sandbox: VLAN 10 (Eng) + VLAN 20 (Guest) -> OpenWrt Bridge-VLAN Switch -> 802.1Q Trunk -> OpenWrt Router-on-a-Stick"
+
+[[topology.nodes]]
+id = "node-host-eng"
+name = "host-eng"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Engineering VLAN 10 workstation (untagged access port)"
+position = { x = 60.0, y = 75.0 }
+
+[[topology.nodes.ports]]
+id = "node-host-eng-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:70:10:10"
+ip_label = "10.10.10.10/24"
+
+[[topology.nodes]]
+id = "node-host-guest"
+name = "host-guest"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Guest Wi-Fi / Visitor VLAN 20 client (untagged access port)"
+position = { x = 60.0, y = 315.0 }
+
+[[topology.nodes.ports]]
+id = "node-host-guest-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:70:20:20"
+ip_label = "10.10.20.20/24"
+
+[[topology.nodes]]
+id = "node-openwrt-sw1"
+name = "openwrt-sw1"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "openwrt"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 2
+vcpus = 1
+memory_mb = 128
+display_mode = "vnc"
+notes = "Managed OpenWrt ARM64 Bridge-VLAN Switch (eth0=VLAN10u*, eth1=VLAN20u*, eth2=Trunk 10t,20t)"
+position = { x = 395.0, y = 180.0 }
+
+[[topology.nodes.ports]]
+id = "node-openwrt-sw1-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:70:01:00"
+ip_label = "VLAN 10 (u*)"
+
+[[topology.nodes.ports]]
+id = "node-openwrt-sw1-p1"
+index = 1
+label = "eth1"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:70:01:01"
+ip_label = "VLAN 20 (u*)"
+
+[[topology.nodes.ports]]
+id = "node-openwrt-sw1-p2"
+index = 2
+label = "eth2"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:70:01:02"
+ip_label = "802.1Q Trunk (10t,20t)"
+
+[[topology.nodes]]
+id = "node-openwrt-rtr"
+name = "openwrt-rtr"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "openwrt"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 2
+vcpus = 1
+memory_mb = 128
+display_mode = "vnc"
+notes = "OpenWrt ARM64 Router-on-a-Stick + fw4/nftables (eth0.10=.10.1/24, eth0.20=.20.1/24)"
+position = { x = 740.0, y = 180.0 }
+
+[[topology.nodes.ports]]
+id = "node-openwrt-rtr-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:70:02:00"
+ip_label = "eth0.10 / eth0.20"
+
+[[topology.links]]
+id = "link-eng-access"
+source_node = "node-host-eng"
+source_port = "node-host-eng-p0"
+target_node = "node-openwrt-sw1"
+target_port = "node-openwrt-sw1-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Access Port VLAN 10 (Untagged Engineering Subnet 10.10.10.0/24)"
+
+[[topology.links]]
+id = "link-guest-access"
+source_node = "node-host-guest"
+source_port = "node-host-guest-p0"
+target_node = "node-openwrt-sw1"
+target_port = "node-openwrt-sw1-p1"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Access Port VLAN 20 (Untagged Guest Subnet 10.10.20.0/24)"
+
+[[topology.links]]
+id = "link-dot1q-trunk"
+source_node = "node-openwrt-sw1"
+source_port = "node-openwrt-sw1-p2"
+target_node = "node-openwrt-rtr"
+target_port = "node-openwrt-rtr-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "IEEE 802.1Q Tagged Trunk (EtherType 0x8100 — VLAN 10 & VLAN 20)"

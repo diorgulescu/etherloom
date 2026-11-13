@@ -15,8 +15,12 @@ import {
 import type {
   BaseTemplateInfo,
   BootMediaBus,
+  DiskBus,
+  FirmwareType,
+  GuestArch,
   GuestFamily,
   InstallerMediaInfo,
+  NicModel,
   OsProfile,
   VmDisplayMode,
 } from "../../types/studio";
@@ -26,6 +30,10 @@ export interface CustomVmWizardSubmission {
   hostname: string;
   osProfileId: string;
   guestFamily: GuestFamily;
+  arch: GuestArch;
+  nicModel: NicModel;
+  firmware: FirmwareType;
+  diskBus: DiskBus;
   vcpus: number;
   memoryMb: number;
   nicCount: number;
@@ -58,6 +66,10 @@ export function CustomVmWizardModal({
   const [hostname, setHostname] = useState("bsd-install1");
   const [osProfileId, setOsProfileId] = useState("openbsd");
   const [guestFamily, setGuestFamily] = useState<GuestFamily>("openbsd");
+  const [arch, setArch] = useState<GuestArch>("aarch64");
+  const [nicModel, setNicModel] = useState<NicModel>("virtio-net-pci");
+  const [firmware, setFirmware] = useState<FirmwareType>("uefi");
+  const [diskBus, setDiskBus] = useState<DiskBus>("virtio-blk");
   const [vcpus, setVcpus] = useState(2);
   const [memoryMb, setMemoryMb] = useState(512);
   const [nicCount, setNicCount] = useState(2);
@@ -96,11 +108,15 @@ export function CustomVmWizardModal({
     const prof = osProfiles.find((p) => p.id === id);
     if (prof) {
       setGuestFamily(prof.guestFamily);
+      setArch(prof.arch ?? "aarch64");
+      setNicModel(prof.defaultNicModel ?? "virtio-net-pci");
+      setFirmware(prof.defaultFirmware ?? "uefi");
+      setDiskBus(prof.defaultDiskBus ?? "virtio-blk");
       setVcpus(prof.defaultCpus);
       setMemoryMb(prof.defaultRamMb);
       setDiskSizeGb(prof.recommendedDiskGb);
       if (hostname.endsWith("-install1") || hostname.startsWith("vm")) {
-        setHostname(`${prof.guestFamily}-1`);
+        setHostname(`${prof.id}-1`);
       }
     }
   };
@@ -115,11 +131,15 @@ export function CustomVmWizardModal({
 
   const handleSubmit = () => {
     onCreateVm({
-      hostname: hostname.trim() || `${guestFamily}-1`,
+      hostname: hostname.trim() || `${osProfileId}-1`,
       osProfileId,
       guestFamily,
+      arch,
+      nicModel,
+      firmware,
+      diskBus,
       vcpus: Math.max(1, vcpus),
-      memoryMb: Math.max(128, memoryMb),
+      memoryMb: Math.max(16, memoryMb),
       nicCount: Math.max(1, Math.min(16, nicCount)),
       displayMode,
       sourceMode,
@@ -156,7 +176,7 @@ export function CustomVmWizardModal({
                 New Custom VM / Install OS Wizard
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                UEFI ARM64 (-M virt -accel hvf) with Dual Serial &amp; Graphical
+                Multi-Arch QEMU (ARM64 HVF • x86_64 • i386 • RISC-V) with Dual
                 Console
               </p>
             </div>
@@ -205,6 +225,70 @@ export function CustomVmWizardModal({
             </label>
           </div>
 
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                Architecture
+              </span>
+              <select
+                value={arch}
+                onChange={(e) => setArch(e.target.value as GuestArch)}
+                className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+              >
+                <option value="aarch64">aarch64 (ARM64)</option>
+                <option value="x86_64">x86_64 (amd64)</option>
+                <option value="i386">i386 (Retro)</option>
+                <option value="riscv64">riscv64</option>
+              </select>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                NIC Driver
+              </span>
+              <select
+                value={nicModel}
+                onChange={(e) => setNicModel(e.target.value as NicModel)}
+                className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+              >
+                <option value="virtio-net-pci">virtio-net-pci</option>
+                <option value="e1000">Intel e1000</option>
+                <option value="rtl8139">RTL8139</option>
+                <option value="pcnet">AMD PCnet</option>
+                <option value="ne2k_pci">NE2000 PCI</option>
+              </select>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                Firmware
+              </span>
+              <select
+                value={firmware}
+                onChange={(e) => setFirmware(e.target.value as FirmwareType)}
+                className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+              >
+                <option value="uefi">UEFI (EDK2)</option>
+                <option value="bios">SeaBIOS</option>
+              </select>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-slate-700 dark:text-zinc-300">
+                Disk Bus
+              </span>
+              <select
+                value={diskBus}
+                onChange={(e) => setDiskBus(e.target.value as DiskBus)}
+                className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+              >
+                <option value="virtio-blk">virtio-blk</option>
+                <option value="ahci">AHCI SATA</option>
+                <option value="ide">Legacy IDE</option>
+              </select>
+            </label>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
@@ -226,9 +310,9 @@ export function CustomVmWizardModal({
               </span>
               <input
                 type="number"
-                min={128}
+                min={16}
                 max={16384}
-                step={128}
+                step={32}
                 value={memoryMb}
                 onChange={(e) => setMemoryMb(Number(e.target.value) || 512)}
                 className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"

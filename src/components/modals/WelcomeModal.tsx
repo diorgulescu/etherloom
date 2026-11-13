@@ -18,6 +18,7 @@ interface WelcomeModalProps {
   onChangeShowOnStartup: (show: boolean) => void;
   onClose: () => void;
   onOpenAcademy: () => void;
+  onOpenStorageLibrary: () => void;
   onLaunchLab: (labId: string) => void;
   onNewProject: () => void;
   onOpenProject: () => void;
@@ -31,10 +32,11 @@ export function WelcomeModal({
   onChangeShowOnStartup,
   onClose,
   onOpenAcademy,
+  onOpenStorageLibrary,
   onLaunchLab,
   onNewProject,
   onOpenProject,
-  onOpenCustomVmWizard,
+  onOpenCustomVmWizard: _onOpenCustomVmWizard,
 }: WelcomeModalProps) {
   if (!open) return null;
 
@@ -66,10 +68,10 @@ export function WelcomeModal({
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 max-w-xl leading-relaxed">
-                Orchestrate real Linux, OpenBSD, FreeBSD, and NetBSD virtual
-                networks on Apple Silicon &amp; Intel Macs, inject live link
-                impairments, stream wiretaps to Wireshark, and dissect TCP flows
-                visually with <code className="font-mono">tcpflowy</code>.
+                Orchestrate 15 curated Linux, BSD, Router/Firewall, and UNIX/Retro
+                operating systems on Apple Silicon &amp; Intel Macs, inject live
+                link impairments, stream wiretaps to Wireshark, and dissect TCP
+                flows visually with <code className="font-mono">tcpflowy</code>.
               </p>
             </div>
           </div>
@@ -104,7 +106,7 @@ export function WelcomeModal({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-colors"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Browse All {labs.length || 5} Guided Labs</span>
+                <span>Browse All {labs.length || 8} Guided Labs</span>
               </button>
             </div>
 
@@ -154,17 +156,17 @@ export function WelcomeModal({
               type="button"
               onClick={() => {
                 onClose();
-                onOpenCustomVmWizard();
+                onOpenStorageLibrary();
               }}
               className="text-left p-3.5 rounded-xl border border-slate-200 dark:border-zinc-800 hover:border-emerald-500/40 bg-slate-50/70 dark:bg-zinc-950/60 transition-colors space-y-1"
             >
               <HardDriveDownload className="w-4 h-4 text-emerald-500" />
               <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
-                Install OS / Golden Template
+                15-OS Library &amp; External SSD
               </div>
               <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Boot any Linux or BSD <code className="font-mono">.iso/.img</code>{" "}
-                over UEFI VNC and promote to a reusable template.
+                Download Alpine, FreeBSD, OpenBSD, RouterOS CHR, OpenWrt,
+                OPNsense, 9front &amp; FreeDOS on demand.
               </p>
             </button>
 

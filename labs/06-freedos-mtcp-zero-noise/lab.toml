@@ -1,0 +1,100 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0-or-later)
+schema_version = 1
+id = "06-freedos-mtcp-zero-noise"
+number = 6
+title = "Zero-Noise ARP & TCP Dissection with FreeDOS (mTCP)"
+subtitle = "Eliminate modern OS background chatter completely by pairing 32-bit FreeDOS (PCNTPK 0x60 + mTCP) with an IPv6-quieted Alpine server—capturing the exact 4 frames of ARP+ICMP and a pure TCP stream in tcpflowy."
+difficulty = "Beginner"
+estimated_minutes = 20
+tags = ["Zero-Noise", "FreeDOS i386", "ARP", "TCP Internals", "tcpflowy"]
+required_catalog_ids = ["freedos", "alpine"]
+required_os_profiles = ["freedos", "alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Silence the Linux Peer Before Link-Up & Start TCP Listener"
+summary = "Disable IPv6 on alpine-srv BEFORE bringing eth0 up so zero Router Solicitations, DAD, or mDNS frames touch the wire."
+highlight_links = ["link-wire-a"]
+
+[[steps]]
+id = "step-2"
+title = "Start .pcap + Live Wireshark on Wire A (Verify 0 Packets!)"
+summary = "Tap link-wire-a and witness complete Ethernet silence—zero background noise while both VMs idle."
+highlight_links = ["link-wire-a"]
+
+[[steps]]
+id = "step-3"
+title = "Load PCNTPK INT 0x60 & Configure mTCP on FreeDOS"
+summary = "Bind the AMD PCnet packet driver at software interrupt 0x60, write C:\\MTCP\\MTCP.CFG, and watch 1 ping emit the exact 4 textbook frames."
+highlight_links = ["link-wire-a"]
+
+[[steps]]
+id = "step-4"
+title = "Run a Pure TCP Session & Dissect Byte Math in tcpflowy"
+summary = "Send a short payload via mTCP nc, then inspect the exact SYN -> PSH-ACK -> FIN sequence/ack math in tcpflowy with zero noise."
+highlight_links = ["link-wire-a"]
+
+[topology]
+schema_version = 1
+name = "Lab 06 — Zero-Noise ARP & TCP Dissection with FreeDOS (mTCP)"
+notes = "Academy Sandbox: FreeDOS i386 (TCG, 32MB RAM, PCNTPK 0x60 + mTCP) <-> IPv6-silenced Alpine Linux (HVF)"
+
+[[topology.nodes]]
+id = "node-dos-client"
+name = "dos-client"
+kind = "vm"
+guest_family = "other"
+os_profile_id = "freedos"
+arch = "i386"
+nic_model = "pcnet"
+firmware = "bios"
+disk_bus = "ide"
+disk_size_gb = 1
+vcpus = 1
+memory_mb = 32
+display_mode = "vnc"
+notes = "FreeDOS 1.3 (i386 TCG, 32 MB RAM) — Crynwr PCNTPK INT 0x60 + mTCP cooperative stack"
+position = { x = 105.0, y = 185.0 }
+
+[[topology.nodes.ports]]
+id = "node-dos-client-p0"
+index = 0
+label = "PCNTPK 0x60"
+nic_model = "pcnet"
+mac = "52:54:00:60:00:10"
+ip_label = "10.0.60.10/24"
+
+[[topology.nodes]]
+id = "node-alpine-srv"
+name = "alpine-srv"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "IPv6-silenced Alpine ARM64 HVF TCP responder (:8080)"
+position = { x = 620.0, y = 185.0 }
+
+[[topology.nodes.ports]]
+id = "node-alpine-srv-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:60:00:01"
+ip_label = "10.0.60.1/24"
+
+[[topology.links]]
+id = "link-wire-a"
+source_node = "node-dos-client"
+source_port = "node-dos-client-p0"
+target_node = "node-alpine-srv"
+target_port = "node-alpine-srv-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Wire A — Zero-Noise Point-to-Point Segment (10.0.60.0/24)"

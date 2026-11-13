@@ -29,12 +29,15 @@ Etherloom stands on the shoulders of extraordinary open-source systems, packet-a
 
 ## 3. Guest Operating Systems Orchestrated & Featured in Labs
 
-Etherloom's OS profiles, Academy labs, and [`scripts/prepare_library.sh`](scripts/prepare_library.sh) helper download and orchestrate official upstream releases of:
+Etherloom's 15-OS Catalog Manager, Guided Academy Labs (Labs 01–08), and [`scripts/prepare_library.sh`](scripts/prepare_library.sh) helper download and orchestrate official upstream releases of:
 
-- **[OpenBSD](https://www.openbsd.org/)** (*The OpenBSD Project*, `ISC` / BSD-style licenses) — Featured in Guided Labs 03 & 04 for stateful packet filtering (`pf`), network address translation (`nat-to`), `CARP` virtual IP failover, `pfsync` state replication, and `vio(4)` VirtIO interfaces.
-- **[FreeBSD](https://www.freebsd.org/)** (*The FreeBSD Project*, `BSD-2-Clause`) — Official `aarch64` UFS VM images with `vtnet(4)` VirtIO networking.
-- **[NetBSD](https://www.netbsd.org/)** (*The NetBSD Foundation*, `BSD-2-Clause`) — Official `evbarm-aarch64` images with `vioif(4)` VirtIO networking.
-- **[Alpine Linux](https://alpinelinux.org/)** (*Alpine Linux Development Team*, `MIT` / `GPL-2.0` / open-source package licenses) — Official `nocloud` UEFI and `alpine-virt` `aarch64` images used for lightweight hosts and Linux routing labs.
+- **[Alpine Linux](https://alpinelinux.org/)** & **[Debian](https://www.debian.org/)** (*Linux Kernel & Userland Contributors*, `GPL-2.0` / `MIT` / DFSG open-source licenses) — Featured across Guided Labs 01–08 for lightweight hosts, static routing, and TCP traffic generation.
+- **[OpenBSD](https://www.openbsd.org/)** (*The OpenBSD Project*, `ISC` / BSD-style licenses) — Featured in Guided Labs 03, 04 & 08 for stateful packet filtering (`pf`), `nat-to` / `rdr-to`, `CARP` + `pfsync` HA clusters, `OpenBGPD` (`RFC 8212`), and `vio(4)` VirtIO interfaces.
+- **[FreeBSD](https://www.freebsd.org/)**, **[NetBSD](https://www.netbsd.org/)**, **[DragonFly BSD](https://www.dragonflybsd.org/)**, **[OPNsense](https://opnsense.org/)**, & **[pfSense CE](https://www.pfsense.org/)** (*BSD & Firewall Communities*, `BSD-2-Clause` / `Apache-2.0`) — Official ARM64 and `x86_64` VM/appliance distributions.
+- **[OpenWrt](https://openwrt.org/)** (*The OpenWrt Project*, `GPL-2.0`) — Featured in Guided Lab 07 for modern UCI `bridge-vlan` / DSA `802.1Q` trunking, Router-on-a-Stick, and `fw4` (`nftables`) zone isolation.
+- **[MikroTik RouterOS CHR](https://mikrotik.com/download)** (*MikroTikls SIA*, free-tier Cloud Hosted Router evaluation image fetched on demand by the user) & **[VyOS](https://vyos.io/)** (`GPL-2.0+`) — Featured in Guided Lab 08 for multi-vendor `eBGP` peering (`TCP/179`).
+- **[FreeDOS](https://www.freedos.org/)** (`GPL-2.0+`) + **[mTCP](https://www.brutman.com/mTCP/)** (*Michael B. Brutman*, `GPL-3.0`) + **Crynwr Packet Drivers** (`GPL`) — Featured in Guided Lab 06 (`i386` TCG, `32 MB` RAM) for zero-noise ARP & TCP sequence/ack dissection.
+- **[9front](https://9front.org/)** (`MIT`), **[OmniOS](https://omnios.org/)** (`CDDL` / open-source licenses), & **[Haiku](https://www.haiku-os.org/)** (`MIT`) — Supported research, UNIX, and desktop systems in the 15-OS catalog.
 
 ---
 
@@ -65,6 +68,13 @@ All JavaScript/TypeScript dependencies are GPLv3-compatible (`MIT`, `ISC`, `Apac
 
 ---
 
-## 6. Conceptual Acknowledgments
+## 6. Project Authors & Contributors
+
+- **[Dragoş Iorgulescu (`@diorgulescu`)](https://github.com/diorgulescu)** — Creator, System Architecture, `tcpflowy` Author & Maintainer
+- **[Antigravity](https://antigravity.google/)** *(Google DeepMind Agentic AI)* — Co-Author & Engineering Contributor
+
+---
+
+## 7. Conceptual Acknowledgments
 
 Etherloom draws pedagogical inspiration from pioneering open-source network emulation and education platforms — including **GNS3** (`GPL-3.0`), **Kathara / Netkit** (`GPL-3.0`), **IMUNES** (`BSD`), and **Containerlab** (`BSD-3-Clause`) — reimagined natively for unprivileged macOS Apple Silicon (`Hypervisor.framework`) with first-class BSD + Linux parity and built-in visual TCP flow dissection.

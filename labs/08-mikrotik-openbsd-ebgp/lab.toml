@@ -1,0 +1,212 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0-or-later)
+schema_version = 1
+id = "08-mikrotik-openbsd-ebgp"
+number = 8
+title = "Multi-Vendor eBGP Peering & Route Failover: MikroTik CHR v7 ↔ OpenBSD (OpenBGPD)"
+subtitle = "Establish RFC 8212-compliant eBGP sessions over TCP/179 between MikroTik RouterOS v7 (AS 65001) and OpenBSD OpenBGPD (AS 65002), dissect BGP OPEN/UPDATE/KEEPALIVE in tcpflowy, and test live Cut Cable failover."
+difficulty = "Advanced"
+estimated_minutes = 35
+tags = ["eBGP", "MikroTik CHR v7", "OpenBSD OpenBGPD", "RFC 8212", "TCP/179"]
+required_catalog_ids = ["mikrotik-chr", "openbsd", "alpine"]
+required_os_profiles = ["mikrotik-chr", "openbsd", "alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Bring Up Transit (/30) & Customer LAN (/24) Interfaces"
+summary = "Configure MikroTik CHR v7 (ether1..ether3), OpenBSD (vio0..vio2 + ip.forwarding), and Alpine LAN hosts lan-a & lan-b."
+highlight_links = ["link-lan-a", "link-ebgp-primary", "link-ebgp-backup", "link-lan-b"]
+
+[[steps]]
+id = "step-2"
+title = "Start Wire Capture on Primary eBGP Transit (TCP Port 179)"
+summary = "Arm .pcap recording + Live Wireshark on link-ebgp-primary BEFORE enabling BGP so the entire TCP/179 session bring-up is captured."
+highlight_links = ["link-ebgp-primary"]
+
+[[steps]]
+id = "step-3"
+title = "Configure RouterOS v7 BGP & OpenBSD /etc/bgpd.conf (RFC 8212!)"
+summary = "Author explicit RFC 8212 import/export filters in RouterOS v7 (/routing/filter/rule + /routing/bgp/connection) and OpenBGPD."
+highlight_links = ["link-ebgp-primary", "link-ebgp-backup"]
+
+[[steps]]
+id = "step-4"
+title = "Dissect BGP in tcpflowy & Test Live 'Cut Cable' Route Failover"
+summary = "Inspect TCP/179 OPEN, UPDATE (NLRI + AS_PATH), and KEEPALIVE heartbeats in tcpflowy, then cut link-ebgp-primary to watch live backup failover!"
+highlight_links = ["link-ebgp-primary", "link-ebgp-backup"]
+
+[topology]
+schema_version = 1
+name = "Lab 08 — Multi-Vendor eBGP Peering & Route Failover: MikroTik CHR v7 ↔ OpenBSD"
+notes = "Academy Sandbox: AS 65001 (MikroTik CHR v7) <-> AS 65002 (OpenBSD OpenBGPD) with Primary + Backup /30 eBGP transits"
+
+[[topology.nodes]]
+id = "node-lan-a"
+name = "lan-a"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "AS 65001 Customer LAN host (192.168.101.10/24)"
+position = { x = 50.0, y = 185.0 }
+
+[[topology.nodes.ports]]
+id = "node-lan-a-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:01:10"
+ip_label = "192.168.101.10/24"
+
+[[topology.nodes]]
+id = "node-chr-as65001"
+name = "chr-as65001"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "mikrotik-chr"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 2
+vcpus = 2
+memory_mb = 256
+display_mode = "vnc"
+notes = "AS 65001 Border Router — MikroTik RouterOS CHR v7 (1-indexed ether1..ether3)"
+position = { x = 335.0, y = 155.0 }
+
+[[topology.nodes.ports]]
+id = "node-chr-as65001-p0"
+index = 0
+label = "ether1"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:00:01"
+ip_label = "172.16.0.1/30"
+
+[[topology.nodes.ports]]
+id = "node-chr-as65001-p1"
+index = 1
+label = "ether2"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:01:01"
+ip_label = "192.168.101.1/24"
+
+[[topology.nodes.ports]]
+id = "node-chr-as65001-p2"
+index = 2
+label = "ether3"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:02:01"
+ip_label = "172.16.1.1/30"
+
+[[topology.nodes]]
+id = "node-obsd-as65002"
+name = "obsd-as65002"
+kind = "vm"
+guest_family = "openbsd"
+os_profile_id = "openbsd"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 8
+vcpus = 2
+memory_mb = 512
+display_mode = "vnc"
+notes = "AS 65002 Border Router — OpenBSD OpenBGPD (vio0..vio2)"
+position = { x = 665.0, y = 155.0 }
+
+[[topology.nodes.ports]]
+id = "node-obsd-as65002-p0"
+index = 0
+label = "vio0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:00:02"
+ip_label = "172.16.0.2/30"
+
+[[topology.nodes.ports]]
+id = "node-obsd-as65002-p1"
+index = 1
+label = "vio1"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:03:01"
+ip_label = "192.168.202.1/24"
+
+[[topology.nodes.ports]]
+id = "node-obsd-as65002-p2"
+index = 2
+label = "vio2"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:02:02"
+ip_label = "172.16.1.2/30"
+
+[[topology.nodes]]
+id = "node-lan-b"
+name = "lan-b"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+arch = "aarch64"
+nic_model = "virtio-net-pci"
+firmware = "uefi"
+disk_bus = "virtio-blk"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "AS 65002 Customer LAN host (192.168.202.10/24)"
+position = { x = 950.0, y = 185.0 }
+
+[[topology.nodes.ports]]
+id = "node-lan-b-p0"
+index = 0
+label = "eth0"
+nic_model = "virtio-net-pci"
+mac = "52:54:00:80:03:10"
+ip_label = "192.168.202.10/24"
+
+[[topology.links]]
+id = "link-lan-a"
+source_node = "node-lan-a"
+source_port = "node-lan-a-p0"
+target_node = "node-chr-as65001"
+target_port = "node-chr-as65001-p1"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "AS 65001 LAN (192.168.101.0/24)"
+
+[[topology.links]]
+id = "link-ebgp-primary"
+source_node = "node-chr-as65001"
+source_port = "node-chr-as65001-p0"
+target_node = "node-obsd-as65002"
+target_port = "node-obsd-as65002-p0"
+admin_up = true
+impairments = { latency_ms = 5, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Primary eBGP Peering Link (172.16.0.0/30 — TCP/179)"
+
+[[topology.links]]
+id = "link-ebgp-backup"
+source_node = "node-chr-as65001"
+source_port = "node-chr-as65001-p2"
+target_node = "node-obsd-as65002"
+target_port = "node-obsd-as65002-p2"
+admin_up = true
+impairments = { latency_ms = 25, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Redundant Backup eBGP Peering Link (172.16.1.0/30)"
+
+[[topology.links]]
+id = "link-lan-b"
+source_node = "node-obsd-as65002"
+source_port = "node-obsd-as65002-p1"
+target_node = "node-lan-b"
+target_port = "node-lan-b-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "AS 65002 LAN (192.168.202.0/24)"

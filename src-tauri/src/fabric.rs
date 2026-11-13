@@ -16,8 +16,16 @@ pub type DeviceId = String;
 
 /// Minimum valid IEEE 802.3 / Ethernet II header size (6B dst + 6B src + 2B ethertype).
 pub const MIN_ETHERNET_FRAME_LEN: usize = 14;
-/// Maximum UDP datagram payload buffer for jumbo frames / virtio offloads.
+/// IEEE 802.1Q Customer VLAN Tagging EtherType (`0x8100` — adds 4B TCI header for 1518B MTU frames).
+pub const ETHERTYPE_8021Q: u16 = 0x8100;
+/// IEEE 802.1ad Provider Bridge / QinQ EtherType (`0x88a8` — adds outer 4B S-Tag).
+pub const ETHERTYPE_8021AD: u16 = 0x88a8;
+/// Guaranteed jumbo Ethernet II / VLAN frame capacity (`9216` bytes matches macOS `net.inet.udp.maxdgram`).
+pub const JUMBO_ETHERNET_FRAME_LEN: usize = 9_216;
+/// Maximum UDP datagram payload buffer (`65_535` bytes >= `9_216` bytes for 802.1Q VLANs, QinQ & jumbo frames).
 pub const MAX_UDP_FRAME_BUF: usize = 65_535;
+/// Target kernel UDP socket buffer size (`256 KiB`) to absorb back-to-back 802.1Q trunk / jumbo bursts.
+const TARGET_UDP_SOCKET_BUF_BYTES: libc::c_int = 262_144;
 /// Default IEEE 802.1D MAC address table aging timeout (300 seconds).
 pub const DEFAULT_MAC_AGING_TTL: Duration = Duration::from_secs(300);
 /// Maximum internal virtual-switch hops per frame to prevent infinite broadcast storms on user loops.
@@ -82,7 +90,42 @@ impl EthernetHeader {
     pub fn is_learnable_unicast_src(&self) -> bool {
         (self.src_mac[0] & 0x01) == 0 && self.src_mac != [0u8; 6]
     }
+
+    /// True if outer EtherType indicates IEEE 802.1Q (`0x8100`) or 802.1ad QinQ (`0x88a8`) tagging.
+    #[inline]
+    pub fn is_vlan_tagged(&self) -> bool {
+        self.ethertype == ETHERTYPE_8021Q || self.ethertype == ETHERTYPE_8021AD
+    }
 }
+
+/// Best-effort enlargement of OS UDP socket send/receive buffers (`256 KiB`) so back-to-back
+/// 1518-byte `802.1Q` trunk bursts and up to `9216`-byte jumbo frames never drop in kernel queues.
+#[cfg(unix)]
+fn tune_udp_socket_buffers(socket: &UdpSocket) {
+    use std::os::unix::io::AsRawFd;
+    let fd = socket.as_raw_fd();
+    let val: libc::c_int = TARGET_UDP_SOCKET_BUF_BYTES;
+    let len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    unsafe {
+        let _ = libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            (&val as *const libc::c_int).cast(),
+            len,
+        );
+        let _ = libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            (&val as *const libc::c_int).cast(),
+            len,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn tune_udp_socket_buffers(_socket: &UdpSocket) {}
 
 /// Live entry inside a Virtual L2 Switch's MAC learning table.
 #[derive(Debug, Clone)]
@@ -689,6 +732,7 @@ impl PacketFabric {
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .await
             .map_err(|e| format!("Failed to bind fabric UDP socket: {e}"))?;
+        tune_udp_socket_buffers(&socket);
         let fabric_port = socket
             .local_addr()
             .map_err(|e| format!("Failed to query fabric socket addr: {e}"))?
@@ -1683,5 +1727,191 @@ mod tests {
             elapsed >= Duration::from_millis(38),
             "expected >= 38ms delay for 45ms link latency, got {elapsed:?}"
         );
+    }
+
+    /// Helper constructing an IEEE 802.1Q VLAN-tagged Ethernet II frame (`EtherType = 0x8100`, 4B TCI + inner EtherType).
+    fn build_dot1q_frame(
+        dst: [u8; 6],
+        src: [u8; 6],
+        vlan_id: u16,
+        inner_ethertype: u16,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(18 + payload.len());
+        frame.extend_from_slice(&dst);
+        frame.extend_from_slice(&src);
+        frame.extend_from_slice(&ETHERTYPE_8021Q.to_be_bytes());
+        let tci = vlan_id & 0x0fff;
+        frame.extend_from_slice(&tci.to_be_bytes());
+        frame.extend_from_slice(&inner_ethertype.to_be_bytes());
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    #[test]
+    fn l2_switch_forwards_8021q_vlan_tagged_and_9216_jumbo_frames_intact() {
+        assert!(MAX_UDP_FRAME_BUF >= JUMBO_ETHERNET_FRAME_LEN);
+        assert!(JUMBO_ETHERNET_FRAME_LEN >= 9_216);
+
+        let ports = vec![
+            "trunk-sw1".to_string(),
+            "trunk-rtr".to_string(),
+            "uplink-mon".to_string(),
+        ];
+        let mut sw = L2SwitchCore::new(
+            "sw-dot1q".into(),
+            "core-trunk".into(),
+            ports,
+            Duration::from_secs(300),
+        );
+
+        let mac_eng = [0x52, 0x54, 0x00, 0x70, 0x10, 0x10];
+        let mac_rtr = [0x52, 0x54, 0x00, 0x70, 0x00, 0x01];
+        let bcast = [0xff; 6];
+        let now = Instant::now();
+
+        // 1. 1518-byte full-MTU 802.1Q VLAN 10 frame (14B Eth + 4B 802.1Q + 1500B IP payload = 1518B)
+        let mtu_payload = vec![0x45u8; 1_500];
+        let vlan10_bcast = build_dot1q_frame(bcast, mac_eng, 10, 0x0806, &mtu_payload);
+        assert_eq!(vlan10_bcast.len(), 1_518);
+        let parsed = EthernetHeader::parse(&vlan10_bcast).expect("802.1Q header must parse");
+        assert!(parsed.is_vlan_tagged());
+        assert_eq!(parsed.ethertype, ETHERTYPE_8021Q);
+
+        let flood_out = sw.process_frame("trunk-sw1", &vlan10_bcast, now);
+        assert_eq!(
+            flood_out,
+            vec!["trunk-rtr".to_string(), "uplink-mon".to_string()]
+        );
+
+        // 2. Router replies with 802.1Q VLAN 20 unicast frame -> strictly unicast to learned outer MAC `mac_eng`
+        let vlan20_reply = build_dot1q_frame(mac_eng, mac_rtr, 20, 0x0800, &mtu_payload);
+        let unicast_out =
+            sw.process_frame("trunk-rtr", &vlan20_reply, now + Duration::from_millis(5));
+        assert_eq!(unicast_out, vec!["trunk-sw1".to_string()]);
+
+        // 3. 9216-byte Jumbo 802.1Q frame (18B tagged header + 9198B payload = 9216B)
+        let jumbo_payload = vec![0xa5u8; JUMBO_ETHERNET_FRAME_LEN - 18];
+        let jumbo_vlan_frame = build_dot1q_frame(mac_rtr, mac_eng, 10, 0x0800, &jumbo_payload);
+        assert_eq!(jumbo_vlan_frame.len(), JUMBO_ETHERNET_FRAME_LEN);
+        let jumbo_out = sw.process_frame(
+            "trunk-sw1",
+            &jumbo_vlan_frame,
+            now + Duration::from_millis(10),
+        );
+        assert_eq!(jumbo_out, vec!["trunk-rtr".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn udp_fabric_preserves_8021q_tags_and_9000_byte_jumbo_frames_end_to_end() {
+        let vm_sw = match UdpSocket::bind("127.0.0.1:0").await {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("bind vm_sw failed: {e}"),
+        };
+        let vm_rtr = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        tune_udp_socket_buffers(&vm_sw);
+        tune_udp_socket_buffers(&vm_rtr);
+
+        let fabric = PacketFabric::new();
+        let sw = fabric
+            .create_switch(Some("sw-vlan".into()), "VLAN Pass Switch".into(), 2)
+            .await
+            .unwrap();
+        let p_sw = fabric
+            .create_udp_port(
+                Some("openwrt-sw1-eth2".into()),
+                Some(vm_sw.local_addr().unwrap().port()),
+            )
+            .await
+            .unwrap();
+        let p_rtr = fabric
+            .create_udp_port(
+                Some("openwrt-rtr-eth0".into()),
+                Some(vm_rtr.local_addr().unwrap().port()),
+            )
+            .await
+            .unwrap();
+
+        fabric
+            .create_link(CreateLinkRequest {
+                link_id: Some("trunk-leg-a".into()),
+                port_a: p_sw.port_id.clone(),
+                port_b: sw.ports[0].clone(),
+                admin_up: Some(true),
+                latency_ms: None,
+                jitter_ms: None,
+                loss_percent: None,
+            })
+            .await
+            .unwrap();
+        fabric
+            .create_link(CreateLinkRequest {
+                link_id: Some("trunk-leg-b".into()),
+                port_a: sw.ports[1].clone(),
+                port_b: p_rtr.port_id.clone(),
+                admin_up: Some(true),
+                latency_ms: None,
+                jitter_ms: None,
+                loss_percent: None,
+            })
+            .await
+            .unwrap();
+
+        let mut tap_rx = fabric.subscribe_link_tap("trunk-leg-a").await.unwrap();
+
+        let mac_host = [0x52, 0x54, 0x00, 0x70, 0x10, 0x10];
+        let mac_rtr = [0x52, 0x54, 0x00, 0x70, 0x00, 0x01];
+
+        // 1. Send 1518-byte IEEE 802.1Q VLAN 10 frame across UDP + L2 Switch + .pcap tap
+        let dot1q_1518 = build_dot1q_frame(mac_rtr, mac_host, 10, 0x0800, &[0x11u8; 1_500]);
+        assert_eq!(dot1q_1518.len(), 1_518);
+        vm_sw
+            .send_to(
+                &dot1q_1518,
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, p_sw.fabric_port),
+            )
+            .await
+            .unwrap();
+
+        let mut recv_buf = vec![0u8; MAX_UDP_FRAME_BUF];
+        let (n1, _) =
+            tokio::time::timeout(Duration::from_secs(2), vm_rtr.recv_from(&mut recv_buf))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(&recv_buf[..n1], dot1q_1518.as_slice());
+
+        let tapped1 = tokio::time::timeout(Duration::from_secs(2), tap_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(tapped1.frame.as_ref(), dot1q_1518.as_slice());
+
+        // 2. Send 9000-byte Jumbo 802.1Q VLAN 20 frame (<= 9216 macOS maxdgram) and verify zero truncation
+        let jumbo_9000 = build_dot1q_frame(mac_rtr, mac_host, 20, 0x0800, &[0x22u8; 9_000 - 18]);
+        assert_eq!(jumbo_9000.len(), 9_000);
+        vm_sw
+            .send_to(
+                &jumbo_9000,
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, p_sw.fabric_port),
+            )
+            .await
+            .unwrap();
+
+        let (n2, _) =
+            tokio::time::timeout(Duration::from_secs(2), vm_rtr.recv_from(&mut recv_buf))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(n2, 9_000);
+        assert_eq!(&recv_buf[..n2], jumbo_9000.as_slice());
+
+        let tapped2 = tokio::time::timeout(Duration::from_secs(2), tap_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(tapped2.frame.len(), 9_000);
+        assert_eq!(tapped2.frame.as_ref(), jumbo_9000.as_slice());
     }
 }
