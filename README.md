@@ -29,9 +29,9 @@
   - **Selectable NIC Hardware (`virtio-net-pci`, `e1000`, `rtl8139`, `pcnet`, `ne2k_pci`)** with automatic canvas port relabeling (`vtnet0` ↔ `em0`, `vio0` ↔ `em0`, `vioif0` ↔ `wm0`, `ether1`, `/net/ether0`, `e1000g0`, `PCNTPK 0x60`).
 - **Unified Storage & 15-OS On-Demand Library Manager**: Download, verify, extract, convert, import, or delete OS images directly from the GUI onto your internal SSD or an external USB-C/Thunderbolt SSD (`/Volumes/...`), with **1-Click Guided Template Setup** that auto-promotes installed disks to read-only (`0444`) Copy-on-Write Golden Templates on shutdown.
 - **Dual-Console Multi-Tab Workspace**: Every VM simultaneously exposes a zero-buffered **Serial Terminal** (`@xterm/xterm` over Unix domain sockets for `tmux`, `vi`, `pfctl`, `vtysh`, and BSD installers) and an **Embedded UEFI / VGA Screen** (`@novnc/novnc` over a Rust VNC-to-WebSocket proxy, or native macOS Cocoa window).
-- **One-Click Wiretaps & Integrated `tcpflowy` Visual Flow Dissector**:
-  - **Live Wireshark Stream**: Creates a `/tmp/etherloom/tap_<link>.pcap` named FIFO pipe (`mkfifo`) and launches `Wireshark.app` for live zero-root packet inspection.
-  - **Record `.pcap` & Dissect**: Writes microsecond-accurate `LINKTYPE_ETHERNET` `.pcap` files into `<project>.etherloom/captures/` and dissects them in-app via `tcpflowy` — rendering interactive **TCP Packet Ladder Diagrams** (3-way handshakes, retransmissions, out-of-order segments, zero-window probes), **Reconstructed ASCII/Hex Streams**, **SPLT Timing & Entropy Profiles**, and **Auto-Synthesized Suricata / Wireshark / BPF Signatures**.
+- **One-Click Wiretaps, PCAP Export & Integrated `tcpflowy` Visual Flow Dissector**:
+  - **Live Wireshark Stream**: Creates a `/tmp/etherloom/tap_<link>.pcap` named FIFO pipe (`mkfifo`) and launches `Wireshark.app` for live zero-root packet inspection alongside active `.pcap` recordings.
+  - **Three Explicit 1-Click Capture Completion Actions**: Atomically flushes and `fsync`s `LINKTYPE_ETHERNET` `.pcap` captures (`<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap`) into `<project>.etherloom/captures/` with zero packet truncation, then lets you finish in one click via **Stop & Save PCAP...** (native macOS Save dialog + Finder reveal), **Stop & Open in Wireshark** (`Wireshark -r <pcap>`), or **Stop & Dissect with `tcpflowy`** (interactive **TCP Packet Ladder Diagrams**, **Reconstructed ASCII/Hex Streams**, **SPLT Timing & Entropy Profiles**, and **Auto-Synthesized Suricata / Wireshark / BPF Signatures**).
 - **Interactive Networking Academy**: 8 built-in, multi-OS guided labs spanning Alpine Linux, OpenBSD, OpenWrt, MikroTik RouterOS CHR v7, and 32-bit FreeDOS (`mTCP`) — complete with declarative `lab.toml` blueprints, 1-click OS Library prerequisite handoffs, step-by-step Markdown drawers, wire highlights, and **Send to Serial** command blocks.
 - **"Woven Patchbay" macOS Dark-Mode Studio UI**: Deep slate-navy topology canvas (`#0D1321`), translucent frosted-glass panels, patchbay VM/Switch cards with hollow **Ring-Jack** port handles and live traffic halos, multi-layer animated **"Loom" cables** with floating ECG waveform tap badges, a bespoke `xterm.js` ANSI dark palette, and color-coded `tcpflowy` sequence/handshake traces.
 
@@ -53,14 +53,14 @@ flowchart TB
     Catalog["CatalogManager\n15 OS Specs • .staging/ Streamer • Auto-Promote"]
     Fabric["PacketFabric (Tokio UDP)\nL2 Switch MAC Table • L1 Hub • Impairments"]
     Bridges["ConsoleBridge\nUnix Serial WS + VNC TCP-to-WS Proxy"]
-    Tap["PcapTapManager\nlibpcap Writer + mkfifo Named Pipes"]
+    Tap["PcapTapManager\nAtomic libpcap Writer • Export • mkfifo Pipes"]
     PyBridge["TcpflowyBridge\nManaged python-env + Packet Ladder"]
     Store["StorageManager + ImageStore\n/Volumes Guard • APFS/ExFAT • CoW Rebase"]
   end
 
   subgraph Host["macOS Host Binaries & Storage"]
     QEMU["QEMU Guests (15 Curated OSes)\nvirtio-net / e1000 / pcnet UDP + Serial + VNC"]
-    WS["Wireshark.app\nLive -k -i /tmp/etherloom/tap_*.pcap"]
+    WS["Wireshark.app\nLive FIFO (-k -i) & Static PCAP (-r)"]
     Disk["~/Library/Application Support/Etherloom\nor External SSD (/Volumes/...)"]
   end
 
@@ -76,8 +76,8 @@ flowchart TB
   QEMU <-->|Raw Ethernet II over UDP| Fabric
   QEMU <-->|Unix Serial + VNC| Bridges
   Fabric -->|Zero-Copy Broadcast Tap| Tap
-  Tap -->|Named Pipe Stream| WS
-  Tap -->|.pcap Captures| Disk
+  Tap -->|Live FIFO or Static -r| WS
+  Tap -->|Flushed .pcap & Export| Disk
   PyBridge -->|Dissects .pcap| Disk
   Store -->|Templates, ISOs, Overlays| Disk
 ```
@@ -155,14 +155,21 @@ Spins up two Copy-on-Write QEMU HVF guests wired back-to-back over raw UDP Ether
 
 ---
 
-## Wire Capture & `tcpflowy` Visual Flow Dissector
+## Wire Capture, PCAP Export & `tcpflowy` Visual Flow Dissector
 
-Click any virtual cable on the canvas (or open the **Link & Wiretap** / **Captures & tcpflowy** tabs in the Bottom Dock) to inspect every frame without `bpf` group changes or `sudo`:
+Click or right-click any virtual cable on the canvas (or open the **Link & Wiretap** / **Captures & tcpflowy** tabs in the Bottom Dock) to inspect every frame without `bpf` group changes or `sudo`. Active recordings display a live `REC MM:SS` timer, packet counter, and byte size alongside coexisting **Live Wireshark** streaming:
 
-- **Live Wireshark (`mkfifo`)**: Streams real-time `LINKTYPE_ETHERNET` frames into `/Applications/Wireshark.app` over `/tmp/etherloom/tap_<link_id>.pcap`. Closing Wireshark cleanly detaches the tap with zero impact on running VMs.
-- **Record `.pcap` & Stop + Dissect**: Saves standard `.pcap` files into `<project>.etherloom/captures/` and launches [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) inside Etherloom's managed `python-env/`:
-  - **Interactive Packet Ladder**: Step through `SYN` → `SYN,ACK` → `ACK`, `PSH,ACK` payload turns, `FIN`/`RST` teardowns, duplicate ACKs, retransmissions, and zero-window events.
-  - **Stream Reconstruction & SPLT Signatures**: View reassembled `C->S` and `S->C` ASCII/Hex payloads, SPLT packet-length/inter-arrival signatures, Shannon entropy classification, passive DNS maps, and ready-to-copy **Wireshark** & **Suricata** rules.
+| Capture Workflow | Action | Behavior |
+| :--- | :--- | :--- |
+| **Live Stream** | **Live Wireshark (`mkfifo`)** | Streams real-time `LINKTYPE_ETHERNET` frames into `/Applications/Wireshark.app` over `/tmp/etherloom/tap_<link_id>.pcap` (runs independently alongside `.pcap` file recording). |
+| **Stop & Export** | **Stop & Save PCAP...** | Atomically drains, flushes, and `fsync`s the canonical `<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap` in `<project>.etherloom/captures/` first, then opens a native macOS Save dialog and surfaces a 1-click **Reveal in Finder** toast. |
+| **Stop & Inspect** | **Stop & Open in Wireshark** | Finalizes the `.pcap` with zero packet truncation and launches `Wireshark.app` in static file read mode (`-r <pcap_path>`). |
+| **Stop & Dissect** | **Stop & Dissect (`tcpflowy`)** | Finalizes the `.pcap` and immediately dissects TCP flows in-app via [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) inside Etherloom's managed `python-env/`. |
+| **Captures History** | **Dissect / Wireshark / Save Copy As... / Finder** | Every saved capture in `captures/*.pcap` can be re-dissected in `tcpflowy`, opened in `Wireshark.app`, exported anywhere on macOS, or revealed in macOS Finder (`open -R`). |
+
+Inside the integrated **`tcpflowy` Visual Flow Dissector**, you can inspect:
+- **Interactive Packet Ladder**: Step through `SYN` → `SYN,ACK` → `ACK`, `PSH,ACK` payload turns, `FIN`/`RST` teardowns, duplicate ACKs, retransmissions, and zero-window events.
+- **Stream Reconstruction & SPLT Signatures**: View reassembled `C->S` and `S->C` ASCII/Hex payloads, SPLT packet-length/inter-arrival signatures, Shannon entropy classification, passive DNS maps, and ready-to-copy **Wireshark**, **BPF**, & **Suricata** rules.
 
 ---
 
@@ -210,7 +217,7 @@ Etherloom runs on **macOS 13+** on both **Apple Silicon** (`M1` / `M2` / `M3` / 
 # Required: Multi-architecture QEMU (aarch64, x86_64, i386, riscv64) + EDK2 UEFI firmware + qemu-img
 brew install qemu
 
-# Optional (recommended): Live FIFO wiretap inspection in Wireshark.app
+# Optional (recommended): Live FIFO wiretap streaming & 1-click static .pcap inspection in Wireshark.app
 brew install --cask wireshark
 
 # Optional (recommended): Python 3.10+ & uv for the in-app tcpflowy Flow Dissector

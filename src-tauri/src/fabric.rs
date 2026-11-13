@@ -383,6 +383,7 @@ struct WireLink {
     capturing_pcap: AtomicBool,
     captured_packets: AtomicU64,
     captured_bytes: AtomicU64,
+    capture_started_at_ms: AtomicU64,
     active_pcap_path: RwLock<Option<String>>,
     live_wireshark: AtomicBool,
 }
@@ -409,6 +410,12 @@ impl WireLink {
         let capturing_pcap = self.capturing_pcap.load(Ordering::Relaxed);
         let captured_packets = self.captured_packets.load(Ordering::Relaxed);
         let captured_bytes = self.captured_bytes.load(Ordering::Relaxed);
+        let started_raw = self.capture_started_at_ms.load(Ordering::Relaxed);
+        let capture_started_at_ms = if capturing_pcap && started_raw > 0 {
+            Some(started_raw)
+        } else {
+            None
+        };
         let active_pcap_path = self.active_pcap_path.read().await.clone();
         let live_wireshark = self.live_wireshark.load(Ordering::Relaxed);
 
@@ -429,6 +436,7 @@ impl WireLink {
             capturing_pcap,
             captured_packets,
             captured_bytes,
+            capture_started_at_ms,
             active_pcap_path,
             live_wireshark,
         }
@@ -455,6 +463,7 @@ pub struct LinkSnapshot {
     pub capturing_pcap: bool,
     pub captured_packets: u64,
     pub captured_bytes: u64,
+    pub capture_started_at_ms: Option<u64>,
     pub active_pcap_path: Option<String>,
     pub live_wireshark: bool,
 }
@@ -1010,6 +1019,7 @@ impl PacketFabric {
             capturing_pcap: AtomicBool::new(false),
             captured_packets: AtomicU64::new(0),
             captured_bytes: AtomicU64::new(0),
+            capture_started_at_ms: AtomicU64::new(0),
             active_pcap_path: RwLock::new(None),
             live_wireshark: AtomicBool::new(false),
         });
@@ -1100,6 +1110,15 @@ impl PacketFabric {
             w.capturing_pcap.store(capturing, Ordering::Release);
             w.captured_packets.store(packets, Ordering::Relaxed);
             w.captured_bytes.store(bytes, Ordering::Relaxed);
+            if capturing {
+                let prev = w.capture_started_at_ms.load(Ordering::Relaxed);
+                if prev == 0 {
+                    w.capture_started_at_ms
+                        .store(now_epoch_ms(), Ordering::Relaxed);
+                }
+            } else {
+                w.capture_started_at_ms.store(0, Ordering::Relaxed);
+            }
             *w.active_pcap_path.write().await = pcap_path;
         }
     }

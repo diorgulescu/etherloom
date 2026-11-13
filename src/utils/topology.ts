@@ -350,3 +350,10 @@ export function formatByteSize(bytes: number): string {
   }
   return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
+
+export function formatDurationMmSs(durationMs: number): string {
+  const totalSecs = Math.max(0, Math.floor(durationMs / 1000));
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}

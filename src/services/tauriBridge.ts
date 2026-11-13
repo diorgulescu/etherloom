@@ -6,6 +6,7 @@ import type {
   AcademyLabSummary,
   BaseTemplateInfo,
   CaptureFileInfo,
+  CaptureSummary,
   CatalogComponent,
   CatalogDownloadProgressEvent,
   ConsoleSessionEndpoints,
@@ -1082,15 +1083,36 @@ export async function focusCocoaVmWindow(nodeId: string): Promise<void> {
 
 const BROWSER_MOCK_CAPTURES: CaptureFileInfo[] = [];
 
+function formatBrowserCaptureTimestamp(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(
+    date.getUTCDate()
+  )}-${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(
+    date.getUTCSeconds()
+  )}`;
+}
+
 export async function startPcapRecording(
   bundlePath: string | null,
   linkId: string,
-  linkLabel?: string
+  linkLabel?: string,
+  endpointA?: string,
+  endpointB?: string
 ): Promise<StartPcapRecordingResult> {
   if (!isTauriRuntime()) {
     const now = Date.now();
-    const safe = (linkLabel ?? linkId).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const filename = `${safe}_${now}.pcap`;
+    const cleanToken = (raw: string) =>
+      raw
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^[-_]+|[-_]+$/g, "") || "endpoint";
+    const stem =
+      endpointA && endpointB
+        ? `${cleanToken(endpointA)}__${cleanToken(endpointB)}`
+        : (linkLabel ?? linkId).replace(/[^a-zA-Z0-9_-]/g, "-");
+    const filename = `${stem}__${formatBrowserCaptureTimestamp(
+      new Date(now)
+    )}.pcap`;
     const path = `${bundlePath ?? "/tmp/etherloom/scratch-captures"}/captures/${filename}`;
     BROWSER_MOCK_CAPTURES.unshift({
       filename,
@@ -1107,27 +1129,41 @@ export async function startPcapRecording(
     bundlePath,
     linkId,
     linkLabel: linkLabel ?? null,
+    endpointA: endpointA ?? null,
+    endpointB: endpointB ?? null,
   });
 }
 
-export async function stopPcapRecording(
-  linkId: string
-): Promise<StopPcapRecordingResult> {
+export async function stopWireCapture(linkId: string): Promise<CaptureSummary> {
   if (!isTauriRuntime()) {
     const hit = BROWSER_MOCK_CAPTURES.find(
       (c) => c.linkId === linkId && c.isRecording
     );
     if (hit) hit.isRecording = false;
+    const filePath =
+      hit?.path ?? `/tmp/etherloom/scratch-captures/${linkId}.pcap`;
+    const packetCount = hit?.packetCount ?? 12;
+    const byteSize = hit?.sizeBytes ?? 1840;
     return {
+      captureId: `${linkId}__${Date.now()}`,
       linkId,
-      path: hit?.path ?? `/tmp/etherloom/scratch-captures/${linkId}.pcap`,
+      filePath,
+      path: filePath,
       filename: hit?.filename ?? `${linkId}.pcap`,
-      packetsWritten: hit?.packetCount ?? 12,
-      bytesWritten: hit?.sizeBytes ?? 1840,
+      packetCount,
+      packetsWritten: packetCount,
+      byteSize,
+      bytesWritten: byteSize,
       durationMs: 3200,
     };
   }
-  return invoke<StopPcapRecordingResult>("pcap_stop_recording", { linkId });
+  return invoke<CaptureSummary>("stop_wire_capture", { linkId });
+}
+
+export async function stopPcapRecording(
+  linkId: string
+): Promise<StopPcapRecordingResult> {
+  return stopWireCapture(linkId);
 }
 
 export async function startLiveWireshark(
@@ -1169,11 +1205,65 @@ export async function deleteProjectCapture(pcapPath: string): Promise<void> {
   await invoke<void>("pcap_delete_capture", { pcapPath });
 }
 
-export async function openPcapInWireshark(pcapPath: string): Promise<string> {
+export async function openPcapInWireshark(pcapPath: string): Promise<void> {
   if (!isTauriRuntime()) {
-    return "/Applications/Wireshark.app/Contents/MacOS/Wireshark";
+    return;
   }
-  return invoke<string>("pcap_open_in_wireshark", { pcapPath });
+  await invoke<void>("open_pcap_in_wireshark", { pcapPath });
+}
+
+export async function exportPcapCopy(
+  sourcePcapPath: string,
+  destinationPath: string
+): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  await invoke<void>("export_pcap_copy", {
+    sourcePcapPath,
+    destinationPath,
+  });
+}
+
+export async function revealPcapInFinder(pcapPath: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  await invoke<void>("reveal_pcap_in_finder", { pcapPath });
+}
+
+/**
+ * Opens a native macOS Save File dialog pre-populated with `<nodeA>-<nicA>__<nodeB>-<nicB>__<timestamp>.pcap`.
+ */
+export async function pickSavePcapDialog(
+  suggestedFilename: string,
+  defaultDir?: string
+): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    const clean = suggestedFilename.trim().endsWith(".pcap")
+      ? suggestedFilename.trim()
+      : `${suggestedFilename.trim() || "capture"}.pcap`;
+    return `/tmp/etherloom/${clean}`;
+  }
+  const cleanName = suggestedFilename.trim().endsWith(".pcap")
+    ? suggestedFilename.trim()
+    : `${suggestedFilename.trim() || "capture"}.pcap`;
+  const defaultPath =
+    defaultDir && !defaultDir.startsWith("~")
+      ? `${defaultDir.replace(/\/+$/, "")}/${cleanName}`
+      : cleanName;
+
+  const selected = await save({
+    title: "Save Packet Capture (.pcap)",
+    defaultPath,
+    filters: [
+      {
+        name: "Packet Capture",
+        extensions: ["pcap"],
+      },
+    ],
+  });
+  return typeof selected === "string" ? selected : null;
 }
 
 export async function pickExternalPcapDialog(

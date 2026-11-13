@@ -21,8 +21,11 @@ import {
 import {
   deleteProjectCapture,
   dissectPcapWithTcpflowy,
+  exportPcapCopy,
   openPcapInWireshark,
   pickExternalPcapDialog,
+  pickSavePcapDialog,
+  revealPcapInFinder,
 } from "../../services/tauriBridge";
 import type {
   CaptureFileInfo,
@@ -42,6 +45,7 @@ interface TcpflowyInspectorPaneProps {
   captures: CaptureFileInfo[];
   selectedPcapPath: string | null;
   dissectNonce: number;
+  wiresharkAvailable: boolean;
   tcpflowyStatus: TcpflowyEnvStatus | null;
   installProgress: TcpflowyInstallProgress | null;
   installingTcpflowy: boolean;
@@ -49,7 +53,12 @@ interface TcpflowyInspectorPaneProps {
   onRefreshCaptures: () => Promise<void>;
   onInstallTcpflowy: () => Promise<void>;
   onOpenSettingsTcpflowy: () => void;
-  onNotify: (kind: "ok" | "error", text: string) => void;
+  onNotify: (
+    kind: "ok" | "error",
+    text: string,
+    actionLabel?: string,
+    onAction?: () => void
+  ) => void;
 }
 
 function handshakeBadgeStyle(state: string): string {
@@ -108,6 +117,7 @@ export function TcpflowyInspectorPane({
   captures,
   selectedPcapPath,
   dissectNonce,
+  wiresharkAvailable,
   tcpflowyStatus,
   installProgress,
   installingTcpflowy,
@@ -120,6 +130,7 @@ export function TcpflowyInspectorPane({
   const [externalPcaps, setExternalPcaps] = useState<string[]>([]);
   const [filterNoise, setFilterNoise] = useState(false);
   const [noIpLookup, setNoIpLookup] = useState(true);
+  const [showCapturesDrawer, setShowCapturesDrawer] = useState(false);
 
   const [dissecting, setDissecting] = useState(false);
   const [dissectError, setDissectError] = useState<string | null>(null);
@@ -202,17 +213,59 @@ export function TcpflowyInspectorPane({
     void runDissection(picked);
   };
 
-  const handleOpenWireshark = async () => {
-    if (!selectedPcapPath) return;
+  const handleOpenPathInWireshark = async (pcapPath: string) => {
+    if (!pcapPath) return;
     try {
-      await openPcapInWireshark(selectedPcapPath);
+      await openPcapInWireshark(pcapPath);
       onNotify(
         "ok",
-        `Opened ${selectedPcapPath.split("/").pop()} in Wireshark`
+        `Opened ${pcapPath.split("/").pop() ?? pcapPath} in Wireshark`
       );
     } catch (err: unknown) {
       onNotify("error", err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const handleOpenWireshark = async () => {
+    if (!selectedPcapPath) return;
+    await handleOpenPathInWireshark(selectedPcapPath);
+  };
+
+  const handleRevealInFinder = async (pcapPath: string) => {
+    if (!pcapPath) return;
+    try {
+      await revealPcapInFinder(pcapPath);
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSaveCopyAs = async (
+    pcapPath: string,
+    suggestedFilename: string,
+    packetCount: number | null
+  ) => {
+    if (!pcapPath) return;
+    try {
+      const destPath = await pickSavePcapDialog(suggestedFilename);
+      if (!destPath) return;
+      await exportPcapCopy(pcapPath, destPath);
+      const label =
+        packetCount !== null
+          ? `Capture saved (${packetCount} packets)`
+          : `Capture saved (${destPath.split("/").pop() ?? suggestedFilename})`;
+      onNotify("ok", label, "Reveal in Finder", () => {
+        void handleRevealInFinder(destPath);
+      });
+    } catch (err: unknown) {
+      onNotify("error", err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleDissectCaptureRow = (pcapPath: string) => {
+    onSelectPcap(pcapPath);
+    setShowCapturesDrawer(false);
+    void runDissection(pcapPath);
   };
 
   const selectedManagedCapture = useMemo(
@@ -220,21 +273,34 @@ export function TcpflowyInspectorPane({
     [captures, selectedPcapPath]
   );
 
-  const handleDeleteSelected = async () => {
-    if (!selectedManagedCapture || selectedManagedCapture.isRecording) return;
+  const selectedFilename = useMemo(() => {
+    if (selectedManagedCapture) return selectedManagedCapture.filename;
+    if (!selectedPcapPath) return "capture.pcap";
+    return selectedPcapPath.split("/").pop() ?? "capture.pcap";
+  }, [selectedManagedCapture, selectedPcapPath]);
+
+  const handleDeleteCapture = async (target: CaptureFileInfo) => {
+    if (target.isRecording) return;
     try {
-      const targetPath = selectedManagedCapture.path;
+      const targetPath = target.path;
       await deleteProjectCapture(targetPath);
       if (report?.pcapPath === targetPath) {
         setReport(null);
       }
       await onRefreshCaptures();
       const remaining = captures.filter((c) => c.path !== targetPath);
-      onSelectPcap(remaining[0]?.path ?? externalPcaps[0] ?? null);
-      onNotify("ok", `Deleted ${selectedManagedCapture.filename}`);
+      if (selectedPcapPath === targetPath) {
+        onSelectPcap(remaining[0]?.path ?? externalPcaps[0] ?? null);
+      }
+      onNotify("ok", `Deleted ${target.filename}`);
     } catch (err: unknown) {
       onNotify("error", err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!selectedManagedCapture || selectedManagedCapture.isRecording) return;
+    await handleDeleteCapture(selectedManagedCapture);
   };
 
   const filteredFlows = useMemo<TcpflowyDissectedFlow[]>(() => {
@@ -298,6 +364,152 @@ export function TcpflowyInspectorPane({
 
   const envReady = tcpflowyStatus?.state === "ready";
 
+  const renderSavedCapturesRows = () => (
+    <div className="divide-y divide-slate-200/70 dark:divide-slate-800/80">
+      {captures.map((cap) => {
+        const isSelected = cap.path === selectedPcapPath;
+        const createdDate =
+          cap.modifiedAtMs > 0
+            ? new Date(cap.modifiedAtMs).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })
+            : null;
+
+        return (
+          <div
+            key={cap.path}
+            onClick={() => onSelectPcap(cap.path)}
+            className={`px-3 py-2 flex flex-wrap items-center justify-between gap-2 transition-colors cursor-pointer ${
+              isSelected
+                ? "bg-indigo-500/10 dark:bg-[#162032]"
+                : "hover:bg-slate-100/80 dark:hover:bg-[#162032]/70"
+            }`}
+          >
+            <div className="min-w-0 flex-1 flex items-center gap-2">
+              <SignalWaveformIcon
+                animated={cap.isRecording}
+                className={`w-4 h-3 shrink-0 ${
+                  cap.isRecording ? "text-[#22D3EE]" : "text-[#818CF8]"
+                }`}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-mono text-xs font-medium text-slate-800 dark:text-slate-100 truncate">
+                    {cap.filename}
+                  </span>
+                  {cap.isRecording && (
+                    <span className="shrink-0 px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-cyan-500/20 text-[#22D3EE] border border-cyan-400/35">
+                      REC
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <span>
+                    {cap.packetCount !== null ? `${cap.packetCount} pkts` : "pcap"}
+                  </span>
+                  <span>•</span>
+                  <span>{formatBytesCompact(cap.sizeBytes)}</span>
+                  {createdDate && (
+                    <>
+                      <span>•</span>
+                      <span>{createdDate}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 4 Explicit Row Actions (+ Delete) */}
+            <div
+              className="flex items-center gap-1 shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* 1. Dissect Flows (tcpflowy) */}
+              <button
+                type="button"
+                disabled={cap.isRecording || dissecting}
+                onClick={() => handleDissectCaptureRow(cap.path)}
+                title={
+                  cap.isRecording
+                    ? "Stop active recording first to dissect flows"
+                    : "Dissect Flows (tcpflowy)"
+                }
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-[#6366F1]/18 hover:bg-[#6366F1] text-indigo-700 dark:text-[#818CF8] hover:text-white border border-[#6366F1]/35 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Layers className="w-3 h-3" />
+                <span className="hidden sm:inline">Dissect</span>
+              </button>
+
+              {/* 2. Open in Wireshark */}
+              <button
+                type="button"
+                disabled={!wiresharkAvailable || cap.isRecording}
+                onClick={() => void handleOpenPathInWireshark(cap.path)}
+                title={
+                  !wiresharkAvailable
+                    ? "Wireshark is not installed on macOS (brew install --cask wireshark)"
+                    : cap.isRecording
+                    ? "Stop active recording before opening static .pcap in Wireshark"
+                    : "Open in Wireshark"
+                }
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-cyan-500/12 hover:bg-[#06B6D4] text-cyan-700 dark:text-[#22D3EE] hover:text-[#090E18] border border-cyan-400/35 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <SignalWaveformIcon className="w-3.5 h-2.5" />
+                <span className="hidden md:inline">Wireshark</span>
+              </button>
+
+              {/* 3. Save Copy As... */}
+              <button
+                type="button"
+                disabled={cap.isRecording}
+                onClick={() =>
+                  void handleSaveCopyAs(
+                    cap.path,
+                    cap.filename,
+                    cap.packetCount
+                  )
+                }
+                title={
+                  cap.isRecording
+                    ? "Stop active recording before exporting a copy"
+                    : "Save Copy As... (Export .pcap anywhere on macOS)"
+                }
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-emerald-500/12 hover:bg-[#10B981] text-emerald-700 dark:text-[#34D399] hover:text-[#090E18] border border-emerald-500/35 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Download className="w-3 h-3" />
+                <span className="hidden md:inline">Save Copy As…</span>
+              </button>
+
+              {/* 4. Reveal in Finder */}
+              <button
+                type="button"
+                onClick={() => void handleRevealInFinder(cap.path)}
+                title="Reveal in macOS Finder"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#090E18] hover:bg-slate-100 dark:hover:bg-[#1E2B42] text-slate-600 dark:text-slate-300 transition-colors"
+              >
+                <FolderOpen className="w-3 h-3" />
+                <span className="hidden xl:inline">Finder</span>
+              </button>
+
+              {!cap.isRecording && (
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteCapture(cap)}
+                  title="Delete capture from workspace"
+                  className="p-1 rounded-md border border-transparent hover:border-rose-500/40 hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 dark:hover:text-[#F43F5E] transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="h-full flex flex-col gap-2 min-h-0">
       {/* Top Capture & Dissector Control Bar */}
@@ -308,7 +520,7 @@ export function TcpflowyInspectorPane({
             aria-label="Select .pcap capture file"
             value={selectedPcapPath ?? ""}
             onChange={(e) => onSelectPcap(e.target.value || null)}
-            className="max-w-[340px] min-w-[190px] px-2 py-1 rounded-md text-xs font-mono bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.20)] text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#6366F1]/40"
+            className="max-w-[300px] min-w-[175px] px-2 py-1 rounded-md text-xs font-mono bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.20)] text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#6366F1]/40"
           >
             <option value="">
               {captures.length === 0 && externalPcaps.length === 0
@@ -338,6 +550,21 @@ export function TcpflowyInspectorPane({
             )}
           </select>
 
+          {captures.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowCapturesDrawer((v) => !v)}
+              title="Toggle workspace saved captures history list (captures/*.pcap)"
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                showCapturesDrawer
+                  ? "bg-indigo-500/18 border-[#6366F1]/45 text-indigo-700 dark:text-[#818CF8]"
+                  : "border-slate-200 dark:border-zinc-700 bg-white dark:bg-[#162032] hover:bg-slate-100 dark:hover:bg-[#1E2B42] text-slate-700 dark:text-slate-200"
+              }`}
+            >
+              <span>Captures ({captures.length})</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => void onRefreshCaptures()}
@@ -356,6 +583,35 @@ export function TcpflowyInspectorPane({
             <FolderOpen className="w-3 h-3" />
             <span>Import .pcap…</span>
           </button>
+
+          {selectedPcapPath && !selectedManagedCapture?.isRecording && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  void handleSaveCopyAs(
+                    selectedPcapPath,
+                    selectedFilename,
+                    selectedManagedCapture?.packetCount ?? null
+                  )
+                }
+                title="Save Copy As... (Export .pcap anywhere on macOS)"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-emerald-500/12 hover:bg-emerald-500/22 text-emerald-700 dark:text-[#34D399] border border-emerald-500/35 transition-colors"
+              >
+                <Download className="w-3 h-3" />
+                <span className="hidden lg:inline">Save Copy As…</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleRevealInFinder(selectedPcapPath)}
+                title="Reveal selected .pcap in macOS Finder"
+                className="p-1.5 rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
 
           {selectedManagedCapture && !selectedManagedCapture.isRecording && (
             <button
@@ -446,11 +702,15 @@ export function TcpflowyInspectorPane({
 
           <button
             type="button"
-            disabled={!selectedPcapPath || dissecting}
+            disabled={
+              !selectedPcapPath ||
+              dissecting ||
+              Boolean(selectedManagedCapture?.isRecording)
+            }
             onClick={() =>
               selectedPcapPath && void runDissection(selectedPcapPath)
             }
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 text-white shadow-xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-[#6366F1] hover:bg-[#818CF8] disabled:opacity-45 text-white shadow-xs transition-colors"
           >
             {dissecting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -462,16 +722,46 @@ export function TcpflowyInspectorPane({
 
           <button
             type="button"
-            disabled={!selectedPcapPath}
+            disabled={
+              !selectedPcapPath ||
+              !wiresharkAvailable ||
+              Boolean(selectedManagedCapture?.isRecording)
+            }
             onClick={() => void handleOpenWireshark()}
-            title="Open this .pcap capture file directly in macOS Wireshark.app"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-700 dark:text-sky-300 border border-sky-500/30 disabled:opacity-45 transition-colors"
+            title={
+              !wiresharkAvailable
+                ? "Wireshark is not installed on macOS (brew install --cask wireshark)"
+                : selectedManagedCapture?.isRecording
+                ? "Stop active recording first to open finalized .pcap in Wireshark"
+                : "Open this .pcap capture file directly in macOS Wireshark.app"
+            }
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-[#22D3EE] border border-cyan-400/35 disabled:opacity-45 disabled:cursor-not-allowed transition-colors"
           >
-            <ExternalLink className="w-3.5 h-3.5" />
+            <SignalWaveformIcon className="w-3.5 h-2.5" />
             <span>Open in Wireshark</span>
           </button>
         </div>
       </div>
+
+      {/* Collapsible Saved Captures History List (when viewing a report or toggled open) */}
+      {showCapturesDrawer && report && captures.length > 0 && (
+        <div className="shrink-0 max-h-44 overflow-y-auto rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)]">
+          <div className="px-3 py-1.5 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-[#111827] flex items-center justify-between text-[11px]">
+            <span className="font-semibold text-slate-700 dark:text-slate-200">
+              Saved Workspace Captures (
+              <code className="font-mono text-[#22D3EE]">captures/*.pcap</code>)
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowCapturesDrawer(false)}
+              className="text-[10px] font-mono text-slate-400 hover:text-slate-200"
+            >
+              Hide
+            </button>
+          </div>
+          {renderSavedCapturesRows()}
+        </div>
+      )}
 
       {/* Live venv / pip install progress banner */}
       {installingTcpflowy && installProgress && (
@@ -518,39 +808,66 @@ export function TcpflowyInspectorPane({
         </div>
       )}
 
-      {/* Main Split View or Empty State */}
+      {/* Main Split View or Saved Captures + Empty State */}
       {!report ? (
-        <div className="relative flex-1 min-h-0 rounded-lg bg-slate-50/80 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] p-4 flex flex-col items-center justify-center text-center gap-2 overflow-hidden">
-          <EtherloomBackdropOrnament
-            opacityClassName="opacity-20"
-            className="absolute inset-0"
-          />
-          <div className="relative flex flex-col items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-[#6366F1]/35 flex items-center justify-center text-[#22D3EE]">
-              <SignalWaveformIcon animated className="w-5 h-3.5" />
+        captures.length > 0 ? (
+          <div className="flex-1 min-h-0 rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] flex flex-col overflow-hidden">
+            <div className="px-3 py-2 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-[#111827] flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+                <SignalWaveformIcon className="w-4 h-3 text-[#22D3EE]" />
+                <span>
+                  Project Captures History (
+                  <code className="font-mono text-[#22D3EE]">
+                    captures/*.pcap
+                  </code>
+                  )
+                </span>
+              </div>
+              <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                Dissect with tcpflowy, open in Wireshark, export a copy, or
+                reveal in Finder
+              </span>
             </div>
-            <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
-              Visual TCP Flow &amp; Stream Dissector (Powered by{" "}
-              <code className="font-mono text-[#818CF8]">tcpflowy</code>)
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {renderSavedCapturesRows()}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xl">
-              Click any wire on the topology canvas to{" "}
-              <strong className="text-slate-700 dark:text-slate-200">
-                Record .pcap
-              </strong>{" "}
-              and hit{" "}
-              <strong className="text-indigo-600 dark:text-[#818CF8]">
-                Stop &amp; Dissect with tcpflowy
-              </strong>
-              , or choose an existing <code className="font-mono">.pcap</code>{" "}
-              above to inspect TCP conversations,{" "}
-              <code className="font-mono text-[#22D3EE]">SYN</code> /{" "}
-              <code className="font-mono text-[#34D399]">PSH-ACK</code> /{" "}
-              <code className="font-mono text-[#F43F5E]">RST</code> sequence
-              ladders, DPI entropy, and reconstructed stream payloads.
-            </p>
           </div>
-        </div>
+        ) : (
+          <div className="relative flex-1 min-h-0 rounded-lg bg-slate-50/80 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] p-4 flex flex-col items-center justify-center text-center gap-2 overflow-hidden">
+            <EtherloomBackdropOrnament
+              opacityClassName="opacity-20"
+              className="absolute inset-0"
+            />
+            <div className="relative flex flex-col items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-[#6366F1]/35 flex items-center justify-center text-[#22D3EE]">
+                <SignalWaveformIcon animated className="w-5 h-3.5" />
+              </div>
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                Visual TCP Flow &amp; Stream Dissector (Powered by{" "}
+                <code className="font-mono text-[#818CF8]">tcpflowy</code>)
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xl">
+                Click any wire on the topology canvas to{" "}
+                <strong className="text-slate-700 dark:text-slate-200">
+                  Record .pcap
+                </strong>{" "}
+                and finish with{" "}
+                <strong className="text-emerald-600 dark:text-[#34D399]">
+                  Stop &amp; Save PCAP…
+                </strong>
+                ,{" "}
+                <strong className="text-cyan-600 dark:text-[#22D3EE]">
+                  Stop &amp; Open in Wireshark
+                </strong>
+                , or{" "}
+                <strong className="text-indigo-600 dark:text-[#818CF8]">
+                  Stop &amp; Dissect (tcpflowy)
+                </strong>
+                .
+              </p>
+            </div>
+          </div>
+        )
       ) : (
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-2.5 overflow-hidden">
           {/* LEFT PANE: Conversations / TCP Flows Table */}

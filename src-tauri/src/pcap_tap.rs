@@ -90,7 +90,7 @@ pub fn encode_pcap_packet_header(
     rec
 }
 
-/// Sanitizes a link name or ID for safe `.pcap` / FIFO filenames.
+/// Sanitizes a link name or ID for safe `.pcap` / FIFO filenames while preserving `__` endpoint separators.
 pub fn sanitize_capture_stem(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
@@ -98,12 +98,12 @@ pub fn sanitize_capture_stem(raw: &str) -> String {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
                 c
             } else {
-                '_'
+                '-'
             }
         })
-        .take(48)
+        .take(96)
         .collect();
-    let trimmed = cleaned.trim_matches('_');
+    let trimmed = cleaned.trim_matches(['_', '-']);
     if trimmed.is_empty() {
         "link".to_string()
     } else {
@@ -111,8 +111,61 @@ pub fn sanitize_capture_stem(raw: &str) -> String {
     }
 }
 
-/// Formats UTC epoch seconds as compact `YYYYMMDD_HHMMSS` for `.pcap` filenames without external crates.
-pub fn format_utc_compact_timestamp(epoch_secs: u64) -> String {
+/// Sanitizes a single endpoint token (`<node>-<nic>`) for descriptive `<nodeA>-<nicA>__<nodeB>-<nicB>` filenames.
+pub fn sanitize_endpoint_token(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_hyphen = false;
+    for c in raw.chars() {
+        let mapped = if c.is_ascii_alphanumeric() {
+            prev_hyphen = false;
+            c
+        } else if c == '-' || c == '_' || c == ':' || c == '/' || c.is_whitespace() {
+            if prev_hyphen {
+                continue;
+            }
+            prev_hyphen = true;
+            '-'
+        } else {
+            continue;
+        };
+        out.push(mapped);
+        if out.len() >= 42 {
+            break;
+        }
+    }
+    let trimmed = out.trim_matches(['-', '_']);
+    if trimmed.is_empty() {
+        "endpoint".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Builds a descriptive `.pcap` filename encoding both endpoints when available:
+/// `<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap`.
+pub fn build_capture_filename(
+    endpoint_a: Option<&str>,
+    endpoint_b: Option<&str>,
+    link_label: Option<&str>,
+    link_id: &str,
+    epoch_secs: u64,
+) -> String {
+    let ts_str = format_utc_hyphen_timestamp(epoch_secs);
+    let stem = match (
+        endpoint_a.map(str::trim).filter(|s| !s.is_empty()),
+        endpoint_b.map(str::trim).filter(|s| !s.is_empty()),
+    ) {
+        (Some(a), Some(b)) => format!(
+            "{}__{}",
+            sanitize_endpoint_token(a),
+            sanitize_endpoint_token(b)
+        ),
+        _ => sanitize_capture_stem(link_label.unwrap_or(link_id)),
+    };
+    format!("{stem}__{ts_str}.pcap")
+}
+
+fn utc_calendar_parts(epoch_secs: u64) -> (i64, u64, u64, u64, u64, u64) {
     // Civil-from-days algorithm (Howard Hinnant, public domain)
     let days = (epoch_secs / 86_400) as i64;
     let secs_of_day = epoch_secs % 86_400;
@@ -131,6 +184,18 @@ pub fn format_utc_compact_timestamp(epoch_secs: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
     let year = if m <= 2 { y + 1 } else { y };
 
+    (year, m, d, hour, minute, second)
+}
+
+/// Formats UTC epoch seconds as `YYYYMMDD-HHMMSS` for `<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap`.
+pub fn format_utc_hyphen_timestamp(epoch_secs: u64) -> String {
+    let (year, m, d, hour, minute, second) = utc_calendar_parts(epoch_secs);
+    format!("{year:04}{m:02}{d:02}-{hour:02}{minute:02}{second:02}")
+}
+
+/// Formats UTC epoch seconds as compact `YYYYMMDD_HHMMSS` (legacy helper).
+pub fn format_utc_compact_timestamp(epoch_secs: u64) -> String {
+    let (year, m, d, hour, minute, second) = utc_calendar_parts(epoch_secs);
     format!("{year:04}{m:02}{d:02}_{hour:02}{minute:02}{second:02}")
 }
 
@@ -172,17 +237,24 @@ pub struct StartPcapRecordingResult {
     pub started_at_ms: u64,
 }
 
-/// Result returned when stopping `.pcap` recording on a link.
+/// Atomic finalized capture metadata returned by `stop_wire_capture` / `pcap_stop_recording`
+/// AFTER flushing `BufWriter`, running `File::sync_all()`, and closing the `.pcap` file handle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StopPcapRecordingResult {
+pub struct CaptureSummary {
+    pub capture_id: String,
     pub link_id: String,
+    pub file_path: String,
     pub path: String,
     pub filename: String,
+    pub packet_count: u64,
     pub packets_written: u64,
+    pub byte_size: u64,
     pub bytes_written: u64,
     pub duration_ms: u64,
 }
+
+pub type StopPcapRecordingResult = CaptureSummary;
 
 /// Result returned when launching a Live Wireshark FIFO stream on a link.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,7 +371,23 @@ fn infer_link_id_from_filename(filename: &str) -> Option<String> {
     let stem = filename
         .strip_suffix(".pcap")
         .or_else(|| filename.strip_suffix(".pcapng"))?;
-    // Pattern `{link_stem}_{YYYYMMDD}_{HHMMSS}`
+
+    // Phase 9 pattern: `<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>[_<ms>]`
+    if let Some((prefix, ts_tail)) = stem.rsplit_once("__") {
+        let core_ts = ts_tail.split('_').next().unwrap_or(ts_tail);
+        if let Some((ymd, hms)) = core_ts.split_once('-') {
+            if ymd.len() == 8
+                && ymd.chars().all(|c| c.is_ascii_digit())
+                && hms.len() == 6
+                && hms.chars().all(|c| c.is_ascii_digit())
+                && !prefix.is_empty()
+            {
+                return Some(prefix.to_string());
+            }
+        }
+    }
+
+    // Legacy pattern: `{link_stem}_{YYYYMMDD}_{HHMMSS}`
     let parts: Vec<&str> = stem.rsplitn(3, '_').collect();
     if parts.len() == 3
         && parts[0].len() == 6
@@ -373,11 +461,42 @@ impl PcapTapManager {
             .collect()
     }
 
-    /// Starts writing standard libpcap frames from `rx` into `{captures_dir}/{link_label}_{timestamp}.pcap`.
+    /// Starts writing standard libpcap frames from `rx` into
+    /// `{captures_dir}/<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap`.
     /// Calls `on_frame_written(packets, bytes)` after each frame and `on_stopped()` when finished.
     pub async fn start_file_recording<F, S>(
         &self,
         link_id: &str,
+        link_label: Option<&str>,
+        captures_dir: &Path,
+        rx: broadcast::Receiver<TappedFrame>,
+        on_frame_written: F,
+        on_stopped: S,
+    ) -> Result<StartPcapRecordingResult, String>
+    where
+        F: Fn(u64, u64) + Send + Sync + 'static,
+        S: FnOnce() + Send + 'static,
+    {
+        self.start_file_recording_with_endpoints(
+            link_id,
+            None,
+            None,
+            link_label,
+            captures_dir,
+            rx,
+            on_frame_written,
+            on_stopped,
+        )
+        .await
+    }
+
+    /// Endpoint-aware `.pcap` recorder producing `<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_file_recording_with_endpoints<F, S>(
+        &self,
+        link_id: &str,
+        endpoint_a: Option<&str>,
+        endpoint_b: Option<&str>,
         link_label: Option<&str>,
         captures_dir: &Path,
         mut rx: broadcast::Receiver<TappedFrame>,
@@ -411,12 +530,17 @@ impl PcapTapManager {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
         let started_at_ms = now_dur.as_millis() as u64;
-        let ts_str = format_utc_compact_timestamp(now_dur.as_secs());
-        let stem = sanitize_capture_stem(link_label.unwrap_or(link_id));
-        let mut filename = format!("{stem}_{ts_str}.pcap");
+        let mut filename = build_capture_filename(
+            endpoint_a,
+            endpoint_b,
+            link_label,
+            link_id,
+            now_dur.as_secs(),
+        );
         let mut target_path = captures_dir.join(&filename);
         if target_path.exists() {
-            filename = format!("{stem}_{ts_str}_{}.pcap", started_at_ms % 1000);
+            let base = filename.strip_suffix(".pcap").unwrap_or(&filename);
+            filename = format!("{base}_{}.pcap", started_at_ms % 1000);
             target_path = captures_dir.join(&filename);
         }
 
@@ -447,7 +571,7 @@ impl PcapTapManager {
                 tokio::select! {
                     changed = stop_rx.changed() => {
                         if changed.is_err() || *stop_rx.borrow() {
-                            // Drain any already-queued frames before closing
+                            // 1. Drain any already-queued Ethernet frames before detaching
                             while let Ok(pkt) = rx.try_recv() {
                                 let orig_len = pkt.frame.len() as u32;
                                 let incl_len = orig_len.min(PCAP_SNAPLEN);
@@ -491,7 +615,16 @@ impl PcapTapManager {
                 }
             }
 
+            // 2. Atomically detach tap receiver from PacketFabric broadcast channel
+            drop(rx);
+
+            // 3. Flush userspace BufWriter, sync kernel buffers to storage (`fsync`), and close file handle
+            //    BEFORE resolving `join_handle` so Wireshark / tcpflowy never observe a truncated packet.
             let _ = writer.flush().await;
+            let file = writer.into_inner();
+            let _ = file.sync_all().await;
+            drop(file);
+
             on_stopped();
             (packets_written, bytes_written)
         });
@@ -521,8 +654,10 @@ impl PcapTapManager {
         Ok(result)
     }
 
-    /// Stops an active `.pcap` recording for `link_id`, flushes all buffered frames, and returns summary metadata.
-    pub async fn stop_file_recording(&self, link_id: &str) -> Result<StopPcapRecordingResult, String> {
+    /// Atomically stops an active `.pcap` recording for `link_id`, detaches the tap receiver,
+    /// flushes `BufWriter`, runs `File::sync_all()`, closes the file descriptor completely,
+    /// and returns finalized `CaptureSummary` metadata.
+    pub async fn stop_file_recording(&self, link_id: &str) -> Result<CaptureSummary, String> {
         let active = {
             let mut guard = self.recordings.lock().await;
             guard
@@ -541,12 +676,21 @@ impl PcapTapManager {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(active.started_at_ms);
 
-        Ok(StopPcapRecordingResult {
+        let disk_size = fs::metadata(&active.path)
+            .map(|m| m.len())
+            .unwrap_or(bytes_written);
+        let full_path_str = active.path.display().to_string();
+
+        Ok(CaptureSummary {
+            capture_id: format!("{}__{}", active.link_id, active.started_at_ms),
             link_id: active.link_id,
-            path: active.path.display().to_string(),
+            file_path: full_path_str.clone(),
+            path: full_path_str,
             filename: active.filename,
+            packet_count: packets_written,
             packets_written,
-            bytes_written,
+            byte_size: disk_size,
+            bytes_written: disk_size,
             duration_ms: now_ms.saturating_sub(active.started_at_ms),
         })
     }
@@ -811,8 +955,16 @@ async fn run_fifo_stream_task(
     let _ = writer_handle.await;
 }
 
-/// Opens an existing `.pcap` / `.pcapng` file in Wireshark on macOS.
-pub fn open_pcap_file_in_wireshark(pcap_path: &Path) -> Result<String, String> {
+/// Opens a finalized `.pcap` / `.pcapng` file in Wireshark on macOS in static file-read mode (`-r <pcap>`).
+///
+/// Resolution order:
+/// 1. `/Applications/Wireshark.app/Contents/MacOS/Wireshark -r <pcap_path>` (detached `Stdio::null()`)
+/// 2. `resolve_wireshark_gui_binary()` or an explicit GUI binary hint from `env_doctor`
+/// 3. `open -a Wireshark <pcap_path>` via macOS LaunchServices
+pub fn open_pcap_in_wireshark_with_hint(
+    pcap_path: &Path,
+    env_wireshark_hint: Option<&str>,
+) -> Result<String, String> {
     if !pcap_path.is_file() {
         return Err(format!(
             "Capture file '{}' does not exist",
@@ -820,7 +972,23 @@ pub fn open_pcap_file_in_wireshark(pcap_path: &Path) -> Result<String, String> {
         ));
     }
 
-    if let Some(ws_bin) = resolve_wireshark_gui_binary() {
+    let primary_app = PathBuf::from("/Applications/Wireshark.app/Contents/MacOS/Wireshark");
+    let candidate_gui_bin = if is_executable_file(&primary_app) {
+        Some(primary_app)
+    } else {
+        resolve_wireshark_gui_binary().or_else(|| {
+            let hint = PathBuf::from(env_wireshark_hint?.trim());
+            let name = hint.file_name()?.to_str()?;
+            // Ensure we don't accidentally spawn CLI `tshark` when opening the Wireshark GUI
+            if name.eq_ignore_ascii_case("wireshark") && is_executable_file(&hint) {
+                Some(hint)
+            } else {
+                None
+            }
+        })
+    };
+
+    if let Some(ws_bin) = candidate_gui_bin {
         std::process::Command::new(&ws_bin)
             .arg("-r")
             .arg(pcap_path)
@@ -850,6 +1018,85 @@ pub fn open_pcap_file_in_wireshark(pcap_path: &Path) -> Result<String, String> {
     }
 }
 
+/// Opens an existing `.pcap` / `.pcapng` file in Wireshark on macOS.
+pub fn open_pcap_file_in_wireshark(pcap_path: &Path) -> Result<String, String> {
+    open_pcap_in_wireshark_with_hint(pcap_path, None)
+}
+
+/// Copies a finalized `.pcap` capture from `<project>.etherloom/captures/` to any user-chosen
+/// macOS destination path (Desktop, Downloads, external SSD, etc.) and fsyncs the destination file.
+pub fn export_pcap_copy_to_path(source_pcap_path: &Path, destination_path: &Path) -> Result<u64, String> {
+    if !source_pcap_path.is_file() {
+        return Err(format!(
+            "Source capture '{}' does not exist",
+            source_pcap_path.display()
+        ));
+    }
+
+    if let (Ok(canon_src), Ok(canon_dst)) = (
+        fs::canonicalize(source_pcap_path),
+        fs::canonicalize(destination_path),
+    ) {
+        if canon_src == canon_dst {
+            return fs::metadata(&canon_src)
+                .map(|m| m.len())
+                .map_err(|e| format!("Failed reading metadata for '{}': {e}", canon_src.display()));
+        }
+    }
+
+    if let Some(parent) = destination_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create destination folder '{}': {e}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
+
+    let copied = fs::copy(source_pcap_path, destination_path).map_err(|e| {
+        format!(
+            "Failed exporting capture to '{}': {e}",
+            destination_path.display()
+        )
+    })?;
+
+    if let Ok(dest_file) = fs::File::open(destination_path) {
+        let _ = dest_file.sync_all();
+    }
+
+    Ok(copied)
+}
+
+/// Highlights a `.pcap` file inside macOS Finder (`open -R <pcap_path>`).
+pub fn reveal_pcap_file_in_finder(pcap_path: &Path) -> Result<(), String> {
+    if !pcap_path.exists() {
+        return Err(format!(
+            "Capture file '{}' does not exist",
+            pcap_path.display()
+        ));
+    }
+
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(pcap_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("Failed invoking macOS Finder (`open -R`): {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "macOS Finder could not reveal '{}'",
+            pcap_path.display()
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -866,16 +1113,36 @@ mod tests {
         assert_eq!(u32::from_le_bytes([hdr[20], hdr[21], hdr[22], hdr[23]]), 1);
     }
 
+    #[test]
+    fn endpoint_filename_encodes_both_nodes_nics_and_timestamp() {
+        let fname = build_capture_filename(
+            Some("fw1:vio0"),
+            Some("sw1:p1"),
+            None,
+            "link-1",
+            1_700_000_000,
+        );
+        assert!(fname.starts_with("fw1-vio0__sw1-p1__20231114-"));
+        assert!(fname.ends_with(".pcap"));
+        assert_eq!(
+            infer_link_id_from_filename(&fname),
+            Some("fw1-vio0__sw1-p1".to_string())
+        );
+    }
+
     #[tokio::test]
-    async fn file_recording_writes_valid_libpcap_and_counts_packets() {
+    async fn file_recording_writes_valid_libpcap_flushes_atomically_and_exports_copy() {
         let dir = std::env::temp_dir().join(format!("etherloom-pcap-test-{}", Uuid::new_v4()));
+        let export_dir = dir.join("exported");
         let mgr = PcapTapManager::new();
         let (tx, rx) = broadcast::channel::<TappedFrame>(64);
 
         let started = mgr
-            .start_file_recording(
+            .start_file_recording_with_endpoints(
                 "link-fw1-sw",
-                Some("fw1_vio0-sw_p1"),
+                Some("fw1-vio0"),
+                Some("sw-p1"),
+                Some("fw1-vio0__sw-p1"),
                 &dir,
                 rx,
                 |_, _| {},
@@ -884,6 +1151,9 @@ mod tests {
             .await
             .expect("start recording");
 
+        assert!(started.filename.starts_with("fw1-vio0__sw-p1__"));
+        assert!(started.filename.ends_with(".pcap"));
+
         let sample_eth = Bytes::from_static(&[
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // dst
             0x52, 0x54, 0x00, 0x10, 0x01, 0x00, // src
@@ -891,34 +1161,44 @@ mod tests {
             0x00, 0x01, 0x08, 0x00, 0x06, 0x04,
         ]);
 
-        tx.send(TappedFrame {
-            ts_sec: 1_700_000_000,
-            ts_usec: 123_456,
-            frame: sample_eth.clone(),
-        })
-        .unwrap();
-        tx.send(TappedFrame {
-            ts_sec: 1_700_000_001,
-            ts_usec: 654_321,
-            frame: sample_eth.clone(),
-        })
-        .unwrap();
+        // Send burst immediately before stop to verify queued-frame drain + zero truncation
+        for idx in 0..5u32 {
+            tx.send(TappedFrame {
+                ts_sec: 1_700_000_000 + idx,
+                ts_usec: 123_456,
+                frame: sample_eth.clone(),
+            })
+            .unwrap();
+        }
 
-        tokio::time::sleep(Duration::from_millis(40)).await;
         let stopped = mgr
             .stop_file_recording("link-fw1-sw")
             .await
             .expect("stop recording");
 
-        assert_eq!(stopped.packets_written, 2);
-        assert_eq!(stopped.bytes_written, 24 + 2 * (16 + sample_eth.len() as u64));
+        let expected_bytes = 24 + 5 * (16 + sample_eth.len() as u64);
+        assert_eq!(stopped.packet_count, 5);
+        assert_eq!(stopped.packets_written, 5);
+        assert_eq!(stopped.byte_size, expected_bytes);
+        assert_eq!(stopped.bytes_written, expected_bytes);
+        assert_eq!(stopped.file_path, started.path);
 
-        let pcap_path = PathBuf::from(&started.path);
-        assert_eq!(count_pcap_packets_fast(&pcap_path), Some(2));
+        // Verify receiver was detached from broadcast channel once stopped
+        assert_eq!(tx.receiver_count(), 0);
+
+        let pcap_path = PathBuf::from(&stopped.file_path);
+        assert_eq!(count_pcap_packets_fast(&pcap_path), Some(5));
 
         let listed = list_captures_in_dir(&dir, &HashMap::new());
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].packet_count, Some(2));
+        assert_eq!(listed[0].packet_count, Some(5));
+
+        // Verify export_pcap_copy_to_path produces an exact, intact copy
+        let dest_pcap = export_dir.join(&stopped.filename);
+        let copied_bytes =
+            export_pcap_copy_to_path(&pcap_path, &dest_pcap).expect("export pcap copy");
+        assert_eq!(copied_bytes, expected_bytes);
+        assert_eq!(count_pcap_packets_fast(&dest_pcap), Some(5));
 
         let _ = fs::remove_dir_all(&dir);
     }

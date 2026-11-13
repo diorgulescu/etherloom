@@ -30,8 +30,9 @@ use images::{
     OverlayTemplateBinding, PromoteTemplateRequest, ResetOverlayRequest,
 };
 use pcap_tap::{
-    list_captures_in_dir, open_pcap_file_in_wireshark, CaptureFileInfo, LiveWiresharkSessionInfo,
-    PcapTapManager, StartPcapRecordingResult, StopPcapRecordingResult,
+    export_pcap_copy_to_path, list_captures_in_dir, open_pcap_file_in_wireshark,
+    open_pcap_in_wireshark_with_hint, reveal_pcap_file_in_finder, CaptureFileInfo, CaptureSummary,
+    LiveWiresharkSessionInfo, PcapTapManager, StartPcapRecordingResult, StopPcapRecordingResult,
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -892,6 +893,8 @@ async fn pcap_start_recording(
     bundle_path: Option<String>,
     link_id: String,
     link_label: Option<String>,
+    endpoint_a: Option<String>,
+    endpoint_b: Option<String>,
 ) -> Result<StartPcapRecordingResult, String> {
     let captures_dir = resolve_effective_captures_dir(bundle_path.as_deref())?;
     let rx = state.fabric.subscribe_link_tap(&link_id).await?;
@@ -903,8 +906,10 @@ async fn pcap_start_recording(
 
     let started = state
         .pcap_taps
-        .start_file_recording(
+        .start_file_recording_with_endpoints(
             &link_id,
+            endpoint_a.as_deref(),
+            endpoint_b.as_deref(),
             link_label.as_deref(),
             &captures_dir,
             rx,
@@ -934,16 +939,24 @@ async fn pcap_start_recording(
 }
 
 #[tauri::command]
-async fn pcap_stop_recording(
+async fn stop_wire_capture(
     state: tauri::State<'_, StudioState>,
     link_id: String,
-) -> Result<StopPcapRecordingResult, String> {
+) -> Result<CaptureSummary, String> {
     let stopped = state.pcap_taps.stop_file_recording(&link_id).await?;
     state
         .fabric
         .set_link_pcap_state(&link_id, false, None, 0, 0)
         .await;
     Ok(stopped)
+}
+
+#[tauri::command]
+async fn pcap_stop_recording(
+    state: tauri::State<'_, StudioState>,
+    link_id: String,
+) -> Result<StopPcapRecordingResult, String> {
+    stop_wire_capture(state, link_id).await
 }
 
 #[tauri::command]
@@ -1009,6 +1022,36 @@ async fn pcap_delete_capture(pcap_path: String) -> Result<(), String> {
 #[tauri::command]
 fn pcap_open_in_wireshark(pcap_path: String) -> Result<String, String> {
     open_pcap_file_in_wireshark(Path::new(pcap_path.trim()))
+}
+
+#[tauri::command]
+async fn open_pcap_in_wireshark(
+    state: tauri::State<'_, StudioState>,
+    pcap_path: String,
+) -> Result<(), String> {
+    let env_hint = {
+        let guard = state.last_env_report.read().await;
+        guard.as_ref().and_then(|r| r.wireshark.path.clone())
+    };
+    open_pcap_in_wireshark_with_hint(Path::new(pcap_path.trim()), env_hint.as_deref()).map(|_| ())
+}
+
+#[tauri::command]
+async fn export_pcap_copy(
+    source_pcap_path: String,
+    destination_path: String,
+) -> Result<(), String> {
+    let src = PathBuf::from(source_pcap_path.trim());
+    let dst = PathBuf::from(destination_path.trim());
+    tokio::task::spawn_blocking(move || export_pcap_copy_to_path(&src, &dst))
+        .await
+        .map_err(|e| format!("PCAP export task join error: {e}"))?
+        .map(|_| ())
+}
+
+#[tauri::command]
+fn reveal_pcap_in_finder(pcap_path: String) -> Result<(), String> {
+    reveal_pcap_file_in_finder(Path::new(pcap_path.trim()))
 }
 
 #[tauri::command]
@@ -1262,12 +1305,16 @@ pub fn run() {
             console_send_ctrl_alt_del,
             console_focus_cocoa_window,
             pcap_start_recording,
+            stop_wire_capture,
             pcap_stop_recording,
             pcap_start_live_wireshark,
             pcap_stop_live_wireshark,
             pcap_list_captures,
             pcap_delete_capture,
             pcap_open_in_wireshark,
+            open_pcap_in_wireshark,
+            export_pcap_copy,
+            reveal_pcap_in_finder,
             tcpflowy_get_status,
             tcpflowy_install_or_upgrade,
             tcpflowy_set_local_repo_path,

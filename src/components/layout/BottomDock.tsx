@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Download,
   ExternalLink,
+  Layers,
   Maximize2,
   Minimize2,
   Monitor,
@@ -11,7 +14,6 @@ import {
   Radio,
   Scissors,
   Sliders,
-  Sparkles,
   Terminal,
   X,
 } from "lucide-react";
@@ -29,7 +31,11 @@ import type { EtherloomFlowNode } from "../canvas/EtherloomNode";
 import type { EtherloomWireEdgeType } from "../canvas/EtherloomWireEdge";
 import { VmConsoleTabContent } from "../console/VmConsoleTabContent";
 import { TcpflowyInspectorPane } from "../inspector/TcpflowyInspectorPane";
-import { formatThroughput } from "../../utils/topology";
+import {
+  formatByteSize,
+  formatDurationMmSs,
+  formatThroughput,
+} from "../../utils/topology";
 
 export type ActiveWorkspaceTabId = `vm:${string}` | "link" | "tcpflowy";
 
@@ -45,6 +51,7 @@ interface BottomDockProps {
   captures: CaptureFileInfo[];
   selectedPcapPath: string | null;
   dissectNonce: number;
+  wiresharkAvailable: boolean;
   tcpflowyStatus: TcpflowyEnvStatus | null;
   tcpflowyProgress: TcpflowyInstallProgress | null;
   installingTcpflowy: boolean;
@@ -56,14 +63,21 @@ interface BottomDockProps {
   onOpenNodeSettings: (nodeId: string) => void;
   onChangeVmDisplayMode: (nodeId: string, mode: VmDisplayMode) => void;
   onUpdateSelectedEdge: (patch: Partial<WireEdgeData>) => void;
-  onTogglePcapRecording: (edgeId: string) => void;
+  onStartPcapRecording: (edgeId: string) => void;
+  onStopAndSavePcap: (edgeId: string) => void;
+  onStopAndOpenWireshark: (edgeId: string) => void;
   onStopAndDissect: (edgeId: string) => void;
   onToggleLiveWireshark: (edgeId: string) => void;
   onSelectPcap: (pcapPath: string | null) => void;
   onRefreshCaptures: () => Promise<void>;
   onInstallTcpflowy: () => Promise<void>;
   onOpenSettingsTcpflowy: () => void;
-  onNotify: (kind: "ok" | "error", text: string) => void;
+  onNotify: (
+    kind: "ok" | "error",
+    text: string,
+    actionLabel?: string,
+    onAction?: () => void
+  ) => void;
   onToggleOpen: () => void;
   onToggleExpanded: () => void;
   onToggleFloating: () => void;
@@ -81,6 +95,7 @@ export function BottomDock({
   captures,
   selectedPcapPath,
   dissectNonce,
+  wiresharkAvailable,
   tcpflowyStatus,
   tcpflowyProgress,
   installingTcpflowy,
@@ -92,7 +107,9 @@ export function BottomDock({
   onOpenNodeSettings,
   onChangeVmDisplayMode,
   onUpdateSelectedEdge,
-  onTogglePcapRecording,
+  onStartPcapRecording,
+  onStopAndSavePcap,
+  onStopAndOpenWireshark,
   onStopAndDissect,
   onToggleLiveWireshark,
   onSelectPcap,
@@ -108,6 +125,25 @@ export function BottomDock({
   const openVmSet = new Set(consoleTabs.map((t) => t.nodeId));
   const unopenedVms = vmNodes.filter((n) => !openVmSet.has(n.id));
   const edgeData = selectedEdge?.data;
+
+  const isCapturing = Boolean(edgeData?.capturingPcap);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [fallbackStartMs, setFallbackStartMs] = useState<number>(() =>
+    Date.now()
+  );
+
+  useEffect(() => {
+    if (!isCapturing) return;
+    setFallbackStartMs(Date.now());
+    setNowMs(Date.now());
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isCapturing, selectedEdge?.id]);
+
+  const effectiveStartMs = edgeData?.captureStartedAtMs ?? fallbackStartMs;
+  const elapsedMs = isCapturing ? Math.max(0, nowMs - effectiveStartMs) : 0;
 
   const containerClass = floating
     ? open
@@ -427,7 +463,7 @@ export function BottomDock({
                   </div>
 
                   <div className="rounded-lg bg-slate-50 dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.14)] p-3 flex flex-col justify-between gap-2">
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center justify-between gap-1.5">
                         <span className="inline-flex items-center gap-1.5">
                           <SignalWaveformIcon
@@ -439,67 +475,115 @@ export function BottomDock({
                           <span>Zero-Root Wiretap</span>
                         </span>
                         {edgeData.capturingPcap && (
-                          <span className="text-[10px] font-mono text-[#22D3EE]">
-                            REC • {edgeData.capturedPackets ?? 0} pkts
+                          <span className="text-[10px] font-mono font-semibold text-[#22D3EE]">
+                            REC {formatDurationMmSs(elapsedMs)}
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Mirrors raw Ethernet II UDP datagrams into libpcap{" "}
-                        <code className="font-mono">.pcap</code> files or named
-                        FIFO pipes for live Wireshark.
-                      </p>
+
+                      {edgeData.capturingPcap ? (
+                        <div className="rounded-md bg-cyan-500/10 border border-cyan-400/30 px-2 py-1 flex items-center justify-between text-[10px] font-mono text-cyan-800 dark:text-slate-200">
+                          <span className="text-[#34D399] font-semibold">
+                            {edgeData.capturedPackets ?? 0} pkts
+                          </span>
+                          <span className="text-slate-400">
+                            {formatByteSize(edgeData.capturedBytes ?? 0)}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Mirrors raw Ethernet II UDP datagrams into libpcap{" "}
+                          <code className="font-mono">.pcap</code> files or
+                          named FIFO pipes for live Wireshark.
+                        </p>
+                      )}
                     </div>
+
                     <div className="space-y-1.5">
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => onTogglePcapRecording(selectedEdge.id)}
-                          className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-medium transition-colors ${
-                            edgeData.capturingPcap
-                              ? "bg-[#F43F5E] hover:bg-rose-500 text-white"
-                              : "bg-[#0891B2] hover:bg-[#06B6D4] text-white"
-                          }`}
-                        >
-                          <Radio
-                            className={`w-3.5 h-3.5 ${
-                              edgeData.capturingPcap ? "animate-pulse" : ""
+                      {edgeData.capturingPcap ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onStopAndSavePcap(selectedEdge.id)}
+                            className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-semibold bg-[#10B981] hover:bg-[#34D399] text-[#090E18] transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Stop &amp; Save PCAP…</span>
+                          </button>
+
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              disabled={!wiresharkAvailable}
+                              onClick={() =>
+                                onStopAndOpenWireshark(selectedEdge.id)
+                              }
+                              title={
+                                !wiresharkAvailable
+                                  ? "Wireshark is not installed on macOS (brew install --cask wireshark)"
+                                  : "Finalize .pcap and open in Wireshark"
+                              }
+                              className="inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-md text-[11px] font-semibold bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] disabled:opacity-45 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <SignalWaveformIcon className="w-3.5 h-2.5" />
+                              <span className="truncate">Stop &amp; Wireshark</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => onStopAndDissect(selectedEdge.id)}
+                              className="inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-md text-[11px] font-semibold bg-[#6366F1] hover:bg-[#818CF8] text-white transition-colors"
+                            >
+                              <Layers className="w-3.5 h-3.5" />
+                              <span className="truncate">Stop &amp; Dissect</span>
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => onToggleLiveWireshark(selectedEdge.id)}
+                            className={`w-full inline-flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-md text-[11px] font-medium border transition-colors ${
+                              edgeData.liveWireshark
+                                ? "bg-[#22D3EE] text-slate-950 font-semibold border-[#22D3EE]"
+                                : "bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-400/30 text-cyan-700 dark:text-[#22D3EE]"
                             }`}
-                          />
-                          <span>
-                            {edgeData.capturingPcap
-                              ? "Stop .pcap"
-                              : "Record .pcap"}
-                          </span>
-                        </button>
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>
+                              {edgeData.liveWireshark
+                                ? "Stop Live Wireshark FIFO"
+                                : "Live Wireshark (FIFO Stream)"}
+                            </span>
+                          </button>
+                        </>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => onStartPcapRecording(selectedEdge.id)}
+                            className="inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-semibold bg-[#0891B2] hover:bg-[#06B6D4] text-white transition-colors"
+                          >
+                            <Radio className="w-3.5 h-3.5" />
+                            <span>Record .pcap</span>
+                          </button>
 
-                        <button
-                          type="button"
-                          onClick={() => onToggleLiveWireshark(selectedEdge.id)}
-                          className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-medium border transition-colors ${
-                            edgeData.liveWireshark
-                              ? "bg-[#22D3EE] text-slate-950 font-semibold border-[#22D3EE]"
-                              : "bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-400/30 text-cyan-700 dark:text-[#22D3EE]"
-                          }`}
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>
-                            {edgeData.liveWireshark
-                              ? "Stop Wireshark"
-                              : "Live Wireshark"}
-                          </span>
-                        </button>
-                      </div>
-
-                      {edgeData.capturingPcap && (
-                        <button
-                          type="button"
-                          onClick={() => onStopAndDissect(selectedEdge.id)}
-                          className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-semibold bg-[#6366F1] hover:bg-[#818CF8] text-white transition-colors"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>Stop &amp; Dissect with tcpflowy</span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => onToggleLiveWireshark(selectedEdge.id)}
+                            className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-md text-xs font-medium border transition-colors ${
+                              edgeData.liveWireshark
+                                ? "bg-[#22D3EE] text-slate-950 font-semibold border-[#22D3EE]"
+                                : "bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-400/30 text-cyan-700 dark:text-[#22D3EE]"
+                            }`}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>
+                              {edgeData.liveWireshark
+                                ? "Stop Wireshark"
+                                : "Live Wireshark"}
+                            </span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -520,6 +604,7 @@ export function BottomDock({
               captures={captures}
               selectedPcapPath={selectedPcapPath}
               dissectNonce={dissectNonce}
+              wiresharkAvailable={wiresharkAvailable}
               tcpflowyStatus={tcpflowyStatus}
               installProgress={tcpflowyProgress}
               installingTcpflowy={installingTcpflowy}

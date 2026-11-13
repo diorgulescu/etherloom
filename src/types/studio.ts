@@ -329,6 +329,7 @@ export interface LinkSnapshot {
   capturingPcap?: boolean;
   capturedPackets?: number;
   capturedBytes?: number;
+  captureStartedAtMs?: number | null;
   activePcapPath?: string | null;
   liveWireshark?: boolean;
 }
@@ -400,6 +401,7 @@ export interface WireEdgeData extends Record<string, unknown> {
   capturingPcap?: boolean;
   capturedPackets?: number;
   capturedBytes?: number;
+  captureStartedAtMs?: number | null;
   activePcapPath?: string | null;
   liveWireshark?: boolean;
   highlightedByLab?: boolean;
@@ -545,14 +547,20 @@ export interface StartPcapRecordingResult {
   startedAtMs: number;
 }
 
-export interface StopPcapRecordingResult {
+export interface CaptureSummary {
+  captureId: string;
   linkId: string;
+  filePath: string;
   path: string;
   filename: string;
+  packetCount: number;
   packetsWritten: number;
+  byteSize: number;
   bytesWritten: number;
   durationMs: number;
 }
+
+export type StopPcapRecordingResult = CaptureSummary;
 
 export interface LiveWiresharkSessionInfo {
   linkId: string;

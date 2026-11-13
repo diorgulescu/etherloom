@@ -36,6 +36,7 @@ import { WelcomeModal } from "./components/modals/WelcomeModal";
 import { useTheme } from "./hooks/useTheme";
 import {
   createNewProject,
+  exportPcapCopy,
   fabricRemoveLink,
   fabricUpdateLink,
   fallbackToDefaultStorage,
@@ -55,17 +56,20 @@ import {
   onStorageStatusChanged,
   onTcpflowyInstallProgress,
   onVmStateChanged,
+  openPcapInWireshark,
   openProject,
   pickOpenProjectDialog,
+  pickSavePcapDialog,
   pickSaveProjectDialog,
   retryStorageDetection,
+  revealPcapInFinder,
   saveProject,
   startLiveWireshark,
   startPcapRecording,
   startTopologyVmNode,
   stopLiveWireshark,
-  stopPcapRecording,
   stopVm,
+  stopWireCapture,
   syncTopologyFabric,
   updateStorageLocation,
   writeSerialCommand,
@@ -613,6 +617,9 @@ export function App() {
           const nextCapturedPkts = snap.capturedPackets ?? 0;
           const nextCapturedBytes = snap.capturedBytes ?? 0;
           const nextActivePcap = snap.activePcapPath ?? null;
+          const nextCaptureStartedAtMs = nextCapturing
+            ? snap.captureStartedAtMs ?? edge.data.captureStartedAtMs ?? null
+            : null;
           const nextLiveWs = snap.liveWireshark ?? false;
 
           if (
@@ -625,6 +632,7 @@ export function App() {
             (edge.data.capturedPackets ?? 0) === nextCapturedPkts &&
             (edge.data.capturedBytes ?? 0) === nextCapturedBytes &&
             (edge.data.activePcapPath ?? null) === nextActivePcap &&
+            (edge.data.captureStartedAtMs ?? null) === nextCaptureStartedAtMs &&
             Boolean(edge.data.liveWireshark) === nextLiveWs
           ) {
             return edge;
@@ -643,6 +651,7 @@ export function App() {
               capturedPackets: nextCapturedPkts,
               capturedBytes: nextCapturedBytes,
               activePcapPath: nextActivePcap,
+              captureStartedAtMs: nextCaptureStartedAtMs,
               liveWireshark: nextLiveWs,
             },
           };
@@ -876,45 +885,37 @@ export function App() {
     [selectedEdgeId, setEdges]
   );
 
-  // Phase 4: Zero-Root `.pcap` Recording, Live Wireshark FIFO, & Stop+Dissect
-  const handleTogglePcapRecording = useCallback(
+  // Phase 4 & Phase 9: Zero-Root `.pcap` Recording, Atomic Finalization,
+  // Stop & Save PCAP..., Stop & Open in Wireshark, Stop & Dissect (tcpflowy), & Live FIFO
+  const stopCaptureOnEdge = useCallback(
+    async (edgeId: string) => {
+      const stopped = await stopWireCapture(edgeId);
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId && e.data
+            ? {
+                ...e,
+                data: {
+                  ...e.data,
+                  capturingPcap: false,
+                  activePcapPath: null,
+                  captureStartedAtMs: null,
+                },
+              }
+            : e
+        )
+      );
+      await refreshCaptures();
+      setSelectedPcapPath(stopped.filePath);
+      return stopped;
+    },
+    [refreshCaptures, setEdges]
+  );
+
+  const handleStartPcapRecording = useCallback(
     async (edgeId: string) => {
       const targetEdge = edges.find((e) => e.id === edgeId);
-      if (!targetEdge || !targetEdge.data) return;
-
-      if (targetEdge.data.capturingPcap) {
-        try {
-          const stopped = await stopPcapRecording(edgeId);
-          setEdges((eds) =>
-            eds.map((e) =>
-              e.id === edgeId && e.data
-                ? {
-                    ...e,
-                    data: {
-                      ...e.data,
-                      capturingPcap: false,
-                      activePcapPath: null,
-                    },
-                  }
-                : e
-            )
-          );
-          await refreshCaptures();
-          setSelectedPcapPath(stopped.path);
-          showToast(
-            "ok",
-            `Saved ${stopped.filename} (${stopped.packetsWritten} pkts)`,
-            "Dissect",
-            () => {
-              setSelectedPcapPath(stopped.path);
-              setDissectNonce((n) => n + 1);
-              setActiveWorkspaceTab("tcpflowy");
-              setDockOpen(true);
-            }
-          );
-        } catch (err: unknown) {
-          showToast("error", err instanceof Error ? err.message : String(err));
-        }
+      if (!targetEdge || !targetEdge.data || targetEdge.data.capturingPcap) {
         return;
       }
 
@@ -924,10 +925,18 @@ export function App() {
       const dstName =
         nodes.find((n) => n.id === targetEdge.target)?.data.label ??
         targetEdge.target;
-      const linkLabel = `${srcName}_${targetEdge.data.sourcePortLabel}-${dstName}_${targetEdge.data.targetPortLabel}`;
+      const endpointA = `${srcName}-${targetEdge.data.sourcePortLabel}`;
+      const endpointB = `${dstName}-${targetEdge.data.targetPortLabel}`;
+      const linkLabel = `${endpointA}__${endpointB}`;
 
       try {
-        const started = await startPcapRecording(bundlePath, edgeId, linkLabel);
+        const started = await startPcapRecording(
+          bundlePath,
+          edgeId,
+          linkLabel,
+          endpointA,
+          endpointB
+        );
         setEdges((eds) =>
           eds.map((e) =>
             e.id === edgeId && e.data
@@ -937,8 +946,9 @@ export function App() {
                     ...e.data,
                     capturingPcap: true,
                     capturedPackets: 0,
-                    capturedBytes: 0,
+                    capturedBytes: 24,
                     activePcapPath: started.path,
+                    captureStartedAtMs: started.startedAtMs || Date.now(),
                   },
                 }
               : e
@@ -953,39 +963,119 @@ export function App() {
     [bundlePath, edges, nodes, refreshCaptures, setEdges, showToast]
   );
 
+  const handleStopAndSavePcap = useCallback(
+    async (edgeId: string) => {
+      try {
+        // 1. Always finalize & fsync canonical .pcap inside workspace `captures/` first
+        const stopped = await stopCaptureOnEdge(edgeId);
+        setWirePopoverOpen(false);
+
+        // 2. Open native macOS Save dialog pre-populated with `<nodeA>-<nicA>__<nodeB>-<nicB>__<timestamp>.pcap`
+        const destPath = await pickSavePcapDialog(stopped.filename);
+        if (!destPath) {
+          showToast(
+            "ok",
+            `Capture stored in project Captures (${stopped.packetCount} packets)`,
+            "Captures",
+            () => {
+              setActiveWorkspaceTab("tcpflowy");
+              setDockOpen(true);
+            }
+          );
+          return;
+        }
+
+        // 3. Export atomic copy to user-chosen location on macOS
+        await exportPcapCopy(stopped.filePath, destPath);
+        showToast(
+          "ok",
+          `Capture saved (${stopped.packetCount} packets)`,
+          "Reveal in Finder",
+          () => {
+            void revealPcapInFinder(destPath).catch((err: unknown) => {
+              showToast(
+                "error",
+                err instanceof Error ? err.message : String(err)
+              );
+            });
+          }
+        );
+      } catch (err: unknown) {
+        showToast("error", err instanceof Error ? err.message : String(err));
+      }
+    },
+    [showToast, stopCaptureOnEdge]
+  );
+
+  const handleStopAndOpenWireshark = useCallback(
+    async (edgeId: string) => {
+      try {
+        const stopped = await stopCaptureOnEdge(edgeId);
+        setWirePopoverOpen(false);
+        await openPcapInWireshark(stopped.filePath);
+        showToast(
+          "ok",
+          `Opened ${stopped.filename} (${stopped.packetCount} packets) in Wireshark`
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.toLowerCase().includes("wireshark")) {
+          showToast("error", msg, "Env Doctor", () => setDoctorModalOpen(true));
+        } else {
+          showToast("error", msg);
+        }
+      }
+    },
+    [showToast, stopCaptureOnEdge]
+  );
+
   const handleStopAndDissect = useCallback(
     async (edgeId: string) => {
       try {
-        const stopped = await stopPcapRecording(edgeId);
-        setEdges((eds) =>
-          eds.map((e) =>
-            e.id === edgeId && e.data
-              ? {
-                  ...e,
-                  data: {
-                    ...e.data,
-                    capturingPcap: false,
-                    activePcapPath: null,
-                  },
-                }
-              : e
-          )
-        );
-        await refreshCaptures();
-        setSelectedPcapPath(stopped.path);
+        const stopped = await stopCaptureOnEdge(edgeId);
         setDissectNonce((n) => n + 1);
         setActiveWorkspaceTab("tcpflowy");
         setDockOpen(true);
         setWirePopoverOpen(false);
         showToast(
           "ok",
-          `Stopped ${stopped.filename} (${stopped.packetsWritten} pkts) — dissecting with tcpflowy…`
+          `Stopped ${stopped.filename} (${stopped.packetCount} pkts) — dissecting with tcpflowy…`
         );
       } catch (err: unknown) {
         showToast("error", err instanceof Error ? err.message : String(err));
       }
     },
-    [refreshCaptures, setEdges, showToast]
+    [showToast, stopCaptureOnEdge]
+  );
+
+  const handleTogglePcapRecording = useCallback(
+    async (edgeId: string) => {
+      const targetEdge = edges.find((e) => e.id === edgeId);
+      if (!targetEdge || !targetEdge.data) return;
+
+      if (targetEdge.data.capturingPcap) {
+        try {
+          const stopped = await stopCaptureOnEdge(edgeId);
+          showToast(
+            "ok",
+            `Saved ${stopped.filename} (${stopped.packetCount} pkts)`,
+            "Dissect",
+            () => {
+              setSelectedPcapPath(stopped.filePath);
+              setDissectNonce((n) => n + 1);
+              setActiveWorkspaceTab("tcpflowy");
+              setDockOpen(true);
+            }
+          );
+        } catch (err: unknown) {
+          showToast("error", err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      await handleStartPcapRecording(edgeId);
+    },
+    [edges, handleStartPcapRecording, showToast, stopCaptureOnEdge]
   );
 
   const handleToggleLiveWireshark = useCallback(
@@ -2013,6 +2103,9 @@ export function App() {
     storageState?.resolvedWorkspacesDir ??
     "~/Library/Application Support/Etherloom/Library/projects";
 
+  const wiresharkAvailable =
+    !isTauriRuntime() || (envReport ? envReport.wireshark.found : true);
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900 dark:bg-[#0D1321] dark:text-slate-100">
       <TopToolbar
@@ -2079,6 +2172,7 @@ export function App() {
             edges={displayEdges}
             selectedEdgeId={selectedEdgeId}
             wirePopoverOpen={wirePopoverOpen}
+            wiresharkAvailable={wiresharkAvailable}
             resolvedTheme={resolvedTheme}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
@@ -2088,7 +2182,9 @@ export function App() {
             onSelectEdge={handleSelectEdge}
             onCloseWirePopover={() => setWirePopoverOpen(false)}
             onUpdateEdgeData={handleUpdateEdgeData}
-            onTogglePcapRecording={(id) => void handleTogglePcapRecording(id)}
+            onStartPcapRecording={(id) => void handleStartPcapRecording(id)}
+            onStopAndSavePcap={(id) => void handleStopAndSavePcap(id)}
+            onStopAndOpenWireshark={(id) => void handleStopAndOpenWireshark(id)}
             onStopAndDissect={(id) => void handleStopAndDissect(id)}
             onToggleLiveWireshark={(id) => void handleToggleLiveWireshark(id)}
             onDeleteEdge={handleDeleteEdge}
@@ -2114,6 +2210,7 @@ export function App() {
             captures={captures}
             selectedPcapPath={selectedPcapPath}
             dissectNonce={dissectNonce}
+            wiresharkAvailable={wiresharkAvailable}
             tcpflowyStatus={tcpflowyStatus}
             tcpflowyProgress={tcpflowyProgress}
             installingTcpflowy={installingTcpflowy}
@@ -2129,7 +2226,9 @@ export function App() {
                 handleUpdateEdgeData(selectedEdgeId, patch);
               }
             }}
-            onTogglePcapRecording={(id) => void handleTogglePcapRecording(id)}
+            onStartPcapRecording={(id) => void handleStartPcapRecording(id)}
+            onStopAndSavePcap={(id) => void handleStopAndSavePcap(id)}
+            onStopAndOpenWireshark={(id) => void handleStopAndOpenWireshark(id)}
             onStopAndDissect={(id) => void handleStopAndDissect(id)}
             onToggleLiveWireshark={(id) => void handleToggleLiveWireshark(id)}
             onSelectPcap={setSelectedPcapPath}
@@ -2139,7 +2238,9 @@ export function App() {
               setSettingsInitialSection("tcpflowy");
               setSettingsModalOpen(true);
             }}
-            onNotify={(kind, text) => showToast(kind, text)}
+            onNotify={(kind, text, actionLabel, onAction) =>
+              showToast(kind, text, actionLabel, onAction)
+            }
             onToggleOpen={() => setDockOpen((v) => !v)}
             onToggleExpanded={() => setDockExpanded((v) => !v)}
             onToggleFloating={() => {
