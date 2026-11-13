@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-macos:
     name: Build macOS (${{ matrix.label }})
-    runs-on: macos-14
+    runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:

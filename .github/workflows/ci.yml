@@ -13,7 +13,7 @@ concurrency:
 jobs:
   scripts-lint:
     name: Shell Scripts Verification (macOS)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
 
   frontend-build:
     name: Frontend TypeScript & Vite Build
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -55,7 +55,7 @@ jobs:
 
   rust-backend-tests:
     name: Rust Backend Engine & PacketFabric Tests (macOS)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
