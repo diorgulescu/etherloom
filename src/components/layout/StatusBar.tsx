@@ -32,7 +32,10 @@ export function StatusBar({
       <div className="flex items-center gap-3 min-w-0">
         <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-[#34D399] font-medium shrink-0">
           <ShieldCheck className="w-3.5 h-3.5" />
-          HVF Userspace
+          <span>HVF Userspace</span>
+          <span className="font-mono text-[10px] text-cyan-700 dark:text-[#22D3EE] ml-0.5">
+            v{__APP_VERSION__}
+          </span>
         </span>
         <span className="text-slate-300 dark:text-slate-800">|</span>
         <span className="font-mono truncate">

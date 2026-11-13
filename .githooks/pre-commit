@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# .githooks/pre-commit
+# Automatically increments Etherloom's revision/patch version (e.g. 0.5.0 ->
+# 0.5.1 -> 0.5.2) on every commit unless the commit already explicitly sets a
+# new version (e.g. via `npm run version:minor` or `npm run version:major`).
+# License: GNU GPLv3
+# ==============================================================================
+
+set -euo pipefail
+
+if [[ "${ETHERLOOM_SKIP_VERSION_BUMP:-0}" == "1" ]]; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+GIT_DIR="$(git rev-parse --git-dir)"
+
+# Do not mutate versions mid-rebase or mid-cherry-pick
+if [[ -d "${GIT_DIR}/rebase-merge" || -d "${GIT_DIR}/rebase-apply" || -f "${GIT_DIR}/CHERRY_PICK_HEAD" ]]; then
+  exit 0
+fi
+
+BUMP_SCRIPT="${REPO_ROOT}/scripts/bump-version.sh"
+if [[ ! -x "${BUMP_SCRIPT}" ]]; then
+  exit 0
+fi
+
+read_head_version() {
+  if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+    printf ''
+    return 0
+  fi
+  if git cat-file -e HEAD:VERSION 2>/dev/null; then
+    git show HEAD:VERSION | tr -d '[:space:]'
+    return 0
+  fi
+  if git cat-file -e HEAD:package.json 2>/dev/null; then
+    git show HEAD:package.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get("version", "").strip())'
+    return 0
+  fi
+  printf ''
+}
+
+read_pkg_version() {
+  python3 - "${REPO_ROOT}/package.json" <<'PY'
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    print(json.load(fh).get("version", "").strip())
+PY
+}
+
+HEAD_VER="$(read_head_version)"
+FILE_VER="$("${BUMP_SCRIPT}" current)"
+PKG_VER="$(read_pkg_version)"
+
+WORK_VER="${FILE_VER}"
+if [[ -n "${HEAD_VER}" && "${FILE_VER}" == "${HEAD_VER}" && -n "${PKG_VER}" && "${PKG_VER}" != "${HEAD_VER}" ]]; then
+  WORK_VER="${PKG_VER}"
+fi
+
+if [[ -n "${HEAD_VER}" && "${WORK_VER}" == "${HEAD_VER}" ]]; then
+  NEXT_VER="$("${BUMP_SCRIPT}" patch)"
+  printf '[etherloom] Auto-bumped revision: %s -> %s\n' "${HEAD_VER}" "${NEXT_VER}"
+else
+  NEXT_VER="$("${BUMP_SCRIPT}" set "${WORK_VER}")"
+  printf '[etherloom] Using explicit version: %s\n' "${NEXT_VER}"
+fi
+
+git add \
+  "${REPO_ROOT}/VERSION" \
+  "${REPO_ROOT}/package.json" \
+  "${REPO_ROOT}/package-lock.json" \
+  "${REPO_ROOT}/src-tauri/tauri.conf.json" \
+  "${REPO_ROOT}/src-tauri/Cargo.toml" \
+  "${REPO_ROOT}/src-tauri/Cargo.lock"

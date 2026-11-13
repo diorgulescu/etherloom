@@ -84,6 +84,9 @@ export function WelcomeModal({
                     Studio
                   </span>
                 </h2>
+                <span className="inline-flex items-center text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-[#22D3EE] border border-cyan-400/35">
+                  v{__APP_VERSION__}
+                </span>
                 <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10B981]/15 text-[#34D399] border border-[#10B981]/35">
                   <ShieldCheck className="w-3 h-3" />
                   <span>Zero-Root macOS HVF • GPLv3</span>

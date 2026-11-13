@@ -1,0 +1,74 @@
+name: Auto Revision Bump (Fallback on Unhooked Push)
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-version-bump-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ensure-revision-bumped:
+    name: Ensure Patch Revision Bumped on Push
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip version bump]') && !startsWith(github.event.head_commit.message, 'chore(version): auto-bump revision')"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether pushed commit(s) already updated VERSION
+        id: check_ver
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          read_ver_at_ref() {
+            local ref="$1"
+            if git cat-file -e "${ref}:VERSION" 2>/dev/null; then
+              git show "${ref}:VERSION" | tr -d '[:space:]'
+            elif git cat-file -e "${ref}:package.json" 2>/dev/null; then
+              git show "${ref}:package.json" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("version", "").strip())'
+            else
+              printf ''
+            fi
+          }
+
+          BASE_REF="HEAD~1"
+          if [[ -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            BASE_REF="${BEFORE_SHA}"
+          fi
+
+          BEFORE_VER="$(read_ver_at_ref "${BASE_REF}")"
+          AFTER_VER="$(./scripts/bump-version.sh current)"
+
+          echo "Before (${BASE_REF}): ${BEFORE_VER:-none}"
+          echo "After  (HEAD):       ${AFTER_VER}"
+
+          if [[ -z "${BEFORE_VER}" || "${BEFORE_VER}" != "${AFTER_VER}" ]]; then
+            echo "needs_bump=false" >> "$GITHUB_OUTPUT"
+            echo "Version already updated (${BEFORE_VER:-none} -> ${AFTER_VER}) in pushed commit(s); no extra CI commit needed."
+          else
+            echo "needs_bump=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auto-bump patch revision & push (when push bypassed local git hooks)
+        if: steps.check_ver.outputs.needs_bump == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/bump-version.sh
+          NEXT_VER="$(./scripts/bump-version.sh patch)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "chore(version): auto-bump revision to ${NEXT_VER} [skip ci]"
+          git push origin HEAD:main

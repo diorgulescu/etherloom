@@ -7,6 +7,7 @@
   </p>
 
   <p>
+    <a href="https://github.com/diorgulescu/etherloom/releases"><img src="https://img.shields.io/github/package-json/v/diorgulescu/etherloom?label=Version&color=06b6d4" alt="Etherloom Version" /></a>
     <a href="https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml"><img src="https://github.com/diorgulescu/etherloom/actions/workflows/ci.yml/badge.svg" alt="CI — Tests & Verification" /></a>
     <a href="https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml"><img src="https://github.com/diorgulescu/etherloom/actions/workflows/release-macos.yml/badge.svg" alt="Build macOS Deliverables" /></a>
     <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
@@ -257,6 +258,18 @@ npm run build
 cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
+### 4. Versioning & Automatic Revision Bumping
+
+Etherloom tracks a single semantic version (`MAJOR.MINOR.PATCH`) in [`VERSION`](VERSION), synchronized across `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` via [`scripts/bump-version.sh`](scripts/bump-version.sh):
+
+- **Automatic Patch Bumps**: `.githooks/pre-commit` (installed automatically by `npm install` via `git config core.hooksPath .githooks`) and `.github/workflows/auto-version-bump.yml` automatically increment the revision number (`0.5.0` → `0.5.1` → `0.5.2`) on every commit/push unless an explicit version change is already staged.
+- **Explicit Minor / Major Bumps**:
+  ```bash
+  npm run version:minor          # e.g. 0.5.x -> 0.6.0
+  npm run version:major          # e.g. 0.x.y -> 1.0.0
+  ./scripts/bump-version.sh set 0.5.0
+  ```
 
 ---
 
