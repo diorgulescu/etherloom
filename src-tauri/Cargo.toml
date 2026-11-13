@@ -1,0 +1,28 @@
+[package]
+name = "etherloom"
+version = "0.1.0"
+description = "macOS-native zero-root network orchestration and learning studio powered by QEMU + Hypervisor.framework"
+authors = ["Etherloom Contributors"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/diorgulescu/etherloom"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "etherloom_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+bytes = "1"
+fastrand = "2"
+libc = "0.2"
+uuid = { version = "1", features = ["v4", "serde"] }

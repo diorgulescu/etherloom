@@ -1,0 +1,89 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0)
+schema_version = 1
+id = "05-tcp-handshakes-window-loss"
+number = 5
+title = "Dissecting TCP: Handshakes, Window Scaling & Packet Loss"
+subtitle = "Transfer bulk streams across an impaired wire (80ms latency, 5% packet loss) and visually dissect 3-way handshakes, window scaling, duplicate ACKs, and Fast Retransmits in tcpflowy."
+difficulty = "Intermediate"
+estimated_minutes = 25
+tags = ["TCP Internals", "Retransmissions", "Link Impairments", "tcpflowy"]
+required_os_profiles = ["alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Inspect the Pre-Impaired Wire (80ms Latency, 5% Loss) & Measure RTT"
+summary = "Boot tcp-client & tcp-server, assign 10.50.0.10/24 and 10.50.0.20/24, and observe ~160ms round-trip latency."
+highlight_links = ["link-lossy-wan"]
+
+[[steps]]
+id = "step-2"
+title = "Record .pcap & Stream 128 KB Over the Lossy Link"
+summary = "Capture link-lossy-wan while transferring 128 KB over TCP port 9090."
+highlight_links = ["link-lossy-wan"]
+
+[[steps]]
+id = "step-3"
+title = "Dissect 3-Way Handshake, Window Sizes, Dup ACKs & Retransmissions"
+summary = "Click Stop & Dissect with tcpflowy and inspect the Sequence Timeline ladder."
+highlight_links = ["link-lossy-wan"]
+
+[[steps]]
+id = "step-4"
+title = "Compare 0% vs. 15% Packet Loss Live (Mathis Throughput Collapse)"
+summary = "Tune the Packet Loss slider on link-lossy-wan and compare duration & retransmission counts in tcpflowy."
+highlight_links = ["link-lossy-wan"]
+
+[topology]
+schema_version = 1
+name = "Lab 05 — Dissecting TCP: Handshakes, Window Scaling & Loss"
+notes = "Academy Sandbox: Pre-configured 80ms latency + 5% packet loss WAN link for tcpflowy analysis"
+
+[[topology.nodes]]
+id = "node-tcp-client"
+name = "tcp-client"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "TCP sender / HTTP client (10.50.0.10/24)"
+position = { x = 110.0, y = 175.0 }
+
+[[topology.nodes.ports]]
+id = "node-tcp-client-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:50:00:10"
+ip_label = "10.50.0.10/24"
+
+[[topology.nodes]]
+id = "node-tcp-server"
+name = "tcp-server"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "TCP receiver / responder (10.50.0.20/24)"
+position = { x = 665.0, y = 175.0 }
+
+[[topology.nodes.ports]]
+id = "node-tcp-server-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:50:00:20"
+ip_label = "10.50.0.20/24"
+
+[[topology.links]]
+id = "link-lossy-wan"
+source_node = "node-tcp-client"
+source_port = "node-tcp-client-p0"
+target_node = "node-tcp-server"
+target_port = "node-tcp-server-p0"
+admin_up = true
+impairments = { latency_ms = 80, jitter_ms = 0, loss_percent = 5.0 }
+notes = "Simulated transcontinental link: 80ms one-way delay (160ms RTT) + 5% Bernoulli packet loss"

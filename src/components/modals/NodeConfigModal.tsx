@@ -1,0 +1,1029 @@
+import { useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  Cpu,
+  Disc,
+  FolderOpen,
+  HardDrive,
+  Layers,
+  Monitor,
+  Network,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
+import type { EtherloomFlowNode } from "../canvas/EtherloomNode";
+import {
+  createBlankVmDisk,
+  listInstallerIsos,
+  pickInstallerImageDialog,
+  promoteDiskToTemplate,
+  resetNodeOverlayDisk,
+  resolveNodeDiskPath,
+} from "../../services/tauriBridge";
+import type {
+  BaseTemplateInfo,
+  BootMediaBus,
+  GuestFamily,
+  InstallerMediaInfo,
+  NodeDiskStatusDto,
+  NodePort,
+  OsProfile,
+  TopologyNodeData,
+  VmDisplayMode,
+} from "../../types/studio";
+import {
+  flowNodeToWorkspaceNode,
+  formatByteSize,
+  formatInterfaceLabel,
+  generateQemuMac,
+} from "../../utils/topology";
+
+interface NodeConfigModalProps {
+  open: boolean;
+  node: EtherloomFlowNode | null;
+  bundlePath: string | null;
+  isosDir?: string;
+  osProfiles: OsProfile[];
+  baseTemplates: BaseTemplateInfo[];
+  onClose: () => void;
+  onSaveNode: (nodeId: string, patch: Partial<TopologyNodeData>) => void;
+  onDeleteNode: (nodeId: string) => void;
+  onTemplatesChanged: () => Promise<void>;
+}
+
+type ConfigTab = "general" | "interfaces" | "storage";
+
+export function NodeConfigModal({
+  open,
+  node,
+  bundlePath,
+  isosDir,
+  osProfiles,
+  baseTemplates,
+  onClose,
+  onSaveNode,
+  onDeleteNode,
+  onTemplatesChanged,
+}: NodeConfigModalProps) {
+  const [activeTab, setActiveTab] = useState<ConfigTab>("general");
+
+  // Editable draft fields
+  const [label, setLabel] = useState("");
+  const [osProfileId, setOsProfileId] = useState<string>("openbsd");
+  const [guestFamily, setGuestFamily] = useState<GuestFamily>("openbsd");
+  const [vcpus, setVcpus] = useState<number>(2);
+  const [memoryMb, setMemoryMb] = useState<number>(512);
+  const [displayMode, setDisplayMode] = useState<VmDisplayMode>("vnc");
+  const [notes, setNotes] = useState<string>("");
+  const [ports, setPorts] = useState<NodePort[]>([]);
+
+  // Storage & OS Installer fields
+  const [storageSource, setStorageSource] = useState<"template" | "installer">(
+    "installer"
+  );
+  const [templateId, setTemplateId] = useState<string>("");
+  const [bootMediaPath, setBootMediaPath] = useState<string>("");
+  const [bootMediaBus, setBootMediaBus] = useState<BootMediaBus>("auto");
+  const [diskSizeGb, setDiskSizeGb] = useState<number>(8);
+
+  // Live disk status & discovered ISOs
+  const [diskStatus, setDiskStatus] = useState<NodeDiskStatusDto | null>(null);
+  const [discoveredIsos, setDiscoveredIsos] = useState<InstallerMediaInfo[]>(
+    []
+  );
+  const [busyMessage, setBusyMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+
+  // Promote-to-Template inline subform
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const [promoteName, setPromoteName] = useState("");
+  const [promoteDesc, setPromoteDesc] = useState("");
+
+  useEffect(() => {
+    if (!open || !node) return;
+    const d = node.data;
+    setActiveTab("general");
+    setFeedback(null);
+    setPromoteOpen(false);
+
+    setLabel(d.label);
+    const fam = d.guestFamily ?? "linux";
+    setGuestFamily(fam);
+    setOsProfileId(
+      d.osProfileId ||
+        (fam === "linux" ? "alpine-linux" : fam)
+    );
+    setVcpus(d.vcpus ?? 2);
+    setMemoryMb(d.memoryMb ?? 512);
+    setDisplayMode(d.displayMode ?? "vnc");
+    setNotes(d.notes ?? "");
+    setPorts(d.ports.map((p) => ({ ...p })));
+
+    const matchedTpl = d.templateId
+      ? baseTemplates.find(
+          (t) => t.id === d.templateId || t.filename === d.templateId
+        )
+      : undefined;
+
+    if (matchedTpl) {
+      setStorageSource("template");
+      setTemplateId(matchedTpl.id);
+    } else if (d.bootMediaPath) {
+      setStorageSource("installer");
+      setTemplateId("");
+    } else if (baseTemplates.length > 0) {
+      setStorageSource("template");
+      setTemplateId(d.templateId || baseTemplates[0].id);
+    } else {
+      setStorageSource("installer");
+      setTemplateId("");
+    }
+
+    setBootMediaPath(d.bootMediaPath ?? "");
+    setBootMediaBus(d.bootMediaBus ?? "auto");
+    setDiskSizeGb(d.diskSizeGb ?? 8);
+    setPromoteName(`${d.label} Golden Image`);
+    setPromoteDesc(`Installed ${fam.toUpperCase()} base image`);
+
+    if (d.kind === "vm") {
+      void listInstallerIsos()
+        .then(setDiscoveredIsos)
+        .catch(() => setDiscoveredIsos([]));
+      void resolveNodeDiskPath(bundlePath, flowNodeToWorkspaceNode(node))
+        .then(setDiskStatus)
+        .catch(() => setDiskStatus(null));
+    } else {
+      setDiskStatus(null);
+    }
+  }, [open, node, bundlePath, baseTemplates]);
+
+  if (!open || !node) return null;
+
+  const isVm = node.data.kind === "vm";
+  const isRunning =
+    node.data.status === "running" || node.data.status === "booting";
+
+  const handleSelectProfile = (profileId: string) => {
+    setOsProfileId(profileId);
+    const prof = osProfiles.find((p) => p.id === profileId);
+    if (prof) {
+      setGuestFamily(prof.guestFamily);
+      setVcpus(prof.defaultCpus);
+      setMemoryMb(prof.defaultRamMb);
+      setDiskSizeGb(prof.recommendedDiskGb);
+      // Relabel standard guest NICs accurately per OS profile
+      setPorts((prev) =>
+        prev.map((p, idx) => ({
+          ...p,
+          index: idx,
+          label: formatInterfaceLabel("vm", prof.guestFamily, idx),
+        }))
+      );
+    }
+  };
+
+  const handleAddPort = () => {
+    setPorts((prev) => {
+      const nextIdx = prev.length;
+      return [
+        ...prev,
+        {
+          id: `${node.id}-p${nextIdx}-${Date.now().toString(36).slice(-3)}`,
+          index: nextIdx,
+          label: formatInterfaceLabel(
+            node.data.kind,
+            isVm ? guestFamily : null,
+            nextIdx
+          ),
+          mac: generateQemuMac(),
+          ipLabel: null,
+          notes: null,
+        },
+      ];
+    });
+  };
+
+  const handleRemovePort = (portId: string) => {
+    if (ports.length <= 1) return;
+    setPorts((prev) =>
+      prev
+        .filter((p) => p.id !== portId)
+        .map((p, idx) => ({
+          ...p,
+          index: idx,
+          label: formatInterfaceLabel(
+            node.data.kind,
+            isVm ? guestFamily : null,
+            idx
+          ),
+        }))
+    );
+  };
+
+  const handleUpdatePort = (portId: string, patch: Partial<NodePort>) => {
+    setPorts((prev) =>
+      prev.map((p) => (p.id === portId ? { ...p, ...patch } : p))
+    );
+  };
+
+  const handleBrowseInstaller = async () => {
+    const chosen = await pickInstallerImageDialog(isosDir);
+    if (chosen) {
+      setBootMediaPath(chosen);
+      setStorageSource("installer");
+    }
+  };
+
+  const handleResetDisk = async () => {
+    if (!diskStatus) return;
+    setBusyMessage("Resetting node disk…");
+    setFeedback(null);
+    try {
+      if (storageSource === "template" && templateId) {
+        await resetNodeOverlayDisk(diskStatus.diskPath, templateId);
+      } else {
+        await createBlankVmDisk(diskStatus.diskPath, diskSizeGb);
+      }
+      const updated = await resolveNodeDiskPath(
+        bundlePath,
+        flowNodeToWorkspaceNode(node)
+      );
+      setDiskStatus(updated);
+      setFeedback({
+        kind: "ok",
+        text: "Node disk wiped and reset cleanly.",
+      });
+    } catch (err) {
+      setFeedback({
+        kind: "error",
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusyMessage(null);
+    }
+  };
+
+  const handlePromoteToTemplate = async () => {
+    if (!diskStatus?.exists) {
+      setFeedback({
+        kind: "error",
+        text: "Boot and install an OS onto this node's disk first before saving as a template.",
+      });
+      return;
+    }
+    if (!promoteName.trim()) {
+      setFeedback({
+        kind: "error",
+        text: "Enter a name for the reusable Base Template.",
+      });
+      return;
+    }
+
+    setBusyMessage("Promoting installed disk to Read-Only Golden Template…");
+    setFeedback(null);
+    try {
+      const created = await promoteDiskToTemplate({
+        sourceDiskPath: diskStatus.diskPath,
+        templateName: promoteName.trim(),
+        osProfileId,
+        description: promoteDesc.trim() || null,
+      });
+      await onTemplatesChanged();
+      setStorageSource("template");
+      setTemplateId(created.id);
+      setBootMediaPath("");
+      setPromoteOpen(false);
+      setFeedback({
+        kind: "ok",
+        text: `Saved reusable template "${created.name}" (${created.filename}) in templates/!`,
+      });
+    } catch (err) {
+      setFeedback({
+        kind: "error",
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusyMessage(null);
+    }
+  };
+
+  const handleSave = () => {
+    const cleanName = label.trim() || node.data.label;
+    if (isVm) {
+      onSaveNode(node.id, {
+        label: cleanName,
+        guestFamily,
+        osProfileId,
+        vcpus: Math.max(1, vcpus),
+        memoryMb: Math.max(128, memoryMb),
+        displayMode,
+        notes: notes.trim() || null,
+        ports,
+        templateId:
+          storageSource === "template" && templateId.trim()
+            ? templateId.trim()
+            : null,
+        bootMediaPath:
+          storageSource === "installer" && bootMediaPath.trim()
+            ? bootMediaPath.trim()
+            : bootMediaPath.trim() || null,
+        bootMediaBus,
+        diskSizeGb: Math.max(1, diskSizeGb),
+      });
+    } else {
+      // Ensure switch / hub port IDs stay `{node.id}-p{idx}` so PacketFabric maps 1:1
+      const normalizedSwitchPorts: NodePort[] = ports.map((p, idx) => ({
+        ...p,
+        id: `${node.id}-p${idx}`,
+        index: idx,
+        label: `p${idx + 1}`,
+      }));
+      onSaveNode(node.id, {
+        label: cleanName,
+        notes: notes.trim() || null,
+        ports: normalizedSwitchPorts,
+      });
+    }
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[88vh] rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+              {isVm ? (
+                <Cpu className="w-4 h-4" />
+              ) : (
+                <Network className="w-4 h-4" />
+              )}
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
+                Configure {isVm ? "Virtual Machine" : "Fabric Device"} —{" "}
+                <span className="font-mono text-sky-600 dark:text-sky-400">
+                  {node.data.label}
+                </span>
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                Node ID: <code className="font-mono">{node.id}</code>
+                {isRunning &&
+                  " • Stop VM before changing hardware or disk attachments"}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="px-5 pt-2 border-b border-slate-200 dark:border-zinc-800 flex items-center gap-1 bg-slate-50/70 dark:bg-zinc-950/40">
+          {(
+            [
+              { id: "general", label: "General & Compute", icon: Cpu },
+              {
+                id: "interfaces",
+                label: `Network Interfaces (${ports.length})`,
+                icon: Network,
+              },
+              ...(isVm
+                ? [
+                    {
+                      id: "storage" as const,
+                      label: "Storage & OS Installer",
+                      icon: HardDrive,
+                    },
+                  ]
+                : []),
+            ] as const
+          ).map(({ id, label: tabLabel, icon: TabIcon }) => {
+            const active = activeTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveTab(id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                  active
+                    ? "border-sky-500 text-sky-600 dark:text-sky-400"
+                    : "border-transparent text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                }`}
+              >
+                <TabIcon className="w-3.5 h-3.5" />
+                <span>{tabLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Modal Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {feedback && (
+            <div
+              className={`rounded-lg px-3.5 py-2.5 text-xs border flex items-center gap-2 ${
+                feedback.kind === "ok"
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                  : "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300"
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{feedback.text}</span>
+            </div>
+          )}
+
+          {activeTab === "general" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                    Hostname / Label
+                  </span>
+                  <input
+                    type="text"
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    placeholder="fw1"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                  />
+                </label>
+
+                {isVm && (
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                      Guest OS Family &amp; NIC Naming
+                    </span>
+                    <select
+                      value={osProfileId}
+                      disabled={isRunning}
+                      onChange={(e) => handleSelectProfile(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100"
+                    >
+                      {osProfiles.map((prof) => (
+                        <option key={prof.id} value={prof.id}>
+                          {prof.name} ({prof.nicNamingPattern})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+
+              {isVm && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                        vCPU Cores (-smp)
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={16}
+                        disabled={isRunning}
+                        value={vcpus}
+                        onChange={(e) =>
+                          setVcpus(Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                      />
+                    </label>
+
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                        Memory MB (-m)
+                      </span>
+                      <input
+                        type="number"
+                        min={128}
+                        max={16384}
+                        step={128}
+                        disabled={isRunning}
+                        value={memoryMb}
+                        onChange={(e) =>
+                          setMemoryMb(
+                            Math.max(128, Number(e.target.value) || 256)
+                          )
+                        }
+                        className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                      />
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {[256, 512, 1024, 2048, 4096].map((mb) => (
+                          <button
+                            key={mb}
+                            type="button"
+                            disabled={isRunning}
+                            onClick={() => setMemoryMb(mb)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                              memoryMb === mb
+                                ? "bg-sky-500/15 border-sky-500/40 text-sky-700 dark:text-sky-300"
+                                : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400"
+                            }`}
+                          >
+                            {mb} MB
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Graphical UEFI Display Mode */}
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                      UEFI Graphical Display Mode (-device ramfb)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        disabled={isRunning}
+                        onClick={() => setDisplayMode("vnc")}
+                        className={`text-left p-3 rounded-xl border transition-all ${
+                          displayMode === "vnc"
+                            ? "border-sky-500 bg-sky-500/10"
+                            : "border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800/50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                          <Monitor className="w-3.5 h-3.5 text-sky-500" />
+                          <span>Headless + Embedded VNC</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">
+                          Streams UEFI framebuffer inside Etherloom&apos;s dock
+                          without opening extra macOS windows.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isRunning}
+                        onClick={() => setDisplayMode("cocoa")}
+                        className={`text-left p-3 rounded-xl border transition-all ${
+                          displayMode === "cocoa"
+                            ? "border-sky-500 bg-sky-500/10"
+                            : "border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800/50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                          <Monitor className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Native macOS Cocoa Window</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">
+                          Launches QEMU&apos;s native Metal/Cocoa window
+                          (-display cocoa) alongside serial console.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                  Role / Topology Notes (Optional)
+                </span>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. AS65001 Edge pf + bgpd router"
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-zinc-100"
+                />
+              </label>
+            </div>
+          )}
+
+          {activeTab === "interfaces" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-slate-600 dark:text-zinc-400">
+                  {isVm
+                    ? "Add/remove virtio-net-pci NICs, customize MACs, and attach IP helper badges shown directly on the canvas."
+                    : "Configure switch/hub port count and optional VLAN/segment labels."}
+                </p>
+                <button
+                  type="button"
+                  disabled={isRunning}
+                  onClick={handleAddPort}
+                  className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-xs font-medium"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isVm ? "Add NIC" : "Add Port"}</span>
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {ports.map((port) => (
+                  <div
+                    key={port.id}
+                    className="p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
+                  >
+                    <div className="sm:col-span-2 flex items-center gap-1.5">
+                      <span className="px-2 py-1 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 font-mono text-xs font-semibold">
+                        {port.label}
+                      </span>
+                    </div>
+
+                    <div className="sm:col-span-4 flex items-center gap-1">
+                      <input
+                        type="text"
+                        disabled={isRunning}
+                        value={port.mac}
+                        onChange={(e) =>
+                          handleUpdatePort(port.id, { mac: e.target.value })
+                        }
+                        title="MAC Address"
+                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      />
+                      <button
+                        type="button"
+                        disabled={isRunning}
+                        title="Regenerate random 52:54:00 MAC"
+                        onClick={() =>
+                          handleUpdatePort(port.id, { mac: generateQemuMac() })
+                        }
+                        className="p-1.5 rounded-md border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <div className="sm:col-span-3">
+                      <input
+                        type="text"
+                        value={port.ipLabel ?? ""}
+                        onChange={(e) =>
+                          handleUpdatePort(port.id, {
+                            ipLabel: e.target.value || null,
+                          })
+                        }
+                        placeholder="IP badge (e.g. 10.0.1.1/24)"
+                        className="w-full px-2 py-1 text-xs font-mono rounded-md bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <input
+                        type="text"
+                        value={port.notes ?? ""}
+                        onChange={(e) =>
+                          handleUpdatePort(port.id, {
+                            notes: e.target.value || null,
+                          })
+                        }
+                        placeholder="Notes"
+                        className="w-full px-2 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        disabled={isRunning || ports.length <= 1}
+                        onClick={() => handleRemovePort(port.id)}
+                        title="Remove interface"
+                        className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-500/10 disabled:opacity-30"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "storage" && isVm && (
+            <div className="space-y-4">
+              {/* Provisioning Source Selector */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  disabled={isRunning}
+                  onClick={() => setStorageSource("template")}
+                  className={`p-3 rounded-xl border text-left transition-all ${
+                    storageSource === "template"
+                      ? "border-sky-500 bg-sky-500/10"
+                      : "border-slate-200 dark:border-zinc-800"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                    <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Read-Only Base Template</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">
+                    Instant Copy-on-Write qcow2 overlay backed by a Golden
+                    Image.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isRunning}
+                  onClick={() => setStorageSource("installer")}
+                  className={`p-3 rounded-xl border text-left transition-all ${
+                    storageSource === "installer"
+                      ? "border-sky-500 bg-sky-500/10"
+                      : "border-slate-200 dark:border-zinc-800"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900 dark:text-zinc-100">
+                    <Disc className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Install OS from .iso / .img</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-zinc-400">
+                    Boot official OpenBSD, FreeBSD, NetBSD, or Linux media onto
+                    a blank disk.
+                  </p>
+                </button>
+              </div>
+
+              {storageSource === "template" ? (
+                <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5">
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                      Select Registered Base Template
+                    </span>
+                    {baseTemplates.length === 0 ? (
+                      <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg p-2.5">
+                        No Base Templates saved in{" "}
+                        <code className="font-mono">templates/</code> yet.
+                        Switch to{" "}
+                        <strong>Install OS from .iso / .img</strong> to install
+                        your first guest, then click{" "}
+                        <strong>Save Installed Disk as Reusable Template</strong>{" "}
+                        below!
+                      </div>
+                    ) : (
+                      <select
+                        value={templateId}
+                        disabled={isRunning}
+                        onChange={(e) => setTemplateId(e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      >
+                        <option value="">-- Choose a Base Template --</option>
+                        {baseTemplates.map((tpl) => (
+                          <option key={tpl.id} value={tpl.id}>
+                            {tpl.name} ({tpl.filename} •{" "}
+                            {formatByteSize(tpl.actualSizeBytes)})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </label>
+                </div>
+              ) : (
+                <div className="space-y-3 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                      Installer Media (.iso or .img, e.g. install76.img)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        disabled={isRunning}
+                        value={bootMediaPath}
+                        onChange={(e) => setBootMediaPath(e.target.value)}
+                        placeholder="/path/to/install76.img or FreeBSD-arm64.iso"
+                        className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      />
+                      <button
+                        type="button"
+                        disabled={isRunning}
+                        onClick={() => void handleBrowseInstaller()}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span>Browse…</span>
+                      </button>
+                      {bootMediaPath && (
+                        <button
+                          type="button"
+                          disabled={isRunning}
+                          onClick={() => setBootMediaPath("")}
+                          title="Eject installer media"
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-xs text-slate-600 dark:text-zinc-300 hover:bg-slate-200/60"
+                        >
+                          Eject
+                        </button>
+                      )}
+                    </div>
+
+                    {discoveredIsos.length > 0 && (
+                      <div className="pt-1">
+                        <select
+                          value=""
+                          disabled={isRunning}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              setBootMediaPath(e.target.value);
+                            }
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-300"
+                        >
+                          <option value="">
+                            Quick-select from Library isos/ (
+                            {discoveredIsos.length} found)…
+                          </option>
+                          {discoveredIsos.map((iso) => (
+                            <option key={iso.path} value={iso.path}>
+                              {iso.filename} ({formatByteSize(iso.sizeBytes)})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                        Boot Media Attachment Bus
+                      </span>
+                      <select
+                        value={bootMediaBus}
+                        disabled={isRunning}
+                        onChange={(e) =>
+                          setBootMediaBus(e.target.value as BootMediaBus)
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      >
+                        <option value="auto">
+                          Auto (USB for .img, SCSI CD for .iso)
+                        </option>
+                        <option value="usb">
+                          USB Storage (Best for OpenBSD .img)
+                        </option>
+                        <option value="cdrom">
+                          Virtio-SCSI CD-ROM (Best for .iso)
+                        </option>
+                      </select>
+                    </label>
+
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                        Blank Virtual Disk Size (GB)
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={256}
+                        disabled={isRunning}
+                        value={diskSizeGb}
+                        onChange={(e) =>
+                          setDiskSizeGb(Math.max(1, Number(e.target.value) || 8))
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Node Disk Status + Wipe & Promote-to-Template Actions */}
+              <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
+                      Node Virtual Disk (.qcow2)
+                    </div>
+                    <p className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 truncate">
+                      {diskStatus?.diskPath ?? "overlays/" + node.id + ".qcow2"}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 text-[10px] font-mono px-2 py-0.5 rounded-full ${
+                      diskStatus?.exists
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                        : "bg-slate-200/70 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
+                    }`}
+                  >
+                    {diskStatus?.exists
+                      ? `Provisioned (${formatByteSize(diskStatus.sizeBytes)})`
+                      : "Created on Boot"}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isRunning || Boolean(busyMessage) || !diskStatus?.exists}
+                    onClick={() => void handleResetDisk()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Wipe / Reset Node Disk</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isRunning || Boolean(busyMessage)}
+                    onClick={() => setPromoteOpen((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-medium shadow-2xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Save Installed Disk as Reusable Template</span>
+                  </button>
+                </div>
+
+                {promoteOpen && (
+                  <div className="p-3 rounded-lg bg-white dark:bg-zinc-900 border border-emerald-500/30 space-y-2.5">
+                    <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      Promote Shut-Down Disk to Read-Only Golden Template
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={promoteName}
+                        onChange={(e) => setPromoteName(e.target.value)}
+                        placeholder="Template Name (e.g. OpenBSD 7.6 Base)"
+                        className="px-2.5 py-1.5 text-xs rounded-md bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                      />
+                      <input
+                        type="text"
+                        value={promoteDesc}
+                        onChange={(e) => setPromoteDesc(e.target.value)}
+                        placeholder="Optional description"
+                        className="px-2.5 py-1.5 text-xs rounded-md bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPromoteOpen(false)}
+                        className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={Boolean(busyMessage)}
+                        onClick={() => void handlePromoteToTemplate()}
+                        className="px-3 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium"
+                      >
+                        {busyMessage ? "Promoting…" : "Create Golden Template"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="px-5 py-3 border-t border-slate-200 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-950/60 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onDeleteNode(node.id);
+              onClose();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-500/10 dark:text-rose-400 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Node</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200/70 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-sm"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Apply Configuration</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

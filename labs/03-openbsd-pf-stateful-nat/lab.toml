@@ -1,0 +1,126 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0)
+schema_version = 1
+id = "03-openbsd-pf-stateful-nat"
+number = 3
+title = "Stateful Firewalls & NAT with OpenBSD pf"
+subtitle = "Write an idiomatic /etc/pf.conf from scratch on an OpenBSD gateway: default-deny policy, NAT masquerading (nat-to), port forwarding (rdr-to), and wire-level SYN verification."
+difficulty = "Intermediate"
+estimated_minutes = 30
+tags = ["OpenBSD PF", "NAT", "Port Forwarding", "tcpflowy"]
+required_os_profiles = ["openbsd", "alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Bring Up LAN (192.168.10.0/24) & Simulated WAN (203.0.113.0/24)"
+summary = "Configure lan-host, OpenBSD pf-gw (vio0 + vio1 + ip.forwarding), and wan-srv (no RFC1918 route)."
+highlight_links = ["link-lan-pf", "link-pf-wan"]
+
+[[steps]]
+id = "step-2"
+title = "Author /etc/pf.conf: Default Block + Outbound NAT (nat-to)"
+summary = "Write a clean stateful ruleset with nat-to (vio1:0) so LAN hosts masquerade behind 203.0.113.1."
+highlight_links = ["link-pf-wan"]
+
+[[steps]]
+id = "step-3"
+title = "Add Inbound Port Forwarding (rdr-to) & Test Blocked vs. Passed SYNs"
+summary = "Forward WAN TCP 8080 -> 192.168.10.10:8080 while rejecting unauthorized WAN ports."
+highlight_links = ["link-lan-pf", "link-pf-wan"]
+
+[[steps]]
+id = "step-4"
+title = "Compare LAN vs. WAN Captures in tcpflowy & Inspect pfctl -ss"
+summary = "Verify address translation (192.168.10.10 -> 203.0.113.1) and RESET/UNANSWERED blocked SYNs."
+highlight_links = ["link-lan-pf", "link-pf-wan"]
+
+[topology]
+schema_version = 1
+name = "Lab 03 — Stateful Firewalls & NAT with OpenBSD pf"
+notes = "Academy Sandbox: Private RFC1918 LAN behind OpenBSD pf gateway facing 203.0.113.0/24 WAN"
+
+[[topology.nodes]]
+id = "node-lan-host"
+name = "lan-host"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Private LAN client & internal :8080 service"
+position = { x = 70.0, y = 175.0 }
+
+[[topology.nodes.ports]]
+id = "node-lan-host-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:30:10:10"
+ip_label = "192.168.10.10/24"
+
+[[topology.nodes]]
+id = "node-pf-gw"
+name = "pf-gw"
+kind = "vm"
+guest_family = "openbsd"
+os_profile_id = "openbsd"
+disk_size_gb = 8
+vcpus = 2
+memory_mb = 512
+display_mode = "vnc"
+notes = "OpenBSD Packet Filter (pf) NAT & firewall"
+position = { x = 395.0, y = 165.0 }
+
+[[topology.nodes.ports]]
+id = "node-pf-gw-p0"
+index = 0
+label = "vio0"
+mac = "52:54:00:30:10:01"
+ip_label = "192.168.10.1/24"
+
+[[topology.nodes.ports]]
+id = "node-pf-gw-p1"
+index = 1
+label = "vio1"
+mac = "52:54:00:30:20:01"
+ip_label = "203.0.113.1/24"
+
+[[topology.nodes]]
+id = "node-wan-srv"
+name = "wan-srv"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Public TEST-NET-3 server (no route to 192.168.10.0/24!)"
+position = { x = 725.0, y = 175.0 }
+
+[[topology.nodes.ports]]
+id = "node-wan-srv-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:30:20:80"
+ip_label = "203.0.113.80/24"
+
+[[topology.links]]
+id = "link-lan-pf"
+source_node = "node-lan-host"
+source_port = "node-lan-host-p0"
+target_node = "node-pf-gw"
+target_port = "node-pf-gw-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Private LAN (192.168.10.0/24)"
+
+[[topology.links]]
+id = "link-pf-wan"
+source_node = "node-pf-gw"
+source_port = "node-pf-gw-p1"
+target_node = "node-wan-srv"
+target_port = "node-wan-srv-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Public WAN (203.0.113.0/24)"

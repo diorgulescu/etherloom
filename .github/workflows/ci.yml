@@ -1,0 +1,78 @@
+name: CI — Tests & Verification
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts-lint:
+    name: Shell Scripts Verification (macOS)
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify executable permissions & Bash syntax
+        run: |
+          test -x scripts/prepare_library.sh
+          test -x scripts/prepare-library.sh
+          test -x scripts/smoke-test-wire.sh
+          bash -n scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh
+          ./scripts/prepare_library.sh --help >/dev/null
+          ./scripts/smoke-test-wire.sh --help >/dev/null
+
+      - name: Run ShellCheck (error severity)
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            brew install shellcheck
+          fi
+          shellcheck --severity=error scripts/prepare_library.sh scripts/prepare-library.sh scripts/smoke-test-wire.sh
+
+  frontend-build:
+    name: Frontend TypeScript & Vite Build
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Typecheck & build production frontend
+        run: npm run build
+
+  rust-backend-tests:
+    name: Rust Backend Engine & PacketFabric Tests (macOS)
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install QEMU tools (qemu-img & edk2 firmware)
+        run: brew install qemu
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry & target directory
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Check all Rust targets
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Run Rust unit & integration tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture

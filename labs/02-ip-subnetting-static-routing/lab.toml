@@ -1,0 +1,126 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0)
+schema_version = 1
+id = "02-ip-subnetting-static-routing"
+number = 2
+title = "IP Subnetting & Static Routing From Scratch"
+subtitle = "Bridge two isolated /24 subnets by turning a dual-homed host into an IPv4 router, and verify MAC rewrites & TTL decrements on the wire."
+difficulty = "Beginner"
+estimated_minutes = 25
+tags = ["Routing", "IPv4 Subnets", "ICMP/TTL", "Linux"]
+required_os_profiles = ["alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Configure Isolated Subnets 10.10.1.0/24 & 10.10.2.0/24"
+summary = "Assign IPv4 addresses on host-a, rtr-1 (eth0 & eth1), and host-b, and observe Network Unreachable."
+highlight_links = ["link-lan1", "link-lan2"]
+
+[[steps]]
+id = "step-2"
+title = "Add Static Routes & Diagnose Missing IP Forwarding"
+summary = "Point host-a at 10.10.1.1, capture link-lan1 vs link-lan2, and see why rtr-1 silently drops transit packets."
+highlight_links = ["link-lan1", "link-lan2"]
+
+[[steps]]
+id = "step-3"
+title = "Enable Kernel IPv4 Forwarding & Symmetric Return Routes"
+summary = "Enable net.ipv4.ip_forward=1 on rtr-1 and add the return route on host-b."
+highlight_links = ["link-lan2"]
+
+[[steps]]
+id = "step-4"
+title = "Inspect L2 MAC Rewrite, TTL Decrement & TCP Flow Across Subnets"
+summary = "Trigger ICMP Time Exceeded (TTL=1) and dissect an end-to-end routed HTTP request in tcpflowy."
+highlight_links = ["link-lan1", "link-lan2"]
+
+[topology]
+schema_version = 1
+name = "Lab 02 — IP Subnetting & Static Routing"
+notes = "Academy Sandbox: Two isolated /24 subnets joined by dual-homed router rtr-1"
+
+[[topology.nodes]]
+id = "node-host-a"
+name = "host-a"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Subnet A client (10.10.1.10/24)"
+position = { x = 70.0, y = 175.0 }
+
+[[topology.nodes.ports]]
+id = "node-host-a-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:20:01:10"
+ip_label = "10.10.1.10/24"
+
+[[topology.nodes]]
+id = "node-rtr1"
+name = "rtr-1"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Dual-homed IPv4 router (ip_forward)"
+position = { x = 395.0, y = 165.0 }
+
+[[topology.nodes.ports]]
+id = "node-rtr1-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:20:01:01"
+ip_label = "10.10.1.1/24"
+
+[[topology.nodes.ports]]
+id = "node-rtr1-p1"
+index = 1
+label = "eth1"
+mac = "52:54:00:20:02:01"
+ip_label = "10.10.2.1/24"
+
+[[topology.nodes]]
+id = "node-host-b"
+name = "host-b"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Subnet B server (10.10.2.20/24)"
+position = { x = 720.0, y = 175.0 }
+
+[[topology.nodes.ports]]
+id = "node-host-b-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:20:02:20"
+ip_label = "10.10.2.20/24"
+
+[[topology.links]]
+id = "link-lan1"
+source_node = "node-host-a"
+source_port = "node-host-a-p0"
+target_node = "node-rtr1"
+target_port = "node-rtr1-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Subnet A: 10.10.1.0/24"
+
+[[topology.links]]
+id = "link-lan2"
+source_node = "node-rtr1"
+source_port = "node-rtr1-p1"
+target_node = "node-host-b"
+target_port = "node-host-b-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Subnet B: 10.10.2.0/24"

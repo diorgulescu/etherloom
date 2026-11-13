@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Etherloom — Zero-Root macOS Network Orchestration &amp; Packet Studio</title>
+    <meta
+      name="description"
+      content="Open-source (GNU GPLv3) macOS network orchestration and packet-inspection studio powered by QEMU + Apple Hypervisor.framework, Wireshark FIFO wiretaps, and tcpflowy visual TCP flow dissection."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container nav-inner">
+        <a href="#" class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="4.5" r="2.5" />
+              <circle cx="5" cy="19.5" r="2.5" />
+              <circle cx="19" cy="19.5" r="2.5" />
+              <path d="M10.8 6.7 6.2 17.3M13.2 6.7l4.6 10.6M7.5 19.5h9" />
+            </svg>
+          </span>
+          <span>Etherloom</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary">
+          <a href="#architecture">Architecture</a>
+          <a href="#guests-scripts">BSD/Linux Library</a>
+          <a href="#tcpflowy">Wiretaps &amp; tcpflowy</a>
+          <a href="#academy">Guided Labs</a>
+          <a href="#credits">Credits &amp; GPLv3</a>
+        </nav>
+
+        <div class="nav-actions">
+          <button type="button" class="btn" id="theme-toggle" aria-label="Toggle color theme">
+            Theme
+          </button>
+          <a class="btn btn-primary" href="https://github.com/diorgulescu/etherloom" target="_blank" rel="noopener noreferrer">
+            GitHub Repository
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- HERO -->
+      <section class="hero" style="border-top: none">
+        <div class="badge-row">
+          <span class="pill pill-emerald">100% Userspace • Zero Root / No sudo</span>
+          <span class="pill pill-sky">macOS Apple Silicon (aarch64) &amp; Intel • QEMU HVF</span>
+          <span class="pill pill-indigo">GNU GPLv3 Open Source</span>
+        </div>
+
+        <h1>
+          Real BSD &amp; Linux Networks on macOS.<br />
+          <span class="gradient-text">Every Wire Tappable. Zero Root Required.</span>
+        </h1>
+
+        <p class="hero-lead">
+          <strong>Etherloom</strong> is a native macOS network orchestration and learning studio built with
+          <strong>Tauri v2 (Rust + Tokio)</strong> and <strong>React 19</strong>. Boot hardware-accelerated
+          <strong>Alpine Linux</strong>, <strong>OpenBSD</strong>, <strong>FreeBSD</strong>, and
+          <strong>NetBSD</strong> topologies via Apple’s <code>Hypervisor.framework</code>, inject live packet loss
+          and latency, stream virtual cables into <strong>Wireshark</strong>, and visually dissect TCP flows inside the
+          app with <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><code>tcpflowy</code></a>.
+        </p>
+
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="https://github.com/diorgulescu/etherloom/releases" target="_blank" rel="noopener noreferrer">
+            Download for macOS (.dmg)
+          </a>
+          <a class="btn" href="#quickstart">Quickstart &amp; Image Scripts</a>
+          <a class="btn" href="https://github.com/diorgulescu/etherloom/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">
+            Read ARCHITECTURE.md
+          </a>
+        </div>
+
+        <!-- Architecture & Live Canvas Diagram -->
+        <div class="studio-preview" role="img" aria-label="Etherloom Zero-Root Packet Fabric Diagram">
+          <div class="window-bar">
+            <div class="traffic-lights">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-amber"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <span>Etherloom Studio — Campus Dual-Stack Lab (Zero-Root UDP PacketFabric)</span>
+            <span>HVF • Ready</span>
+          </div>
+          <div class="diagram-wrap">
+            <svg viewBox="0 0 980 310" width="100%" style="min-width: 720px; display: block">
+              <defs>
+                <linearGradient id="wireGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#38bdf8" />
+                  <stop offset="100%" stop-color="#818cf8" />
+                </linearGradient>
+              </defs>
+
+              <!-- Wires -->
+              <path d="M 235 120 C 300 120, 315 120, 370 120" stroke="url(#wireGrad)" stroke-width="3" fill="none" stroke-dasharray="7 5" />
+              <path d="M 575 95 C 650 95, 665 65, 735 65" stroke="#34d399" stroke-width="2.5" fill="none" />
+              <path d="M 575 145 C 650 145, 665 175, 735 175" stroke="#38bdf8" stroke-width="2.5" fill="none" />
+
+              <!-- Tap drop line -->
+              <path d="M 302 120 L 302 232 L 370 232" stroke="#f59e0b" stroke-width="2" fill="none" stroke-dasharray="4 4" />
+              <circle cx="302" cy="120" r="5" fill="#f59e0b" />
+
+              <!-- Node 1: OpenBSD fw1 -->
+              <rect x="35" y="72" width="200" height="96" rx="12" fill="#131c2e" stroke="#38bdf8" stroke-width="1.5" />
+              <circle cx="56" cy="96" r="5" fill="#34d399" />
+              <text x="70" y="100" fill="#f1f5f9" font-size="13" font-weight="700" font-family="SF Mono, monospace">fw1 • OpenBSD</text>
+              <text x="52" y="124" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">pf + CARP • 512 MB HVF</text>
+              <text x="52" y="146" fill="#38bdf8" font-size="11" font-family="SF Mono, monospace">vio0: 10.0.1.1/24</text>
+
+              <!-- Center: PacketFabric + L2 Switch -->
+              <rect x="370" y="56" width="205" height="126" rx="14" fill="#152238" stroke="#818cf8" stroke-width="1.6" />
+              <text x="390" y="83" fill="#c7d2fe" font-size="12" font-weight="700" font-family="SF Mono, monospace">Rust PacketFabric (UDP)</text>
+              <text x="390" y="106" fill="#f1f5f9" font-size="12" font-family="SF Mono, monospace">sw-core (802.1D L2)</text>
+              <text x="390" y="128" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• MAC Table Aging (300s)</text>
+              <text x="390" y="147" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• Loss / RTT / Jitter</text>
+              <text x="390" y="166" fill="#34d399" font-size="11" font-family="SF Mono, monospace">• Raw Ethernet II Frames</text>
+
+              <!-- Node 2: Alpine srv1 -->
+              <rect x="735" y="24" width="210" height="82" rx="12" fill="#131c2e" stroke="#34d399" stroke-width="1.4" />
+              <text x="753" y="50" fill="#f1f5f9" font-size="13" font-weight="700" font-family="SF Mono, monospace">srv1 • Alpine Linux</text>
+              <text x="753" y="71" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">256 MB HVF • CoW qcow2</text>
+              <text x="753" y="91" fill="#34d399" font-size="11" font-family="SF Mono, monospace">eth0: 10.0.1.10/24</text>
+
+              <!-- Node 3: FreeBSD bsd1 -->
+              <rect x="735" y="132" width="210" height="82" rx="12" fill="#131c2e" stroke="#38bdf8" stroke-width="1.4" />
+              <text x="753" y="158" fill="#f1f5f9" font-size="13" font-weight="700" font-family="SF Mono, monospace">bsd1 • FreeBSD</text>
+              <text x="753" y="179" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">512 MB HVF • UFS CoW</text>
+              <text x="753" y="199" fill="#38bdf8" font-size="11" font-family="SF Mono, monospace">vtnet0: 10.0.1.20/24</text>
+
+              <!-- Wiretap + tcpflowy + Wireshark -->
+              <rect x="370" y="204" width="575" height="82" rx="12" fill="#1b1829" stroke="#f59e0b" stroke-width="1.4" />
+              <text x="390" y="230" fill="#fbbf24" font-size="12" font-weight="700" font-family="SF Mono, monospace">Zero-Copy Wiretap Engine (pcap_tap.rs + tcpflowy_bridge.rs)</text>
+              <text x="390" y="252" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">1) Live FIFO -&gt; Wireshark.app (-k -i /tmp/etherloom/tap_link.pcap)</text>
+              <text x="390" y="271" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">2) .pcap Recorder -&gt; In-App tcpflowy Packet Ladder, Stream Hex/ASCII &amp; Suricata Rules</text>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- ARCHITECTURE -->
+      <section id="architecture">
+        <div class="section-header">
+          <div class="section-eyebrow">System Design</div>
+          <h2>Zero-Root macOS Virtualization Architecture</h2>
+          <p>
+            Every QEMU process, virtual switch, serial console, and packet capture runs strictly under your unprivileged macOS user account — no <code>sudo</code>, no <code>chmod /dev/bpf*</code>, and no kernel extensions.
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <h3>UDP Datagram PacketFabric</h3>
+            <p>
+              QEMU NICs attach via <code>-netdev socket,udp=127.0.0.1:...</code> transmitting raw IEEE 802.3 Ethernet II frames per UDP datagram (no 4-byte TCP length prefix). Tokio routes frames across point-to-point wires, IEEE 802.1D learning L2 Switches, and L1 Hubs while enforcing live latency, jitter, loss, and cable-cut impairments.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Dual Serial + UEFI VNC Consoles</h3>
+            <p>
+              Every ARM64 VM boots with Homebrew’s <code>edk2-aarch64-code.fd</code> UEFI firmware and exposes both an unbuffered PL011 Unix serial console (rendered in <code>@xterm/xterm</code> for <code>pfctl</code>, <code>tmux</code>, and <code>vi</code>) and an embedded <code>ramfb</code> graphical screen via <code>@novnc/novnc</code>.
+            </p>
+          </div>
+          <div class="card">
+            <h3>External SSD Resilience (<code>/Volumes</code>)</h3>
+            <p>
+              Keep multi-gigabyte ISOs, read-only Golden Templates, and project overlays on Thunderbolt/USB-C drives (APFS or ExFAT) while sockets, FIFOs, and Python symlinks stay safely on local storage. Includes a <code>st_dev</code> mount guard and automatic <code>qemu-img rebase -u</code> portability.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SUPPORTED GUESTS & HELPER SCRIPTS -->
+      <section id="guests-scripts">
+        <div class="section-header">
+          <div class="section-eyebrow">First-Class BSD &amp; Linux Citizens</div>
+          <h2>Supported Guest Families &amp; One-Command Library Provisioning</h2>
+          <p>
+            Accurate VirtIO interface naming across all four major open-source UNIX families, backed by instant Copy-on-Write <code>qcow2</code> overlays and standalone CLI automation scripts in <code>scripts/</code>.
+          </p>
+        </div>
+
+        <div class="table-wrap" style="margin-bottom: 1.5rem">
+          <table>
+            <thead>
+              <tr>
+                <th>Guest Family</th>
+                <th>VirtIO NIC Naming</th>
+                <th>Default Profile</th>
+                <th>Automated Base Image Provisioning (<code>scripts/prepare_library.sh</code>)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Alpine / Generic Linux</strong></td>
+                <td><code>eth0</code>, <code>eth1</code>, …</td>
+                <td>1–2 vCPU • 256–512 MB</td>
+                <td>Downloads latest <code>nocloud_alpine-*-aarch64-uefi</code> <code>qcow2</code> + <code>alpine-virt</code> ISO</td>
+              </tr>
+              <tr>
+                <td><strong>OpenBSD</strong></td>
+                <td><code>vio0</code>, <code>vio1</code>, …</td>
+                <td>2 vCPU • 512 MB</td>
+                <td>Downloads &amp; SHA-256 verifies <code>installXX.img</code> + interactive HVF builder (<code>--setup-openbsd</code>)</td>
+              </tr>
+              <tr>
+                <td><strong>FreeBSD</strong></td>
+                <td><code>vtnet0</code>, <code>vtnet1</code>, …</td>
+                <td>2 vCPU • 512 MB</td>
+                <td>Downloads latest official <code>aarch64-ufs.qcow2.xz</code> &amp; expands sparse disk to 16 GB</td>
+              </tr>
+              <tr>
+                <td><strong>NetBSD</strong></td>
+                <td><code>vioif0</code>, <code>vioif1</code>, …</td>
+                <td>1–2 vCPU • 256 MB</td>
+                <td>Downloads <code>evbarm-aarch64/arm64.img.gz</code> &amp; converts to thin-provisioned 8 GB <code>qcow2</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="quickstart" class="grid-2">
+          <div class="code-card">
+            <div class="code-header">
+              <span>1. Provision ARM64 Golden Templates (Local or External SSD)</span>
+              <button class="copy-btn" data-copy="brew install qemu xz&#10;brew install --cask wireshark&#10;./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom&#10;./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd">Copy</button>
+            </div>
+            <pre><code>brew install qemu xz
+brew install --cask wireshark
+
+# Download &amp; lock read-only Alpine, FreeBSD, NetBSD &amp; OpenBSD kit
+./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom
+
+# Optional 2-minute HVF serial install for OpenBSD golden template
+./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd</code></pre>
+          </div>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>2. Run CLI Two-VM Wire Smoke Test or Launch Desktop Studio</span>
+              <button class="copy-btn" data-copy="./scripts/smoke-test-wire.sh /Volumes/Samsung_T7/Etherloom --node1 alpine --node2 freebsd&#10;npm install &amp;&amp; npm run tauri dev">Copy</button>
+            </div>
+            <pre><code># Boot Alpine &lt;-&gt; FreeBSD over UDP wire + live Wireshark + .pcap
+./scripts/smoke-test-wire.sh /Volumes/Samsung_T7/Etherloom \
+  --node1 alpine --node2 freebsd
+
+# Or launch the full Etherloom GUI Studio
+npm install
+npm run tauri dev</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- TCPFLOWY SHOWCASE -->
+      <section id="tcpflowy">
+        <div class="section-header">
+          <div class="section-eyebrow">Deep Packet &amp; Flow Visibility</div>
+          <h2>Live Wireshark Pipes &amp; Integrated <code>tcpflowy</code> Dissector</h2>
+          <p>
+            Stream live Ethernet II frames into <code>Wireshark.app</code> via named FIFOs, or click
+            <strong>Stop &amp; Dissect</strong> on any wire to inspect TCP handshakes, retransmissions, reconstructed streams, and behavioral SPLT telemetry powered by <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><code>tcpflowy</code></a>.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <div class="code-card">
+            <div class="code-header">
+              <span>In-App Packet Ladder Diagram (Lab 05 — 5% Packet Loss, 80ms RTT)</span>
+            </div>
+            <div>
+              <div class="ladder-row">
+                <span>+0.0 ms</span>
+                <span style="color: #38bdf8">10.0.0.1:51422 ──── [SYN] Seq=0 Win=64240 ───▶ 10.0.0.2:8080</span>
+                <span>74 B</span>
+              </div>
+              <div class="ladder-row">
+                <span>+80.4 ms</span>
+                <span style="color: #34d399">10.0.0.1:51422 ◀── [SYN, ACK] Seq=0 Ack=1 ──── 10.0.0.2:8080</span>
+                <span>74 B</span>
+              </div>
+              <div class="ladder-row">
+                <span>+80.9 ms</span>
+                <span style="color: #38bdf8">10.0.0.1:51422 ──── [ACK] Seq=1 Ack=1 ───────▶ 10.0.0.2:8080</span>
+                <span>66 B</span>
+              </div>
+              <div class="ladder-row">
+                <span>+81.5 ms</span>
+                <span style="color: #c7d2fe">10.0.0.1:51422 ── [PSH, ACK] GET / HTTP/1.1 ─▶ 10.0.0.2:8080</span>
+                <span>149 B</span>
+              </div>
+              <div class="ladder-row retrans">
+                <span>+286.1 ms</span>
+                <span>10.0.0.1:51422 ── [Retransmission] [PSH, ACK] ▶ 10.0.0.2:8080</span>
+                <span>149 B</span>
+              </div>
+              <div class="ladder-row">
+                <span>+366.8 ms</span>
+                <span style="color: #34d399">10.0.0.1:51422 ◀─ [PSH, ACK] HTTP/1.1 200 OK ─ 10.0.0.2:8080</span>
+                <span>512 B</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 1rem">
+            <div>
+              <h3>Managed Python Virtualenv Bridge</h3>
+              <p style="margin-bottom: 0.85rem">
+                Etherloom automatically provisions an isolated Python virtual environment in
+                <code>~/Library/Application Support/Etherloom/python-env/</code> (kept local so ExFAT external drives never fail on POSIX symlinks) and installs <code>tcpflowy</code> with one click.
+              </p>
+              <p>
+                Every dissected capture surfaces bidirectional <strong>ASCII &amp; Hex Stream Reconstruction</strong>,
+                <strong>SPLT burst-timing histograms</strong>, <strong>Shannon payload entropy</strong>, passive DNS maps, and copyable <strong>Suricata</strong>, <strong>Wireshark</strong>, and <strong>BPF</strong> detection rules.
+              </p>
+            </div>
+            <div>
+              <a class="btn" href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer">
+                Explore upstream tcpflowy →
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACADEMY -->
+      <section id="academy">
+        <div class="section-header">
+          <div class="section-eyebrow">Interactive Networking Academy</div>
+          <h2>Five Built-in Vendor-Neutral Guided Labs</h2>
+          <p>
+            Each lab instantiates a clean sandbox workspace (<code>academy-&lt;id&gt;.etherloom</code>), highlights target wires on the canvas, and pairs Markdown protocol diagrams with 1-click <strong>Send to Serial</strong> commands.
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <h3>01 • Hubs, Switches &amp; ARP</h3>
+            <p>Compare L1 Hub broadcast flooding against IEEE 802.1D L2 Switch MAC learning and inspect broadcast ARP requests vs. unicast ARP replies.</p>
+          </div>
+          <div class="card">
+            <h3>02 • Subnetting &amp; Static Routing</h3>
+            <p>Connect two <code>/24</code> subnets through a multi-homed Linux router, enable IPv4 forwarding, configure static routes, and verify TTL decrements.</p>
+          </div>
+          <div class="card">
+            <h3>03 • OpenBSD <code>pf</code> &amp; Stateful NAT</h3>
+            <p>Author a clean <code>/etc/pf.conf</code> with default-deny filtering and <code>nat-to</code> masquerading, then compare LAN vs. WAN captures in <code>tcpflowy</code>.</p>
+          </div>
+          <div class="card">
+            <h3>04 • OpenBSD <code>CARP</code> + <code>pfsync</code> HA</h3>
+            <p>Build an Active/Backup OpenBSD firewall cluster sharing a virtual IP (<code>vhid 1</code>) with live state synchronization and cut the primary wire mid-session.</p>
+          </div>
+          <div class="card">
+            <h3>05 • TCP Handshakes, Window &amp; Loss</h3>
+            <p>Run transfers across a pre-impaired WAN wire (<code>80 ms</code> latency, <code>5%</code> packet loss) to observe window scaling, fast retransmit, and RTO backoff.</p>
+          </div>
+          <div class="card">
+            <h3>Custom Declarative Labs</h3>
+            <p>Author new tutorials with just two plain-text files — <code>lab.toml</code> + <code>guide.md</code> — inside <code>labs/</code> or your external storage library.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CREDITS & GPLV3 -->
+      <section id="credits">
+        <div class="section-header">
+          <div class="section-eyebrow">Free Software &amp; Attributions</div>
+          <h2>GNU GPLv3 Compliance &amp; Upstream Credits</h2>
+          <p>
+            Etherloom is distributed under the <strong>GNU General Public License v3.0 or later (<code>GPL-3.0-or-later</code>)</strong> and proudly credits the open-source projects it builds upon and orchestrates:
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Core Engines &amp; Packet Analysis</h3>
+            <p>
+              • <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><strong>tcpflowy</strong></a> by Dragos Iorgulescu — TCP/UDP flow intelligence, SPLT signatures, entropy profiling, and rule synthesis.<br />
+              • <a href="https://www.qemu.org/" target="_blank" rel="noopener noreferrer"><strong>QEMU</strong></a> &amp; <strong>TianoCore EDK II</strong> — ARM64/x86_64 virtualization, <code>qemu-img</code> CoW overlays, and UEFI firmware.<br />
+              • <strong>Apple <code>Hypervisor.framework</code></strong> — Zero-root macOS hardware-accelerated VM execution.<br />
+              • <a href="https://www.wireshark.org/" target="_blank" rel="noopener noreferrer"><strong>Wireshark</strong></a> — Live named-pipe Ethernet frame inspection.
+            </p>
+          </div>
+
+          <div class="card">
+            <h3>Frameworks, UI Libraries &amp; Guest OSes</h3>
+            <p>
+              • <strong>Guest OS Projects</strong>: <a href="https://www.openbsd.org/" target="_blank" rel="noopener noreferrer">OpenBSD</a>, <a href="https://www.freebsd.org/" target="_blank" rel="noopener noreferrer">FreeBSD</a>, <a href="https://www.netbsd.org/" target="_blank" rel="noopener noreferrer">NetBSD</a>, and <a href="https://alpinelinux.org/" target="_blank" rel="noopener noreferrer">Alpine Linux</a>.<br />
+              • <strong>Rust &amp; Desktop Shell</strong>: <a href="https://tauri.app/" target="_blank" rel="noopener noreferrer">Tauri v2</a>, <a href="https://tokio.rs/" target="_blank" rel="noopener noreferrer">Tokio</a>, Serde, <code>toml</code>, <code>uuid</code>.<br />
+              • <strong>Frontend Studio</strong>: <a href="https://react.dev/" target="_blank" rel="noopener noreferrer">React 19</a>, <a href="https://reactflow.dev/" target="_blank" rel="noopener noreferrer"><code>@xyflow/react</code></a>, <a href="https://xtermjs.org/" target="_blank" rel="noopener noreferrer"><code>xterm.js</code></a>, <a href="https://novnc.com/" target="_blank" rel="noopener noreferrer"><code>noVNC</code></a> (MPL-2.0), Lucide, and TailwindCSS.<br />
+              • Full license notices: see <a href="https://github.com/diorgulescu/etherloom/blob/main/CREDITS.md" target="_blank" rel="noopener noreferrer">CREDITS.md</a> and <a href="https://github.com/diorgulescu/etherloom/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">LICENSE</a>.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container" style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem">
+        <div>
+          <strong>Etherloom</strong> — Zero-Root macOS Network Orchestration &amp; Learning Studio.<br />
+          Licensed under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0 (or later)</a>.
+        </div>
+        <div style="display: flex; gap: 1.25rem; align-items: center">
+          <a href="https://github.com/diorgulescu/etherloom">Source Code</a>
+          <a href="https://github.com/diorgulescu/etherloom/blob/main/ARCHITECTURE.md">Architecture</a>
+          <a href="https://github.com/diorgulescu/etherloom/blob/main/CREDITS.md">Credits</a>
+          <a href="https://github.com/diorgulescu/tcpflowy">tcpflowy</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var toggle = document.getElementById("theme-toggle");
+        var saved = localStorage.getItem("etherloom-docs-theme");
+        if (saved === "light" || saved === "dark") {
+          root.setAttribute("data-theme", saved);
+        }
+        if (toggle) {
+          toggle.addEventListener("click", function () {
+            var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+            root.setAttribute("data-theme", next);
+            localStorage.setItem("etherloom-docs-theme", next);
+          });
+        }
+
+        document.querySelectorAll("[data-copy]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var text = btn.getAttribute("data-copy") || "";
+            navigator.clipboard.writeText(text).then(function () {
+              var prev = btn.textContent;
+              btn.textContent = "Copied!";
+              setTimeout(function () {
+                btn.textContent = prev;
+              }, 1600);
+            });
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

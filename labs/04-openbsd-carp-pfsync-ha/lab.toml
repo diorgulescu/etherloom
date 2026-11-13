@@ -1,0 +1,274 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0)
+schema_version = 1
+id = "04-openbsd-carp-pfsync-ha"
+number = 4
+title = "High-Availability Failover with OpenBSD CARP + pfsync"
+subtitle = "Build an active/standby OpenBSD firewall cluster sharing virtual gateway IPs via CARP and replicating live pf TCP states over pfsync — then cut the master's cable mid-transfer!"
+difficulty = "Advanced"
+estimated_minutes = 35
+tags = ["OpenBSD PF", "CARP / HA", "pfsync", "Cable Cut", "tcpflowy"]
+required_os_profiles = ["openbsd", "alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Configure Physical Interfaces & pfsync State-Replication Link"
+summary = "Bring up vio0 (LAN), vio1 (WAN), and vio2 (pfsync 172.16.254.0/30) on fw-master and fw-backup."
+highlight_links = ["link-pfsync"]
+
+[[steps]]
+id = "step-2"
+title = "Configure CARP Virtual Gateways (carp0 & carp1) + Stateful pf"
+summary = "Create shared VIPs 10.20.1.1 (LAN) and 198.51.100.1 (WAN) with advskew election & carp.preempt=1."
+highlight_links = ["link-master-lan", "link-backup-lan"]
+
+[[steps]]
+id = "step-3"
+title = "Cut fw-master's Cable Mid-Stream & Witness Hitless Failover!"
+summary = "Record link-client-lan, start a multi-second TCP stream, and click Cut Cable on link-master-lan."
+highlight_links = ["link-client-lan", "link-master-lan"]
+
+[[steps]]
+id = "step-4"
+title = "Dissect the Failover Capture in tcpflowy"
+summary = "Verify that the active TCP connection survived the physical router failure without a TCP RST!"
+highlight_links = ["link-client-lan"]
+
+[topology]
+schema_version = 1
+name = "Lab 04 — High-Availability Failover (OpenBSD CARP + pfsync)"
+notes = "Academy Sandbox: Redundant OpenBSD firewall pair with CARP VIPs & dedicated pfsync crossover"
+
+[[topology.nodes]]
+id = "node-lan-client"
+name = "lan-client"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Default gateway = CARP VIP 10.20.1.1"
+position = { x = 40.0, y = 210.0 }
+
+[[topology.nodes.ports]]
+id = "node-lan-client-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:40:01:50"
+ip_label = "10.20.1.50/24"
+
+[[topology.nodes]]
+id = "node-sw-lan"
+name = "sw-lan"
+kind = "l2_switch"
+notes = "LAN switch (carries CARP multicast 224.0.0.18)"
+position = { x = 255.0, y = 195.0 }
+
+[[topology.nodes.ports]]
+id = "node-sw-lan-p0"
+index = 0
+label = "p1"
+mac = "02:e1:04:01:00:01"
+
+[[topology.nodes.ports]]
+id = "node-sw-lan-p1"
+index = 1
+label = "p2"
+mac = "02:e1:04:01:00:02"
+
+[[topology.nodes.ports]]
+id = "node-sw-lan-p2"
+index = 2
+label = "p3"
+mac = "02:e1:04:01:00:03"
+
+[[topology.nodes.ports]]
+id = "node-sw-lan-p3"
+index = 3
+label = "p4"
+mac = "02:e1:04:01:00:04"
+
+[[topology.nodes]]
+id = "node-fw-master"
+name = "fw-master"
+kind = "vm"
+guest_family = "openbsd"
+os_profile_id = "openbsd"
+disk_size_gb = 8
+vcpus = 2
+memory_mb = 512
+display_mode = "vnc"
+notes = "Primary OpenBSD router (advskew 10)"
+position = { x = 485.0, y = 55.0 }
+
+[[topology.nodes.ports]]
+id = "node-fw-master-p0"
+index = 0
+label = "vio0"
+mac = "52:54:00:40:01:02"
+ip_label = "10.20.1.2/24"
+
+[[topology.nodes.ports]]
+id = "node-fw-master-p1"
+index = 1
+label = "vio1"
+mac = "52:54:00:40:02:02"
+ip_label = "198.51.100.2/24"
+
+[[topology.nodes.ports]]
+id = "node-fw-master-p2"
+index = 2
+label = "vio2"
+mac = "52:54:00:40:fe:01"
+ip_label = "172.16.254.1/30"
+
+[[topology.nodes]]
+id = "node-fw-backup"
+name = "fw-backup"
+kind = "vm"
+guest_family = "openbsd"
+os_profile_id = "openbsd"
+disk_size_gb = 8
+vcpus = 2
+memory_mb = 512
+display_mode = "vnc"
+notes = "Standby OpenBSD router (advskew 100)"
+position = { x = 485.0, y = 345.0 }
+
+[[topology.nodes.ports]]
+id = "node-fw-backup-p0"
+index = 0
+label = "vio0"
+mac = "52:54:00:40:01:03"
+ip_label = "10.20.1.3/24"
+
+[[topology.nodes.ports]]
+id = "node-fw-backup-p1"
+index = 1
+label = "vio1"
+mac = "52:54:00:40:02:03"
+ip_label = "198.51.100.3/24"
+
+[[topology.nodes.ports]]
+id = "node-fw-backup-p2"
+index = 2
+label = "vio2"
+mac = "52:54:00:40:fe:02"
+ip_label = "172.16.254.2/30"
+
+[[topology.nodes]]
+id = "node-sw-wan"
+name = "sw-wan"
+kind = "l2_switch"
+notes = "WAN switch (VIP 198.51.100.1)"
+position = { x = 720.0, y = 195.0 }
+
+[[topology.nodes.ports]]
+id = "node-sw-wan-p0"
+index = 0
+label = "p1"
+mac = "02:e1:04:02:00:01"
+
+[[topology.nodes.ports]]
+id = "node-sw-wan-p1"
+index = 1
+label = "p2"
+mac = "02:e1:04:02:00:02"
+
+[[topology.nodes.ports]]
+id = "node-sw-wan-p2"
+index = 2
+label = "p3"
+mac = "02:e1:04:02:00:03"
+
+[[topology.nodes.ports]]
+id = "node-sw-wan-p3"
+index = 3
+label = "p4"
+mac = "02:e1:04:02:00:04"
+
+[[topology.nodes]]
+id = "node-wan-srv"
+name = "wan-srv"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "WAN endpoint (gw = CARP VIP 198.51.100.1)"
+position = { x = 925.0, y = 210.0 }
+
+[[topology.nodes.ports]]
+id = "node-wan-srv-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:40:02:80"
+ip_label = "198.51.100.80/24"
+
+[[topology.links]]
+id = "link-client-lan"
+source_node = "node-lan-client"
+source_port = "node-lan-client-p0"
+target_node = "node-sw-lan"
+target_port = "node-sw-lan-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+
+[[topology.links]]
+id = "link-master-lan"
+source_node = "node-sw-lan"
+source_port = "node-sw-lan-p1"
+target_node = "node-fw-master"
+target_port = "node-fw-master-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Cut this cable in Step 3!"
+
+[[topology.links]]
+id = "link-backup-lan"
+source_node = "node-sw-lan"
+source_port = "node-sw-lan-p2"
+target_node = "node-fw-backup"
+target_port = "node-fw-backup-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+
+[[topology.links]]
+id = "link-pfsync"
+source_node = "node-fw-master"
+source_port = "node-fw-master-p2"
+target_node = "node-fw-backup"
+target_port = "node-fw-backup-p2"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+notes = "Dedicated pfsync state-replication link"
+
+[[topology.links]]
+id = "link-master-wan"
+source_node = "node-fw-master"
+source_port = "node-fw-master-p1"
+target_node = "node-sw-wan"
+target_port = "node-sw-wan-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+
+[[topology.links]]
+id = "link-backup-wan"
+source_node = "node-fw-backup"
+source_port = "node-fw-backup-p1"
+target_node = "node-sw-wan"
+target_port = "node-sw-wan-p1"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+
+[[topology.links]]
+id = "link-srv-wan"
+source_node = "node-sw-wan"
+source_port = "node-sw-wan-p2"
+target_node = "node-wan-srv"
+target_port = "node-wan-srv-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }

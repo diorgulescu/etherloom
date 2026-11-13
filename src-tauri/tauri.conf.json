@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Etherloom",
+  "version": "0.1.0",
+  "identifier": "io.etherloom.studio",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Etherloom — Network Orchestration Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1080,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Zero-root macOS network orchestration & packet-inspection studio",
+    "longDescription": "Open-source (GNU GPLv3) macOS network orchestration and learning studio powered by QEMU + Apple Hypervisor.framework with zero root requirements, Wireshark wiretaps, and tcpflowy visual TCP flow dissection.",
+    "copyright": "Copyright (C) 2026 Etherloom Contributors — Licensed under GNU GPLv3 (GPL-3.0-or-later)",
+    "licenseFile": "../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

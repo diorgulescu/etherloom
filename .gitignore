@@ -1,0 +1,41 @@
+# Node / Frontend dependencies & build outputs
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Rust / Tauri build artifacts & release bundles
+src-tauri/target/
+src-tauri/gen/schemas/
+release-artifacts-*/
+
+# macOS Finder, Spotlight & AppleDouble metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editor & IDE directories
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Runtime sockets, FIFOs, VM disk images & user workspace bundles
+*.sock
+*.fifo
+*.pcap
+*.pcapng
+*.qcow2
+*.iso
+*.img
+*.dmg
+*.etherloom/
+.staging/
+python-env/

@@ -1,0 +1,200 @@
+# Etherloom Guided Academy Lab Manifest (GPL-3.0)
+schema_version = 1
+id = "01-ethernet-hubs-switches-arp"
+number = 1
+title = "Ethernet, Hubs vs. Switches & ARP Under the Microscope"
+subtitle = "Compare shared-medium L1 Hubs against learning L2 Switches, capture ARP broadcasts, and watch 802.1D MAC tables populate live."
+difficulty = "Beginner"
+estimated_minutes = 20
+tags = ["L2/ARP", "Switching", "Hubs vs. Switches", "Wireshark"]
+required_os_profiles = ["alpine-linux"]
+
+[[steps]]
+id = "step-1"
+title = "Boot Host 1–3 & Assign Same-Subnet IPv4 Addresses"
+summary = "Bring up eth0 on h1 (10.0.1.1/24), h2 (10.0.1.2/24), and h3 (10.0.1.3/24)."
+highlight_links = ["link-h1-hub", "link-h2-hub", "link-h3-hub"]
+
+[[steps]]
+id = "step-2"
+title = "Tap Host 3's Hub Wire & Observe Shared-Medium Flooding"
+summary = "Record link-h3-hub while h1 pings h2 — witness unicast frames leaking onto h3's cable."
+highlight_links = ["link-h3-hub"]
+
+[[steps]]
+id = "step-3"
+title = "Re-Cable All 3 Hosts onto L2 Switch sw-1"
+summary = "Move h1, h2, and h3 from hub-1 to sw-1 ports p1–p3 and inspect the live MAC table."
+highlight_links = []
+
+[[steps]]
+id = "step-4"
+title = "Verify ARP Broadcast vs. Unicast Isolation & Dissect in tcpflowy"
+summary = "Flush ARP caches, capture on h3's switch port, and dissect a TCP stream on h1's wire."
+highlight_links = ["link-h1-hub"]
+
+[topology]
+schema_version = 1
+name = "Lab 01 — Ethernet, Hubs vs. Switches & ARP"
+notes = "Academy Sandbox: Move h1..h3 from hub-1 (L1 repeater) to sw-1 (L2 learning bridge)"
+
+[[topology.nodes]]
+id = "node-h1"
+name = "h1"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Sender host (10.0.1.1/24)"
+position = { x = 80.0, y = 45.0 }
+
+[[topology.nodes.ports]]
+id = "node-h1-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:10:01:01"
+ip_label = "10.0.1.1/24"
+
+[[topology.nodes]]
+id = "node-h2"
+name = "h2"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Target responder (10.0.1.2/24)"
+position = { x = 80.0, y = 215.0 }
+
+[[topology.nodes.ports]]
+id = "node-h2-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:10:01:02"
+ip_label = "10.0.1.2/24"
+
+[[topology.nodes]]
+id = "node-h3"
+name = "h3"
+kind = "vm"
+guest_family = "linux"
+os_profile_id = "alpine-linux"
+disk_size_gb = 4
+vcpus = 1
+memory_mb = 256
+display_mode = "vnc"
+notes = "Bystander observer (10.0.1.3/24)"
+position = { x = 80.0, y = 385.0 }
+
+[[topology.nodes.ports]]
+id = "node-h3-p0"
+index = 0
+label = "eth0"
+mac = "52:54:00:10:01:03"
+ip_label = "10.0.1.3/24"
+
+[[topology.nodes]]
+id = "node-hub1"
+name = "hub-1"
+kind = "l1_hub"
+notes = "Layer-1 multi-port repeater (floods every frame)"
+position = { x = 470.0, y = 85.0 }
+
+[[topology.nodes.ports]]
+id = "node-hub1-p0"
+index = 0
+label = "p1"
+mac = "02:e1:01:00:01:00"
+
+[[topology.nodes.ports]]
+id = "node-hub1-p1"
+index = 1
+label = "p2"
+mac = "02:e1:01:00:01:01"
+
+[[topology.nodes.ports]]
+id = "node-hub1-p2"
+index = 2
+label = "p3"
+mac = "02:e1:01:00:01:02"
+
+[[topology.nodes.ports]]
+id = "node-hub1-p3"
+index = 3
+label = "p4"
+mac = "02:e1:01:00:01:03"
+
+[[topology.nodes]]
+id = "node-sw1"
+name = "sw-1"
+kind = "l2_switch"
+notes = "Layer-2 IEEE 802.1D learning switch (hover MAC badge!)"
+position = { x = 470.0, y = 315.0 }
+
+[[topology.nodes.ports]]
+id = "node-sw1-p0"
+index = 0
+label = "p1"
+mac = "02:e1:01:00:02:00"
+
+[[topology.nodes.ports]]
+id = "node-sw1-p1"
+index = 1
+label = "p2"
+mac = "02:e1:01:00:02:01"
+
+[[topology.nodes.ports]]
+id = "node-sw1-p2"
+index = 2
+label = "p3"
+mac = "02:e1:01:00:02:02"
+
+[[topology.nodes.ports]]
+id = "node-sw1-p3"
+index = 3
+label = "p4"
+mac = "02:e1:01:00:02:03"
+
+[[topology.nodes.ports]]
+id = "node-sw1-p4"
+index = 4
+label = "p5"
+mac = "02:e1:01:00:02:04"
+
+[[topology.nodes.ports]]
+id = "node-sw1-p5"
+index = 5
+label = "p6"
+mac = "02:e1:01:00:02:05"
+
+[[topology.links]]
+id = "link-h1-hub"
+source_node = "node-h1"
+source_port = "node-h1-p0"
+target_node = "node-hub1"
+target_port = "node-hub1-p0"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+
+[[topology.links]]
+id = "link-h2-hub"
+source_node = "node-h2"
+source_port = "node-h2-p0"
+target_node = "node-hub1"
+target_port = "node-hub1-p1"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
+
+[[topology.links]]
+id = "link-h3-hub"
+source_node = "node-h3"
+source_port = "node-h3-p0"
+target_node = "node-hub1"
+target_port = "node-hub1-p2"
+admin_up = true
+impairments = { latency_ms = 0, jitter_ms = 0, loss_percent = 0.0 }
