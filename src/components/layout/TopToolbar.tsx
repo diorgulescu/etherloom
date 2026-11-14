@@ -5,6 +5,7 @@ import {
   FilePlus2,
   FolderDown,
   FolderOpen,
+  Gauge,
   GraduationCap,
   HardDriveDownload,
   Laptop,
@@ -19,6 +20,7 @@ import {
   Sun,
 } from "lucide-react";
 import { EtherloomMark } from "../brand";
+import { evaluateQemuHostStatus } from "./QemuMissingBanner";
 import type { EnvDoctorReport, ThemePreference } from "../../types/studio";
 
 interface TopToolbarProps {
@@ -29,7 +31,9 @@ interface TopToolbarProps {
   activeLabNumber: number | null;
   labDrawerOpen: boolean;
   readyTemplateCount?: number;
+  runningVmCount?: number;
   onOpenWelcomeModal: () => void;
+  onOpenActivityMonitorModal: () => void;
   onOpenAcademyModal: () => void;
   onOpenStorageLibraryModal: () => void;
   onToggleLabDrawer: () => void;
@@ -59,7 +63,9 @@ export function TopToolbar({
   activeLabNumber,
   labDrawerOpen,
   readyTemplateCount = 0,
+  runningVmCount = 0,
   onOpenWelcomeModal,
+  onOpenActivityMonitorModal,
   onOpenAcademyModal,
   onOpenStorageLibraryModal,
   onToggleLabDrawer,
@@ -81,6 +87,8 @@ export function TopToolbar({
   onToggleLabRunning,
 }: TopToolbarProps) {
   const isAllOk = envReport?.overallBadge === "ok";
+  const qemuStatus = evaluateQemuHostStatus(envReport);
+  const isQemuMissing = !envLoading && Boolean(envReport) && !qemuStatus.ready;
   const bundleBasename = bundlePath
     ? bundlePath.split("/").filter(Boolean).pop() ?? projectName
     : `${projectName} (unsaved)`;
@@ -219,8 +227,23 @@ export function TopToolbar({
         </button>
       </div>
 
-      {/* Right section: OS Library, Academy Browser, Env Doctor Status Pill, Theme Selector, Settings, Docks */}
+      {/* Right section: Activity Monitor, OS Library, Academy Browser, Env Doctor Status Pill, Theme Selector, Settings, Docks */}
       <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={onOpenActivityMonitorModal}
+          title="Open Node Activity Monitor — CPU, Memory & Network (⌘⇧M)"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-400/30 text-emerald-800 dark:text-[#34D399] transition-colors"
+        >
+          <Gauge className="w-3.5 h-3.5" />
+          <span className="hidden xl:inline">Monitor</span>
+          {runningVmCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-900 dark:text-emerald-100">
+              {runningVmCount}
+            </span>
+          )}
+        </button>
+
         <button
           type="button"
           onClick={onOpenStorageLibraryModal}
@@ -257,9 +280,16 @@ export function TopToolbar({
         <button
           type="button"
           onClick={onOpenDoctorModal}
+          title={
+            isQemuMissing
+              ? `QEMU Missing (${qemuStatus.missingItems.join(", ")}) — Click for setup instructions`
+              : "Open System Status & Host Dependency Check"
+          }
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
             envLoading
               ? "bg-slate-100 dark:bg-[#162032] border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+              : isQemuMissing
+              ? "bg-[#F43F5E]/15 hover:bg-[#F43F5E]/25 border-[#F43F5E]/45 text-rose-700 dark:text-rose-300 font-semibold"
               : isAllOk
               ? "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-700 dark:text-[#34D399]"
               : "bg-amber-500/12 hover:bg-amber-500/22 border-amber-500/35 text-amber-700 dark:text-[#F59E0B]"
@@ -267,17 +297,25 @@ export function TopToolbar({
         >
           {envLoading ? (
             <Activity className="w-3.5 h-3.5 animate-pulse" />
+          ) : isQemuMissing ? (
+            <AlertTriangle className="w-3.5 h-3.5 text-[#F43F5E]" />
           ) : isAllOk ? (
             <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981]" />
           ) : (
             <AlertTriangle className="w-3.5 h-3.5 text-[#F59E0B]" />
           )}
-          <span className="hidden xl:inline font-mono text-[11px]">
+          <span
+            className={`${
+              isQemuMissing ? "inline" : "hidden xl:inline"
+            } font-mono text-[11px]`}
+          >
             {envLoading
               ? "Checking…"
+              : isQemuMissing
+              ? "QEMU Missing"
               : isAllOk
               ? `Ready (${envReport.okCount}/${envReport.checks.length})`
-              : `Doctor (${envReport?.warningCount ?? 0})`}
+              : `QEMU OK • ${envReport?.warningCount ?? 0} opt`}
           </span>
         </button>
 

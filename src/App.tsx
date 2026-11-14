@@ -19,15 +19,26 @@ import {
 import { LeftSidebar } from "./components/layout/LeftSidebar";
 import { StatusBar } from "./components/layout/StatusBar";
 import { TopToolbar } from "./components/layout/TopToolbar";
+import {
+  QemuMissingBanner,
+  evaluateQemuHostStatus,
+} from "./components/layout/QemuMissingBanner";
 import { VolumeDisconnectedBanner } from "./components/layout/VolumeDisconnectedBanner";
 import { WorkspaceCanvas } from "./components/layout/WorkspaceCanvas";
+import {
+  ActivityMonitorModal,
+  type ActivityMonitorNodeInput,
+} from "./components/modals/ActivityMonitorModal";
 import {
   CustomVmWizardModal,
   type CustomVmWizardSubmission,
 } from "./components/modals/CustomVmWizardModal";
 import { DependencyCheckModal } from "./components/modals/DependencyCheckModal";
 import { NewProjectModal } from "./components/modals/NewProjectModal";
-import { NodeConfigModal } from "./components/modals/NodeConfigModal";
+import {
+  NodeConfigModal,
+  type ConfigTab,
+} from "./components/modals/NodeConfigModal";
 import {
   SettingsModal,
   type SettingsSectionId,
@@ -321,6 +332,8 @@ export function App() {
   const [customVmWizardOpen, setCustomVmWizardOpen] = useState(false);
   const [newProjectModalOpen, setNewProjectModalOpen] = useState(false);
   const [configNodeId, setConfigNodeId] = useState<string | null>(null);
+  const [configNodeInitialTab, setConfigNodeInitialTab] =
+    useState<ConfigTab>("general");
 
   // Phase 5: Welcome Launchpad & Interactive Networking Academy State
   const [showWelcomeOnStartup, setShowWelcomeOnStartup] = useState<boolean>(
@@ -359,6 +372,10 @@ export function App() {
   const [baseTemplates, setBaseTemplates] = useState<BaseTemplateInfo[]>([]);
   const [envReport, setEnvReport] = useState<EnvDoctorReport | null>(null);
   const [envLoading, setEnvLoading] = useState(true);
+  const [qemuBannerDismissed, setQemuBannerDismissed] = useState(false);
+  const [activityMonitorOpen, setActivityMonitorOpen] = useState(false);
+  const prevQemuMissingRef = useRef(false);
+  const lastFocusProbeMsRef = useRef(0);
 
   // Storage & Volume Resilience
   const [storageState, setStorageState] =
@@ -417,19 +434,52 @@ export function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 5500);
+    const durationMs = toast.kind === "error" ? 9000 : 5500;
+    const t = window.setTimeout(() => setToast(null), durationMs);
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const loadDiagnostics = useCallback(async (forceRefresh = false) => {
-    setEnvLoading(true);
-    try {
-      const report = await fetchEnvStatus(forceRefresh);
-      setEnvReport(report);
-    } finally {
-      setEnvLoading(false);
-    }
-  }, []);
+  const loadDiagnostics = useCallback(
+    async (forceRefresh = false) => {
+      setEnvLoading(true);
+      try {
+        const report = await fetchEnvStatus(forceRefresh);
+        const evalNow = evaluateQemuHostStatus(report);
+        if (!evalNow.ready) {
+          prevQemuMissingRef.current = true;
+        } else if (prevQemuMissingRef.current) {
+          prevQemuMissingRef.current = false;
+          setQemuBannerDismissed(false);
+          showToast(
+            "ok",
+            `QEMU detected (${evalNow.versionSummary ?? "ready"})! Host is ready to boot virtual machines.`
+          );
+        }
+        setEnvReport(report);
+      } finally {
+        setEnvLoading(false);
+      }
+    },
+    [showToast]
+  );
+
+  // Automatically re-check host binaries on window focus when QEMU was missing
+  // (e.g. right after the user finishes running `brew install qemu` in Terminal!)
+  useEffect(() => {
+    if (!envReport) return;
+    const evalStatus = evaluateQemuHostStatus(envReport);
+    if (evalStatus.ready) return;
+
+    const handleWindowFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusProbeMsRef.current < 3000) return;
+      lastFocusProbeMsRef.current = now;
+      void loadDiagnostics(true);
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [envReport, loadDiagnostics]);
 
   const refreshAcademyLabs = useCallback(async () => {
     setAcademyLoading(true);
@@ -554,8 +604,21 @@ export function App() {
       else unlistenTcpflowyProg = fn;
     });
 
+    const activeRunningVms = new Set<string>();
+
     void onVmStateChanged((ev) => {
       if (disposed) return;
+      const wasRunning = activeRunningVms.has(ev.nodeId);
+      if (ev.status === "running") {
+        activeRunningVms.add(ev.nodeId);
+      } else if (ev.status === "stopped" || ev.status === "crashed") {
+        activeRunningVms.delete(ev.nodeId);
+      }
+
+      if (ev.status === "crashed" && wasRunning && ev.message) {
+        showToast("error", `VM ${ev.nodeId} crashed: ${ev.message}`);
+      }
+
       const mappedStatus =
         ev.status === "starting"
           ? "booting"
@@ -571,7 +634,7 @@ export function App() {
               : vm
           )
         );
-        if (ev.status === "stopped") {
+        if (ev.status === "stopped" || ev.status === "crashed") {
           void fetchComponentCatalog().then(setCatalog);
           void refreshTemplates();
           if (ev.message?.includes("Golden Template")) {
@@ -1224,10 +1287,21 @@ export function App() {
           )
         );
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("Node Settings")) {
-          showToast("error", msg, "Configure Storage", () =>
-            setConfigNodeId(nodeId)
-          );
+        const profId = target.data.osProfileId;
+        const hasMatchingTemplate = profId
+          ? baseTemplates.some((t) => t.osProfileId === profId)
+          : baseTemplates.length > 0;
+        if (msg.includes("OS Library") && !hasMatchingTemplate) {
+          showToast("error", msg, "Open OS Library", () => {
+            setLibraryFocusedCatalogIds(profId ? [profId] : null);
+            setLibraryFocusedLabTitle(null);
+            setStorageLibraryOpen(true);
+          });
+        } else if (msg.includes("Node Settings")) {
+          showToast("error", msg, "Configure Storage", () => {
+            setConfigNodeInitialTab("storage");
+            setConfigNodeId(nodeId);
+          });
         } else if (msg.toLowerCase().includes("qemu")) {
           showToast("error", msg, "Env Doctor", () =>
             setDoctorModalOpen(true)
@@ -1237,7 +1311,7 @@ export function App() {
         }
       }
     },
-    [bundlePath, nodes, setNodes, showToast]
+    [baseTemplates, bundlePath, nodes, setNodes, showToast]
   );
 
   const handleOpenVmConsoleTab = useCallback(
@@ -1280,10 +1354,14 @@ export function App() {
     [handleOpenVmConsoleTab]
   );
 
-  const handleOpenNodeSettings = useCallback((nodeId: string) => {
-    setSelectedNodeId(nodeId);
-    setConfigNodeId(nodeId);
-  }, []);
+  const handleOpenNodeSettings = useCallback(
+    (nodeId: string, initialTab: ConfigTab = "general") => {
+      setSelectedNodeId(nodeId);
+      setConfigNodeInitialTab(initialTab);
+      setConfigNodeId(nodeId);
+    },
+    []
+  );
 
   const handleNodeDoubleClick = useCallback(
     (nodeId: string) => {
@@ -1353,6 +1431,11 @@ export function App() {
             ? component.defaultNicModel ?? "virtio-net-pci"
             : null;
 
+        const matchedTpl =
+          component.kind === "vm" && component.osProfileId
+            ? baseTemplates.find((t) => t.osProfileId === component.osProfileId)
+            : undefined;
+
         const newNode: EtherloomFlowNode = {
           id: nodeId,
           type: "etherloomNode",
@@ -1376,7 +1459,7 @@ export function App() {
               component.kind === "vm"
                 ? component.defaultDiskBus ?? "virtio-blk"
                 : null,
-            templateId: null,
+            templateId: matchedTpl?.id ?? null,
             diskSizeGb: 8,
             status: "stopped",
             vcpus: component.defaultVcpus,
@@ -1397,7 +1480,7 @@ export function App() {
       });
       setIsDirty(true);
     },
-    [setNodes]
+    [baseTemplates, setNodes]
   );
 
   const handleAddFromTemplate = useCallback(
@@ -2000,12 +2083,19 @@ export function App() {
     storageState?.resolvedWorkspacesDir,
   ]);
 
-  // ⌘S / Ctrl+S shortcut for Project Save
+  // ⌘S / Ctrl+S shortcut for Project Save & ⌘⇧M / Ctrl+Shift+M for Activity Monitor
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void handleSaveProject();
+      } else if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "m"
+      ) {
+        e.preventDefault();
+        setActivityMonitorOpen((v) => !v);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -2161,7 +2251,18 @@ export function App() {
         activeLabNumber={activeLab?.summary.number ?? null}
         labDrawerOpen={labDrawerOpen}
         readyTemplateCount={baseTemplates.length}
+        runningVmCount={
+          nodes.filter(
+            (n) =>
+              n.data.kind === "vm" &&
+              (n.data.status === "running" || n.data.status === "booting")
+          ).length +
+          guidedSetupVms.filter(
+            (n) => n.data.status === "running" || n.data.status === "booting"
+          ).length
+        }
         onOpenWelcomeModal={() => setWelcomeModalOpen(true)}
+        onOpenActivityMonitorModal={() => setActivityMonitorOpen(true)}
         onOpenAcademyModal={() => setAcademyModalOpen(true)}
         onOpenStorageLibraryModal={() => setStorageLibraryOpen(true)}
         onToggleLabDrawer={() => setLabDrawerOpen((v) => !v)}
@@ -2195,6 +2296,17 @@ export function App() {
           onRetry={() => void handleRetryStorage()}
           onSelectDifferentFolder={() => setSettingsModalOpen(true)}
           onFallbackInternal={() => void handleFallbackInternalStorage()}
+        />
+      )}
+
+      {/* Automatic Host QEMU Hypervisor Missing Banner */}
+      {envReport && !qemuBannerDismissed && (
+        <QemuMissingBanner
+          report={envReport}
+          loading={envLoading}
+          onRefresh={() => void loadDiagnostics(true)}
+          onOpenDoctor={() => setDoctorModalOpen(true)}
+          onDismiss={() => setQemuBannerDismissed(true)}
         />
       )}
 
@@ -2324,46 +2436,43 @@ export function App() {
         nodeCount={nodes.length}
         linkCount={edges.length}
         onOpenStorageSettings={() => setStorageLibraryOpen(true)}
+        onOpenActivityMonitor={() => setActivityMonitorOpen(true)}
       />
 
-      {/* Non-blocking Toast Notification */}
-      {toast && (
-        <div
-          className={`fixed bottom-10 right-4 z-50 max-w-md rounded-xl border px-3.5 py-2.5 shadow-xl backdrop-blur-md flex items-center gap-2.5 text-xs ${
-            toast.kind === "ok"
-              ? "bg-white/95 dark:bg-[#111827]/95 border-[#10B981]/40 text-slate-800 dark:text-slate-100"
-              : "bg-white/95 dark:bg-[#111827]/95 border-[#F43F5E]/45 text-slate-800 dark:text-slate-100"
-          }`}
-        >
-          {toast.kind === "ok" ? (
-            <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 text-[#F43F5E] shrink-0" />
-          )}
-          <span className="flex-1 leading-snug">{toast.text}</span>
-          {toast.actionLabel && toast.onAction && (
-            <button
-              type="button"
-              onClick={() => {
-                toast.onAction?.();
-                setToast(null);
-              }}
-              className="shrink-0 px-2.5 py-1 rounded-md bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] font-semibold"
-            >
-              {toast.actionLabel}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
       {/* Modals */}
+      <ErrorBoundary
+        scopeLabel="Activity Monitor"
+        onReset={() => setActivityMonitorOpen(false)}
+      >
+        <ActivityMonitorModal
+          open={activityMonitorOpen}
+          nodes={[
+            ...enrichedNodes.map(
+              (n): ActivityMonitorNodeInput => ({
+                id: n.id,
+                data: n.data,
+                isGuidedSetup: false,
+              })
+            ),
+            ...guidedSetupVms.map(
+              (g): ActivityMonitorNodeInput => ({
+                id: g.id,
+                data: g.data,
+                isGuidedSetup: true,
+              })
+            ),
+          ]}
+          onClose={() => setActivityMonitorOpen(false)}
+          onToggleNodeRun={(nodeId) => void handleToggleNodeRun(nodeId)}
+          onOpenNodeConsole={(nodeId) => {
+            handleOpenVmConsoleTab(nodeId);
+            setDockOpen(true);
+          }}
+          onSelectNode={(nodeId) => {
+            setSelectedNodeId(nodeId);
+          }}
+        />
+      </ErrorBoundary>
       <ErrorBoundary
         scopeLabel="Storage & OS Library Manager"
         onReset={handleCloseStorageLibrary}
@@ -2371,6 +2480,8 @@ export function App() {
         <StorageLibraryModal
           open={storageLibraryOpen}
           hostArch={envReport?.hostArch ?? "aarch64"}
+          envReport={envReport}
+          onOpenEnvDoctor={() => setDoctorModalOpen(true)}
           storageState={storageState}
           migrationProgress={migrationProgress}
           focusedCatalogIds={libraryFocusedCatalogIds}
@@ -2400,6 +2511,10 @@ export function App() {
       <WelcomeModal
         open={welcomeModalOpen}
         labs={academyLabs}
+        envReport={envReport}
+        envLoading={envLoading}
+        onRefreshEnv={() => void loadDiagnostics(true)}
+        onOpenDoctorModal={() => setDoctorModalOpen(true)}
         showOnStartup={showWelcomeOnStartup}
         onChangeShowOnStartup={handleChangeShowWelcomeOnStartup}
         onClose={() => setWelcomeModalOpen(false)}
@@ -2461,14 +2576,23 @@ export function App() {
       <NodeConfigModal
         open={Boolean(configNode)}
         node={configNode}
+        initialTab={configNodeInitialTab}
         bundlePath={bundlePath}
         isosDir={storageState?.resolvedIsosDir}
         osProfiles={osProfiles}
         baseTemplates={baseTemplates}
-        onClose={() => setConfigNodeId(null)}
+        onClose={() => {
+          setConfigNodeId(null);
+          setConfigNodeInitialTab("general");
+        }}
         onSaveNode={handleSaveNodeConfig}
         onDeleteNode={handleDeleteNode}
         onTemplatesChanged={refreshTemplates}
+        onOpenOsLibrary={(profId) => {
+          setLibraryFocusedCatalogIds(profId ? [profId] : null);
+          setLibraryFocusedLabTitle(null);
+          setStorageLibraryOpen(true);
+        }}
       />
 
       <CustomVmWizardModal
@@ -2512,6 +2636,43 @@ export function App() {
         onInstallTcpflowy={handleInstallTcpflowy}
         onTcpflowyStatusChanged={setTcpflowyStatus}
       />
+
+      {/* Non-blocking Toast Notification (z-[100] so notifications stay visible above any open modal) */}
+      {toast && (
+        <div
+          className={`fixed bottom-10 right-4 z-[100] max-w-lg rounded-xl border px-3.5 py-2.5 shadow-2xl backdrop-blur-md flex items-center gap-2.5 text-xs ${
+            toast.kind === "ok"
+              ? "bg-white/95 dark:bg-[#111827]/96 border-[#10B981]/45 text-slate-800 dark:text-slate-100"
+              : "bg-white/95 dark:bg-[#111827]/96 border-[#F43F5E]/50 text-slate-800 dark:text-slate-100"
+          }`}
+        >
+          {toast.kind === "ok" ? (
+            <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-[#F43F5E] shrink-0" />
+          )}
+          <span className="flex-1 leading-snug break-words">{toast.text}</span>
+          {toast.actionLabel && toast.onAction && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.onAction?.();
+                setToast(null);
+              }}
+              className="shrink-0 px-2.5 py-1 rounded-md bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] font-semibold"
+            >
+              {toast.actionLabel}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

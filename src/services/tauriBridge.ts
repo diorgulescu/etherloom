@@ -4,6 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AcademyLabDetail,
   AcademyLabSummary,
+  ActivityMonitorSnapshot,
   BaseTemplateInfo,
   CaptureFileInfo,
   CaptureSummary,
@@ -2824,4 +2825,33 @@ export async function onCatalogDownloadProgress(
       error: typeof p.error === "string" ? p.error : null,
     });
   });
+}
+
+// -----------------------------------------------------------------------------
+// Activity Monitor IPC Client
+// -----------------------------------------------------------------------------
+
+export async function sampleActivityMonitor(): Promise<ActivityMonitorSnapshot> {
+  if (!isTauriRuntime()) {
+    return {
+      host: {
+        timestampMs: Date.now(),
+        sampleIntervalMs: 1000,
+        hostArch: "aarch64",
+        hostLogicalCpus: 10,
+        hostTotalMemoryBytes: 24 * 1024 * 1024 * 1024,
+        studioPid: 1001,
+        studioCpuPercent: 0.6,
+        studioMemoryBytes: 86 * 1024 * 1024,
+        activeVmCount: 0,
+        totalVmCpuPercent: 0,
+        totalVmMemoryBytes: 0,
+        totalFabricBytesPerSec: 0,
+        totalFabricPacketsPerSec: 0,
+      },
+      vms: [],
+      portTraffic: {},
+    };
+  }
+  return invoke<ActivityMonitorSnapshot>("sample_activity_monitor");
 }

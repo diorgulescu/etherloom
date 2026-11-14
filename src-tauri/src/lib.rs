@@ -1,4 +1,5 @@
 pub mod academy;
+pub mod activity_monitor;
 pub mod catalog;
 pub mod console_bridge;
 pub mod env_doctor;
@@ -14,6 +15,7 @@ use academy::{
     get_academy_lab_detail, instantiate_academy_lab, list_academy_labs, AcademyLabDetail,
     AcademyLabSummary, InstantiatedLabDto,
 };
+use activity_monitor::{ActivityMonitor, ActivityMonitorSnapshot};
 use catalog::{
     reveal_path_in_finder, CatalogDownloadRequest, CatalogImportLocalRequest, CatalogManager,
     DeleteCatalogImageResult, OsCatalogEntryDto,
@@ -62,6 +64,7 @@ pub struct StudioState {
     pub console_bridge: ConsoleBridge,
     pub pcap_taps: PcapTapManager,
     pub tcpflowy: TcpflowyManager,
+    pub activity_monitor: ActivityMonitor,
 }
 
 impl Default for StudioState {
@@ -78,6 +81,7 @@ impl Default for StudioState {
             console_bridge: ConsoleBridge::new(),
             pcap_taps: PcapTapManager::new(),
             tcpflowy: TcpflowyManager::default(),
+            activity_monitor: ActivityMonitor::new(),
         }
     }
 }
@@ -665,7 +669,7 @@ async fn start_topology_vm_node(
             .map_err(|e| format!("Failed to prepare overlay directory {}: {e}", parent.display()))?;
     }
 
-    let template_id = node
+    let mut template_id = node
         .template_id
         .as_deref()
         .map(str::trim)
@@ -677,6 +681,18 @@ async fn start_topology_vm_node(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned);
+
+    // If a node was dragged from Guest OS Profiles before downloading its OS image, auto-bind to a matching
+    // Base Template in `templates/` once downloaded so the user can boot immediately without re-wiring storage!
+    if template_id.is_none() && boot_media_path.is_none() {
+        if let Some(ref prof_id) = node.os_profile_id {
+            if let Ok(templates) = state.image_store.list_templates().await {
+                if let Some(matched) = templates.into_iter().find(|t| t.os_profile_id == *prof_id) {
+                    template_id = Some(matched.id);
+                }
+            }
+        }
+    }
 
     if !disk_path.is_file() {
         if let Some(ref tpl_id) = template_id {
@@ -707,9 +723,15 @@ async fn start_topology_vm_node(
                 })
                 .await?;
         } else {
+            let profile_label = node
+                .os_profile_id
+                .as_deref()
+                .and_then(find_os_profile)
+                .map(|p| p.name)
+                .unwrap_or_else(|| "an OS image".to_string());
             return Err(format!(
-                "Node '{}' has no disk yet. Open Node Settings -> Storage to select a Read-Only Base Template or attach an OS Installer (.iso / .img).",
-                node.name
+                "Node '{}' has no OS disk image yet ({} is not downloaded in templates/). Open OS Library to download {}, or open Node Settings -> Storage to select a Base Template or attach an .iso / .img installer.",
+                node.name, profile_label, profile_label
             ));
         }
     }
@@ -1231,6 +1253,16 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
     reveal_path_in_finder(&path)
 }
 
+#[tauri::command]
+async fn sample_activity_monitor(
+    state: tauri::State<'_, StudioState>,
+) -> Result<ActivityMonitorSnapshot, String> {
+    Ok(state
+        .activity_monitor
+        .sample(&state.vm_manager, &state.fabric)
+        .await)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1329,6 +1361,7 @@ pub fn run() {
             catalog_delete_image,
             catalog_launch_guided_setup,
             reveal_in_finder,
+            sample_activity_monitor,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Etherloom Tauri application");

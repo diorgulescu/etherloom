@@ -1,4 +1,4 @@
-import { AlertTriangle, HardDrive, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, HardDrive, ShieldCheck } from "lucide-react";
 import type { StorageStateSnapshot } from "../../types/studio";
 
 interface StatusBarProps {
@@ -6,6 +6,7 @@ interface StatusBarProps {
   nodeCount: number;
   linkCount: number;
   onOpenStorageSettings: () => void;
+  onOpenActivityMonitor?: () => void;
 }
 
 export function formatBytesCompact(bytes: number): string {
@@ -23,6 +24,7 @@ export function StatusBar({
   nodeCount,
   linkCount,
   onOpenStorageSettings,
+  onOpenActivityMonitor,
 }: StatusBarProps) {
   const disconnected = storageState?.status.state === "volumeDisconnected";
   const telemetry = storageState?.diskTelemetry ?? null;
@@ -38,9 +40,23 @@ export function StatusBar({
           </span>
         </span>
         <span className="text-slate-300 dark:text-slate-800">|</span>
-        <span className="font-mono truncate">
-          {nodeCount} Nodes • {linkCount} Wires
-        </span>
+        {onOpenActivityMonitor ? (
+          <button
+            type="button"
+            onClick={onOpenActivityMonitor}
+            title="Open Activity Monitor — CPU, Memory & Network per Node (⌘⇧M)"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 -mx-1 rounded hover:bg-slate-200/80 dark:hover:bg-[#162032] hover:text-cyan-700 dark:hover:text-[#22D3EE] font-mono truncate transition-colors"
+          >
+            <Activity className="w-3 h-3 text-[#22D3EE] shrink-0" />
+            <span>
+              {nodeCount} Nodes • {linkCount} Wires
+            </span>
+          </button>
+        ) : (
+          <span className="font-mono truncate">
+            {nodeCount} Nodes • {linkCount} Wires
+          </span>
+        )}
         {storageState && (
           <>
             <span className="hidden md:inline text-slate-300 dark:text-slate-800">

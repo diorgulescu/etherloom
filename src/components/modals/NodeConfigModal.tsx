@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   CheckCircle2,
   Cpu,
   Disc,
+  Download,
   FolderOpen,
   HardDrive,
   Layers,
@@ -47,9 +49,12 @@ import {
   generateQemuMac,
 } from "../../utils/topology";
 
+export type ConfigTab = "general" | "interfaces" | "storage";
+
 interface NodeConfigModalProps {
   open: boolean;
   node: EtherloomFlowNode | null;
+  initialTab?: ConfigTab;
   bundlePath: string | null;
   isosDir?: string;
   osProfiles: OsProfile[];
@@ -58,13 +63,13 @@ interface NodeConfigModalProps {
   onSaveNode: (nodeId: string, patch: Partial<TopologyNodeData>) => void;
   onDeleteNode: (nodeId: string) => void;
   onTemplatesChanged: () => Promise<void>;
+  onOpenOsLibrary?: (osProfileId?: string | null) => void;
 }
-
-type ConfigTab = "general" | "interfaces" | "storage";
 
 export function NodeConfigModal({
   open,
   node,
+  initialTab = "general",
   bundlePath,
   isosDir,
   osProfiles,
@@ -73,8 +78,10 @@ export function NodeConfigModal({
   onSaveNode,
   onDeleteNode,
   onTemplatesChanged,
+  onOpenOsLibrary,
 }: NodeConfigModalProps) {
   const [activeTab, setActiveTab] = useState<ConfigTab>("general");
+  const initializedSessionKeyRef = useRef<string | null>(null);
 
   // Editable draft fields
   const [label, setLabel] = useState("");
@@ -115,10 +122,22 @@ export function NodeConfigModal({
   const [promoteName, setPromoteName] = useState("");
   const [promoteDesc, setPromoteDesc] = useState("");
 
+  // Initialize draft state ONLY when the modal opens or switches to a different `node.id`
+  // (never when parent telemetry / enrichedNodes / baseTemplates references refresh while editing!)
   useEffect(() => {
-    if (!open || !node) return;
+    if (!open || !node) {
+      initializedSessionKeyRef.current = null;
+      return;
+    }
+    if (initializedSessionKeyRef.current === node.id) {
+      return;
+    }
+    initializedSessionKeyRef.current = node.id;
+
     const d = node.data;
-    setActiveTab("general");
+    const requestedTab: ConfigTab =
+      initialTab === "storage" && d.kind !== "vm" ? "general" : initialTab;
+    setActiveTab(requestedTab);
     setFeedback(null);
     setPromoteOpen(false);
 
@@ -145,7 +164,7 @@ export function NodeConfigModal({
       ? baseTemplates.find(
           (t) => t.id === d.templateId || t.filename === d.templateId
         )
-      : undefined;
+      : baseTemplates.find((t) => t.osProfileId === resolvedProfId);
 
     if (matchedTpl) {
       setStorageSource("template");
@@ -157,13 +176,13 @@ export function NodeConfigModal({
       setStorageSource("template");
       setTemplateId(d.templateId || baseTemplates[0].id);
     } else {
-      setStorageSource("installer");
+      setStorageSource("template");
       setTemplateId("");
     }
 
     setBootMediaPath(d.bootMediaPath ?? "");
     setBootMediaBus(d.bootMediaBus ?? "auto");
-    setDiskSizeGb(d.diskSizeGb ?? 8);
+    setDiskSizeGb(d.diskSizeGb ?? matchedProf?.recommendedDiskGb ?? 8);
     setPromoteName(`${d.label} Golden Image`);
     setPromoteDesc(`Installed ${fam.toUpperCase()} base image`);
 
@@ -177,7 +196,15 @@ export function NodeConfigModal({
     } else {
       setDiskStatus(null);
     }
-  }, [open, node, bundlePath, baseTemplates]);
+  }, [open, node, initialTab, bundlePath, baseTemplates, osProfiles]);
+
+  // If templates finish downloading while the modal is open and no template is selected yet, populate gently
+  useEffect(() => {
+    if (!open || !node || node.data.kind !== "vm") return;
+    if (templateId || baseTemplates.length === 0) return;
+    const byProfile = baseTemplates.find((t) => t.osProfileId === osProfileId);
+    setTemplateId((byProfile ?? baseTemplates[0]).id);
+  }, [open, node, baseTemplates, osProfileId, templateId]);
 
   if (!open || !node) return null;
 
@@ -501,7 +528,11 @@ export function NodeConfigModal({
                   : "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300"
               }`}
             >
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              {feedback.kind === "ok" ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
               <span>{feedback.text}</span>
             </div>
           )}
@@ -925,38 +956,79 @@ export function NodeConfigModal({
               </div>
 
               {storageSource === "template" ? (
-                <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5">
-                  <label className="block space-y-1">
-                    <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
+                <div className="space-y-3 rounded-xl bg-slate-50 dark:bg-[#0D1321] border border-slate-200 dark:border-[rgba(34,211,238,0.16)] p-3.5">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
                       Select Registered Base Template
                     </span>
                     {baseTemplates.length === 0 ? (
-                      <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg p-2.5">
-                        No Base Templates saved in{" "}
-                        <code className="font-mono">templates/</code> yet.
-                        Switch to{" "}
-                        <strong>Install OS from .iso / .img</strong> to install
-                        your first guest, then click{" "}
-                        <strong>Save Installed Disk as Reusable Template</strong>{" "}
-                        below!
+                      <div className="text-xs text-amber-800 dark:text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 space-y-2.5">
+                        <p className="leading-relaxed">
+                          No Golden Base Templates are downloaded in{" "}
+                          <code className="font-mono">templates/</code> yet.
+                          Download <strong>{osProfiles.find((p) => p.id === osProfileId)?.name ?? osProfileId}</strong>{" "}
+                          directly in the OS Library, or switch to{" "}
+                          <strong>Install OS from .iso / .img</strong>.
+                        </p>
+                        {onOpenOsLibrary && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenOsLibrary(osProfileId);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] text-xs font-semibold shadow-sm transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>
+                              Open OS Library to Download{" "}
+                              {osProfiles.find((p) => p.id === osProfileId)?.name ?? "OS Image"}
+                            </span>
+                          </button>
+                        )}
                       </div>
                     ) : (
-                      <select
-                        value={templateId}
-                        disabled={isRunning}
-                        onChange={(e) => setTemplateId(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
-                      >
-                        <option value="">-- Choose a Base Template --</option>
-                        {baseTemplates.map((tpl) => (
-                          <option key={tpl.id} value={tpl.id}>
-                            {tpl.name} ({tpl.filename} •{" "}
-                            {formatByteSize(tpl.actualSizeBytes)})
-                          </option>
-                        ))}
-                      </select>
+                      <>
+                        <select
+                          value={templateId}
+                          disabled={isRunning}
+                          onChange={(e) => setTemplateId(e.target.value)}
+                          className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-900 dark:text-slate-100"
+                        >
+                          <option value="">-- Choose a Base Template --</option>
+                          {baseTemplates.map((tpl) => (
+                            <option key={tpl.id} value={tpl.id}>
+                              {tpl.name} ({tpl.filename} •{" "}
+                              {formatByteSize(tpl.actualSizeBytes)})
+                            </option>
+                          ))}
+                        </select>
+                        {onOpenOsLibrary &&
+                          !baseTemplates.some(
+                            (t) => t.osProfileId === osProfileId
+                          ) && (
+                            <div className="pt-1 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#22D3EE]/10 border border-[#22D3EE]/25 px-3 py-2 text-[11px] text-cyan-800 dark:text-cyan-200">
+                              <span>
+                                No template matching{" "}
+                                <code className="font-mono">{osProfileId}</code>{" "}
+                                is downloaded yet.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  onOpenOsLibrary(osProfileId);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] font-semibold"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Download in OS Library</span>
+                              </button>
+                            </div>
+                          )}
+                      </>
                     )}
-                  </label>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5">

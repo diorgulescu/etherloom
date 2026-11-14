@@ -141,10 +141,21 @@ export function VncScreenPane({
       return;
     }
 
+    if (status === "booting") {
+      // Wait for VmManager::spawn_vm to finish initializing QEMU & binding its RFB port
+      tearDown();
+      setRfbState("connecting");
+      return;
+    }
+
     let cancelled = false;
-    setRfbState("connecting");
+    let retryTimer: number | null = null;
+    let retryCount = 0;
+    const MAX_AUTO_RETRIES = 4;
 
     const connectAttempt = async () => {
+      if (cancelled) return;
+      setRfbState("connecting");
       try {
         const ep = await getConsoleSessionEndpoints(nodeId);
         if (cancelled) return;
@@ -166,20 +177,30 @@ export function VncScreenPane({
         rfb.background = "#090E18";
 
         rfb.addEventListener("connect", () => {
+          retryCount = 0;
           if (!cancelled) {
             setRfbState("connected");
           }
         });
 
         rfb.addEventListener("disconnect", () => {
-          if (!cancelled) {
+          if (cancelled) return;
+          if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
+            retryCount += 1;
+            setRfbState("connecting");
+            retryTimer = window.setTimeout(() => void connectAttempt(), 900);
+          } else {
             setRfbState(status === "running" ? "disconnected" : "standby");
           }
         });
 
         rfbRef.current = rfb;
       } catch {
-        if (!cancelled) {
+        if (cancelled) return;
+        if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
+          retryCount += 1;
+          retryTimer = window.setTimeout(() => void connectAttempt(), 900);
+        } else {
           setRfbState("disconnected");
         }
       }
@@ -189,6 +210,9 @@ export function VncScreenPane({
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
       tearDown();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

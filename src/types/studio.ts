@@ -287,6 +287,7 @@ export interface VmInstanceInfo {
   qemuArgs: string[];
   startedAtMs: number;
   exitCode: number | null;
+  lastError?: string | null;
 }
 
 export interface VmStateEvent {
@@ -883,4 +884,69 @@ export interface DeleteCatalogImageResult {
   bytesFreed: number;
   referencingProjects: string[];
   blockedByReferences: boolean;
+}
+
+// -----------------------------------------------------------------------------
+// Activity Monitor (Per-Node CPU, Physical Memory & Directional Network Telemetry)
+// -----------------------------------------------------------------------------
+
+export interface HostResourceSummary {
+  timestampMs: number;
+  sampleIntervalMs: number;
+  hostArch: string;
+  hostLogicalCpus: number;
+  hostTotalMemoryBytes: number;
+  studioPid: number;
+  studioCpuPercent: number;
+  studioMemoryBytes: number;
+  activeVmCount: number;
+  totalVmCpuPercent: number;
+  totalVmMemoryBytes: number;
+  totalFabricBytesPerSec: number;
+  totalFabricPacketsPerSec: number;
+}
+
+export interface VmProcessTelemetry {
+  nodeId: string;
+  name: string;
+  status: VmStatus;
+  pid: number | null;
+  arch: GuestArch;
+  accel: string;
+  allocatedCpus: number;
+  allocatedRamMb: number;
+  uptimeMs: number;
+  /** macOS Activity Monitor style CPU % (`100%` = 1 logical core; max `allocatedCpus * 100%`) */
+  cpuPercent: number;
+  /** Normalized guest vCPU saturation (`0..100%` of `allocatedCpus`) */
+  cpuNormalizedPercent: number;
+  /** Physical memory footprint (`ri_phys_footprint`, matching macOS Activity Monitor's Memory column) */
+  memoryBytes: number;
+  /** Resident Set Size (RSS) */
+  residentBytes: number;
+  threadCount: number;
+  diskReadBytes: number;
+  diskWriteBytes: number;
+  overlayDiskBytes: number;
+}
+
+export interface PortTrafficTelemetry {
+  portId: string;
+  linkId: string;
+  adminUp: boolean;
+  txBytes: number;
+  rxBytes: number;
+  txPackets: number;
+  rxPackets: number;
+  droppedPackets: number;
+  txBytesPerSec: number;
+  rxBytesPerSec: number;
+  txPacketsPerSec: number;
+  rxPacketsPerSec: number;
+}
+
+export interface ActivityMonitorSnapshot {
+  host: HostResourceSummary;
+  vms: VmProcessTelemetry[];
+  portTraffic: Record<string, PortTrafficTelemetry>;
 }

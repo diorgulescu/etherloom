@@ -1092,7 +1092,7 @@ impl CatalogManager {
             bytes_downloaded: 0,
             total_bytes: None,
             percent: Some(90.0),
-            message: format!("Converting {} to Golden Base Template qcow2…", spec.name),
+            message: format!("Preparing {} Golden Base Template qcow2…", spec.name),
             error: None,
         })
         .await;
@@ -1101,29 +1101,39 @@ impl CatalogManager {
             .map_err(|e| format!("Failed creating {}: {e}", templates_dir.display()))?;
         let staged_qcow2 = staging_dir.join(format!("{}.qcow2", spec.template_stem));
 
-        let convert_args = vec![
-            "convert".to_string(),
-            "-O".to_string(),
-            "qcow2".to_string(),
-            extracted.display().to_string(),
-            staged_qcow2.display().to_string(),
-        ];
-        image_store.run_qemu_img(&convert_args).await?;
-
-        // Expand virtual size to recommended_disk_gb if the upstream image is smaller
         let prof = find_os_profile(spec.os_profile_id);
-        if let Some(ref p) = prof {
-            if let Ok(info) = image_store.inspect_disk(&staged_qcow2).await {
-                let target_bytes = (p.recommended_disk_gb as u64) * 1024 * 1024 * 1024;
-                if info.virtual_size_bytes > 0 && info.virtual_size_bytes < target_bytes {
-                    let resize_args = vec![
-                        "resize".to_string(),
-                        staged_qcow2.display().to_string(),
-                        format!("{}G", p.recommended_disk_gb),
-                    ];
-                    let _ = image_store.run_qemu_img(&resize_args).await;
+        if image_store.resolve_qemu_img_bin().is_some() {
+            let convert_args = vec![
+                "convert".to_string(),
+                "-O".to_string(),
+                "qcow2".to_string(),
+                extracted.display().to_string(),
+                staged_qcow2.display().to_string(),
+            ];
+            image_store.run_qemu_img(&convert_args).await?;
+
+            // Expand virtual size to recommended_disk_gb if the upstream image is smaller
+            if let Some(ref p) = prof {
+                if let Ok(info) = image_store.inspect_disk(&staged_qcow2).await {
+                    let target_bytes = (p.recommended_disk_gb as u64) * 1024 * 1024 * 1024;
+                    if info.virtual_size_bytes > 0 && info.virtual_size_bytes < target_bytes {
+                        let resize_args = vec![
+                            "resize".to_string(),
+                            staged_qcow2.display().to_string(),
+                            format!("{}G", p.recommended_disk_gb),
+                        ];
+                        let _ = image_store.run_qemu_img(&resize_args).await;
+                    }
                 }
             }
+        } else if ext == "qcow2" {
+            // Upstream artifact is already a valid qcow2 image (e.g. Alpine, Debian, FreeBSD, 9front, OmniOS):
+            // finalize it directly so users can prepare qcow2 OS templates even before running `brew install qemu`.
+            move_or_copy_file(&extracted, &staged_qcow2)?;
+        } else {
+            return Err(format!(
+                "QEMU ('qemu-img') is required to convert .{ext} disk images into qcow2 templates, but QEMU is not installed on this Mac yet. Run 'brew install qemu' in Terminal and click Retry."
+            ));
         }
 
         let final_qcow2 = templates_dir.join(format!("{}.qcow2", spec.template_stem));
@@ -1184,6 +1194,21 @@ impl CatalogManager {
         total_bytes: Option<u64>,
         cancel_rx: &mut watch::Receiver<bool>,
     ) -> Result<(), String> {
+        let fname = dest
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image");
+        self.emit_progress(CatalogDownloadProgressEvent {
+            catalog_id: catalog_id.to_string(),
+            stage: "Downloading".to_string(),
+            bytes_downloaded: 0,
+            total_bytes,
+            percent: Some(3.0),
+            message: format!("Connected — downloading {fname}…"),
+            error: None,
+        })
+        .await;
+
         let curl_bin = resolve_macos_binary("curl").unwrap_or_else(|| PathBuf::from("/usr/bin/curl"));
         let mut child = Command::new(&curl_bin)
             .args([
@@ -1204,6 +1229,18 @@ impl CatalogManager {
             .spawn()
             .map_err(|e| format!("Failed starting curl: {e}"))?;
 
+        let stderr_pipe = child.stderr.take();
+        let stderr_task = tokio::spawn(async move {
+            if let Some(mut pipe) = stderr_pipe {
+                use tokio::io::AsyncReadExt;
+                let mut buf = String::new();
+                let _ = pipe.read_to_string(&mut buf).await;
+                buf
+            } else {
+                String::new()
+            }
+        });
+
         let mut ticker = tokio::time::interval(Duration::from_millis(220));
         loop {
             tokio::select! {
@@ -1215,8 +1252,14 @@ impl CatalogManager {
                 }
                 status_res = child.wait() => {
                     let status = status_res.map_err(|e| format!("curl wait failed: {e}"))?;
+                    let stderr_text = stderr_task.await.unwrap_or_default();
                     if !status.success() {
-                        return Err(format!("Download failed from {url} ({status}). You can supply a Custom Mirror URL or Import a Local File."));
+                        let detail = stderr_text.trim();
+                        return Err(if detail.is_empty() {
+                            format!("Download failed from {url} ({status}). You can supply a Custom Mirror URL or Import a Local File.")
+                        } else {
+                            format!("Download failed from {url}: {detail}")
+                        });
                     }
                     let final_len = fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
                     self.emit_progress(CatalogDownloadProgressEvent {
@@ -1234,14 +1277,14 @@ impl CatalogManager {
                     let cur_len = fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
                     let pct = total_bytes
                         .filter(|&t| t > 0)
-                        .map(|t| ((cur_len as f64 / t as f64) * 78.0 + 2.0).clamp(2.0, 80.0));
+                        .map(|t| ((cur_len as f64 / t as f64) * 77.0 + 3.0).clamp(3.0, 80.0));
                     self.emit_progress(CatalogDownloadProgressEvent {
                         catalog_id: catalog_id.to_string(),
                         stage: "Downloading".to_string(),
                         bytes_downloaded: cur_len,
                         total_bytes,
                         percent: pct,
-                        message: "Streaming image onto active storage…".to_string(),
+                        message: format!("Streaming {fname} onto active storage…"),
                         error: None,
                     }).await;
                 }
@@ -1465,25 +1508,31 @@ struct ResolvedUpstreamAsset {
 async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsset, String> {
     match catalog_id {
         "alpine-linux" => {
-            for branch in ["v3.21", "v3.20"] {
+            let mut last_http_err: Option<String> = None;
+            for branch in ["latest-stable", "v3.23", "v3.22", "v3.21", "v3.20"] {
                 let dir_url =
                     format!("https://dl-cdn.alpinelinux.org/alpine/{branch}/releases/cloud/");
-                if let Ok(html) = curl_text(&dir_url).await {
-                    if let Some(fname) = find_last_matching_token(
-                        &html,
-                        "nocloud_alpine-",
-                        ".qcow2",
-                        Some("aarch64-uefi"),
-                    ) {
-                        return Ok(ResolvedUpstreamAsset {
-                            url: format!("{dir_url}{fname}"),
-                            filename: fname,
-                            sha256_manifest_url: None,
-                        });
+                match curl_text(&dir_url).await {
+                    Ok(html) => {
+                        if let Some(fname) = select_alpine_cloud_filename(&html) {
+                            return Ok(ResolvedUpstreamAsset {
+                                url: format!("{dir_url}{fname}"),
+                                filename: fname,
+                                sha256_manifest_url: None,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        last_http_err = Some(e);
                     }
                 }
             }
-            Err("Unable to resolve Alpine ARM64 cloud image from dl-cdn.alpinelinux.org".to_string())
+            let suffix = last_http_err
+                .map(|e| format!(" ({e})"))
+                .unwrap_or_default();
+            Err(format!(
+                "Unable to resolve Alpine ARM64 UEFI cloud image (.qcow2.xz / .qcow2) from dl-cdn.alpinelinux.org{suffix}. Check your internet connection or provide a Custom Mirror URL."
+            ))
         }
         "debian-linux" => Ok(ResolvedUpstreamAsset {
             url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-arm64.qcow2"
@@ -1492,25 +1541,82 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
             sha256_manifest_url: None,
         }),
         "freebsd" => {
-            for ver in ["14.2-RELEASE", "14.1-RELEASE"] {
-                let fname = format!("FreeBSD-{ver}-arm64-aarch64-ufs.qcow2.xz");
-                let url = format!(
-                    "https://download.freebsd.org/releases/VM-IMAGES/{ver}/aarch64/Latest/{fname}"
-                );
-                if probe_url_reachable(&url).await {
-                    return Ok(ResolvedUpstreamAsset {
-                        url,
-                        filename: fname,
-                        sha256_manifest_url: None,
-                    });
+            let vm_root = "https://download.freebsd.org/releases/VM-IMAGES";
+            let mut candidates: Vec<String> = Vec::new();
+            if let Ok(root_html) = curl_text(&format!("{vm_root}/")).await {
+                for tok in root_html.split(|c: char| {
+                    c == '"' || c == '\'' || c == '>' || c == '<' || c == '/' || c.is_whitespace()
+                }) {
+                    if tok.ends_with("-RELEASE")
+                        && tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                        && !candidates.iter().any(|existing| existing == tok)
+                    {
+                        candidates.push(tok.to_string());
+                    }
+                }
+                candidates.sort_by(|a, b| compare_version_desc(a, b));
+            }
+            for fallback in ["15.0-RELEASE", "14.3-RELEASE", "14.2-RELEASE", "14.1-RELEASE"] {
+                if !candidates.iter().any(|c| c == fallback) {
+                    candidates.push(fallback.to_string());
                 }
             }
-            Err("Unable to reach FreeBSD VM-IMAGES mirror at download.freebsd.org".to_string())
+
+            for ver in candidates {
+                let latest_dir = format!("{vm_root}/{ver}/aarch64/Latest/");
+                if let Ok(dir_html) = curl_text(&latest_dir).await {
+                    if let Some(fname) = find_last_matching_token(
+                        &dir_html,
+                        "FreeBSD-",
+                        "-arm64-aarch64-ufs.qcow2.xz",
+                        None,
+                    )
+                    .or_else(|| {
+                        find_last_matching_token(
+                            &dir_html,
+                            "FreeBSD-",
+                            "-arm64-aarch64.qcow2.xz",
+                            None,
+                        )
+                    }) {
+                        return Ok(ResolvedUpstreamAsset {
+                            url: format!("{latest_dir}{fname}"),
+                            filename: fname,
+                            sha256_manifest_url: None,
+                        });
+                    }
+                }
+            }
+            Err("Unable to reach FreeBSD VM-IMAGES mirror at download.freebsd.org. Check your internet connection or provide a Custom Mirror URL.".to_string())
         }
         "openbsd" => {
-            for (ver, short) in [("7.7", "77"), ("7.6", "76")] {
+            let ob_root = "https://cdn.openbsd.org/pub/OpenBSD";
+            let mut versions: Vec<String> = Vec::new();
+            if let Ok(root_html) = curl_text(&format!("{ob_root}/")).await {
+                for tok in root_html.split(|c: char| {
+                    c == '"' || c == '\'' || c == '>' || c == '<' || c == '/' || c.is_whitespace()
+                }) {
+                    if tok.len() >= 3
+                        && tok.len() <= 5
+                        && tok.contains('.')
+                        && tok.chars().all(|c| c.is_ascii_digit() || c == '.')
+                        && !versions.iter().any(|v| v == tok)
+                    {
+                        versions.push(tok.to_string());
+                    }
+                }
+                versions.sort_by(|a, b| compare_version_desc(a, b));
+            }
+            for fallback in ["7.8", "7.7", "7.6"] {
+                if !versions.iter().any(|v| v == fallback) {
+                    versions.push(fallback.to_string());
+                }
+            }
+
+            for ver in versions.into_iter().take(5) {
+                let short: String = ver.chars().filter(|c| *c != '.').collect();
                 let fname = format!("install{short}.img");
-                let base = format!("https://cdn.openbsd.org/pub/OpenBSD/{ver}/arm64");
+                let base = format!("{ob_root}/{ver}/arm64");
                 let url = format!("{base}/{fname}");
                 if probe_url_reachable(&url).await {
                     return Ok(ResolvedUpstreamAsset {
@@ -1520,14 +1626,51 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                     });
                 }
             }
-            Err("Unable to reach OpenBSD arm64 mirror at cdn.openbsd.org".to_string())
+            Err("Unable to reach OpenBSD arm64 mirror at cdn.openbsd.org. Check your internet connection or provide a Custom Mirror URL.".to_string())
         }
-        "netbsd" => Ok(ResolvedUpstreamAsset {
-            url: "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/evbarm-aarch64/binary/gzimg/arm64.img.gz"
-                .to_string(),
-            filename: "netbsd-10.1-arm64.img.gz".to_string(),
-            sha256_manifest_url: None,
-        }),
+        "netbsd" => {
+            let nb_root = "https://cdn.netbsd.org/pub/NetBSD";
+            let mut versions: Vec<String> = Vec::new();
+            if let Ok(root_html) = curl_text(&format!("{nb_root}/")).await {
+                for tok in root_html.split(|c: char| {
+                    c == '"' || c == '\'' || c == '>' || c == '<' || c == '/' || c.is_whitespace()
+                }) {
+                    if let Some(ver) = tok.strip_prefix("NetBSD-") {
+                        if !ver.is_empty()
+                            && ver.chars().all(|c| c.is_ascii_digit() || c == '.')
+                            && !versions.iter().any(|v| v == ver)
+                        {
+                            versions.push(ver.to_string());
+                        }
+                    }
+                }
+                versions.sort_by(|a, b| compare_version_desc(a, b));
+            }
+            for fallback in ["10.1", "10.0"] {
+                if !versions.iter().any(|v| v == fallback) {
+                    versions.push(fallback.to_string());
+                }
+            }
+
+            for ver in versions.into_iter().take(4) {
+                let url = format!(
+                    "{nb_root}/NetBSD-{ver}/evbarm-aarch64/binary/gzimg/arm64.img.gz"
+                );
+                if probe_url_reachable(&url).await {
+                    return Ok(ResolvedUpstreamAsset {
+                        url,
+                        filename: format!("netbsd-{ver}-arm64.img.gz"),
+                        sha256_manifest_url: None,
+                    });
+                }
+            }
+            Ok(ResolvedUpstreamAsset {
+                url: "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/evbarm-aarch64/binary/gzimg/arm64.img.gz"
+                    .to_string(),
+                filename: "netbsd-10.1-arm64.img.gz".to_string(),
+                sha256_manifest_url: None,
+            })
+        }
         "openwrt" => {
             for ver in ["24.10.0", "23.05.5"] {
                 let fname = format!(
@@ -1692,9 +1835,15 @@ async fn curl_text(url: &str) -> Result<String, String> {
         .stderr(Stdio::piped())
         .output()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed invoking curl: {e}"))?;
     if !out.status.success() {
-        return Err(format!("HTTP request failed for {url}"));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let detail = stderr.trim();
+        return Err(if detail.is_empty() {
+            format!("HTTP request failed for {url} ({})", out.status)
+        } else {
+            format!("HTTP request failed for {url}: {detail}")
+        });
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -1800,6 +1949,18 @@ async fn run_cancellable_command(
         .spawn()
         .map_err(|e| format!("Failed spawning {}: {e}", bin.display()))?;
 
+    let stderr_pipe = child.stderr.take();
+    let stderr_task = tokio::spawn(async move {
+        if let Some(mut pipe) = stderr_pipe {
+            use tokio::io::AsyncReadExt;
+            let mut buf = String::new();
+            let _ = pipe.read_to_string(&mut buf).await;
+            buf
+        } else {
+            String::new()
+        }
+    });
+
     tokio::select! {
         _ = cancel_rx.changed() => {
             if *cancel_rx.borrow() {
@@ -1807,19 +1968,61 @@ async fn run_cancellable_command(
                 return Err("__CANCELLED__".to_string());
             }
             let status = child.wait().await.map_err(|e| e.to_string())?;
+            let stderr_text = stderr_task.await.unwrap_or_default();
             if !status.success() {
-                return Err(format!("{} exited with {status}", bin.display()));
+                let detail = stderr_text.trim();
+                return Err(if detail.is_empty() {
+                    format!("{} exited with {status}", bin.display())
+                } else {
+                    format!("{} failed ({status}): {detail}", bin.display())
+                });
             }
             Ok(())
         }
         res = child.wait() => {
             let status = res.map_err(|e| e.to_string())?;
+            let stderr_text = stderr_task.await.unwrap_or_default();
             if !status.success() {
-                return Err(format!("{} failed ({status})", bin.display()));
+                let detail = stderr_text.trim();
+                return Err(if detail.is_empty() {
+                    format!("{} failed ({status})", bin.display())
+                } else {
+                    format!("{} failed ({status}): {detail}", bin.display())
+                });
             }
             Ok(())
         }
     }
+}
+
+/// Selects the best Alpine Linux ARM64 UEFI cloud image filename from an HTML directory listing.
+/// Upstream Alpine `releases/cloud/` publishes `.qcow2.xz` (and historically `.qcow2`) images;
+/// we prefer `nocloud_alpine-*-aarch64-uefi-tiny-*.qcow2(.xz)` (instant passwordless `root` serial console)
+/// before falling back to `cloudinit` or `generic_alpine-*` variants.
+fn select_alpine_cloud_filename(html: &str) -> Option<String> {
+    for (prefix, must_contain) in [
+        ("nocloud_alpine-", "aarch64-uefi-tiny"),
+        ("nocloud_alpine-", "aarch64-uefi"),
+        ("generic_alpine-", "aarch64-uefi"),
+    ] {
+        for suffix in [".qcow2.xz", ".qcow2"] {
+            if let Some(found) = find_last_matching_token(html, prefix, suffix, Some(must_contain))
+            {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn compare_version_desc(a: &str, b: &str) -> std::cmp::Ordering {
+    let parse_nums = |s: &str| -> Vec<u32> {
+        s.split(|c: char| !c.is_ascii_digit())
+            .filter(|p| !p.is_empty())
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    };
+    parse_nums(b).cmp(&parse_nums(a)).then_with(|| b.cmp(a))
 }
 
 fn find_last_matching_token(
@@ -1983,5 +2186,27 @@ elif cmd == "info":
         assert!(del.deleted);
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn alpine_cloud_resolver_matches_xz_compressed_and_tiny_images() {
+        let html_xz = r#"
+            <a href="nocloud_alpine-3.21.2-x86_64-uefi-tiny-r0.qcow2.xz">x86</a>
+            <a href="nocloud_alpine-3.21.2-aarch64-uefi-cloudinit-r0.qcow2.xz">cloudinit</a>
+            <a href="nocloud_alpine-3.21.2-aarch64-uefi-tiny-r0.qcow2.xz">tiny</a>
+            <a href="nocloud_alpine-3.21.2-aarch64-uefi-tiny-r0.qcow2.xz.sha512">sha</a>
+        "#;
+        assert_eq!(
+            select_alpine_cloud_filename(html_xz).as_deref(),
+            Some("nocloud_alpine-3.21.2-aarch64-uefi-tiny-r0.qcow2.xz")
+        );
+
+        let html_cloudinit_only = r#"
+            <a href="nocloud_alpine-3.22.0-aarch64-uefi-cloudinit-r0.qcow2.xz">cloudinit</a>
+        "#;
+        assert_eq!(
+            select_alpine_cloud_filename(html_cloudinit_only).as_deref(),
+            Some("nocloud_alpine-3.22.0-aarch64-uefi-cloudinit-r0.qcow2.xz")
+        );
     }
 }

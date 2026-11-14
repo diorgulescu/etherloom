@@ -61,6 +61,14 @@ impl SerialNodeHub {
 
     /// Ensures the background Unix socket reader task is connected to QEMU's `_serial.sock`.
     async fn ensure_connected(self: &Arc<Self>) -> Result<(), String> {
+        self.ensure_connected_for_vm("", None).await
+    }
+
+    async fn ensure_connected_for_vm(
+        self: &Arc<Self>,
+        node_id: &str,
+        vm_manager: Option<&VmManager>,
+    ) -> Result<(), String> {
         {
             let guard = self.reader_running.lock().await;
             if *guard {
@@ -68,10 +76,11 @@ impl SerialNodeHub {
             }
         }
 
-        // Retry briefly in case QEMU was spawned milliseconds ago and is still creating `_serial.sock`
+        // Retry up to ~12s while disk overlays are created or macOS Gatekeeper / syspolicyd
+        // verifies Homebrew QEMU's shared libraries on first launch, bailing early if the VM stops/crashes.
         let mut last_err = String::new();
         let mut connected_stream: Option<UnixStream> = None;
-        for _ in 0..35 {
+        for _ in 0..120 {
             match UnixStream::connect(&self.socket_path).await {
                 Ok(stream) => {
                     connected_stream = Some(stream);
@@ -79,7 +88,25 @@ impl SerialNodeHub {
                 }
                 Err(e) => {
                     last_err = e.to_string();
-                    sleep(Duration::from_millis(80)).await;
+                    if let Some(mgr) = vm_manager {
+                        if let Some(info) = mgr.get_vm_info(node_id).await {
+                            match info.status {
+                                VmStatus::Crashed => {
+                                    return Err(info.last_error.unwrap_or_else(|| {
+                                        "QEMU VM exited unexpectedly before opening its serial console."
+                                            .to_string()
+                                    }));
+                                }
+                                VmStatus::Stopped => {
+                                    return Err(
+                                        "VM is stopped. Click Boot VM to start.".to_string()
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    sleep(Duration::from_millis(100)).await;
                 }
             }
         }
@@ -423,7 +450,7 @@ impl ConsoleBridge {
         let clean_path = req.path.split('?').next().unwrap_or(&req.path);
         if let Some(encoded_node) = clean_path.strip_prefix("/serial/") {
             let node_id = percent_decode_segment(encoded_node);
-            self.bridge_serial_ws(stream, &node_id).await
+            self.bridge_serial_ws(stream, &node_id, &vm_manager).await
         } else if let Some(encoded_node) = clean_path.strip_prefix("/vnc/") {
             let node_id = percent_decode_segment(encoded_node);
             self.bridge_vnc_node_ws(stream, &node_id, &vm_manager).await
@@ -438,11 +465,16 @@ impl ConsoleBridge {
         }
     }
 
-    async fn bridge_serial_ws(&self, ws_stream: TcpStream, node_id: &str) -> Result<(), String> {
+    async fn bridge_serial_ws(
+        &self,
+        ws_stream: TcpStream,
+        node_id: &str,
+        vm_manager: &VmManager,
+    ) -> Result<(), String> {
         let hub = self.get_or_create_serial_hub(node_id).await;
         // Subscribe BEFORE reading scrollback so zero bytes are missed in between
         let mut rx = hub.broadcaster.subscribe();
-        if let Err(err) = hub.ensure_connected().await {
+        if let Err(err) = hub.ensure_connected_for_vm(node_id, Some(vm_manager)).await {
             let mut s = ws_stream;
             let msg = format!("\r\n\x1b[33m[Etherloom Serial Bridge] {err}\x1b[0m\r\n");
             let _ = write_ws_frame(&mut s, 0x2, msg.as_bytes()).await;
@@ -507,16 +539,19 @@ impl ConsoleBridge {
         node_id: &str,
         vm_manager: &VmManager,
     ) -> Result<(), String> {
-        // Wait up to ~2.5s if VM is still starting and registering its VNC TCP port
+        // Wait up to ~10s if VM is still starting and registering its VNC TCP port
         let mut target_port: Option<u16> = None;
-        for _ in 0..20 {
+        for _ in 0..80 {
             if let Some(info) = vm_manager.get_vm_info(node_id).await {
+                if matches!(info.status, VmStatus::Stopped | VmStatus::Crashed) {
+                    break;
+                }
                 if let Some(port) = info.vnc_tcp_port {
                     target_port = Some(port);
                     break;
                 }
             }
-            sleep(Duration::from_millis(120)).await;
+            sleep(Duration::from_millis(125)).await;
         }
 
         let Some(tcp_port) = target_port else {
@@ -532,9 +567,9 @@ impl ConsoleBridge {
         mut ws_stream: TcpStream,
         vnc_tcp_port: u16,
     ) -> Result<(), String> {
-        // Retry briefly while QEMU initializes its local RFB TCP socket
+        // Retry while QEMU initializes its local RFB TCP socket
         let mut vnc_conn: Option<TcpStream> = None;
-        for _ in 0..25 {
+        for _ in 0..80 {
             if let Ok(conn) =
                 TcpStream::connect(SocketAddrV4::new(Ipv4Addr::LOCALHOST, vnc_tcp_port)).await
             {

@@ -1,23 +1,34 @@
+import { useState } from "react";
 import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Copy,
   FilePlus2,
   FolderOpen,
   GraduationCap,
   HardDriveDownload,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Waves,
   X,
 } from "lucide-react";
-import type { AcademyLabSummary } from "../../types/studio";
+import type { AcademyLabSummary, EnvDoctorReport } from "../../types/studio";
 import {
   EtherloomBackdropOrnament,
   EtherloomMark,
   EtherloomWordmark,
 } from "../brand";
+import { evaluateQemuHostStatus } from "../layout/QemuMissingBanner";
 
 interface WelcomeModalProps {
   open: boolean;
   labs: AcademyLabSummary[];
+  envReport?: EnvDoctorReport | null;
+  envLoading?: boolean;
+  onRefreshEnv?: () => void;
+  onOpenDoctorModal?: () => void;
   showOnStartup: boolean;
   onChangeShowOnStartup: (show: boolean) => void;
   onClose: () => void;
@@ -32,6 +43,10 @@ interface WelcomeModalProps {
 export function WelcomeModal({
   open,
   labs,
+  envReport = null,
+  envLoading = false,
+  onRefreshEnv,
+  onOpenDoctorModal,
   showOnStartup,
   onChangeShowOnStartup,
   onClose,
@@ -42,7 +57,20 @@ export function WelcomeModal({
   onOpenProject,
   onOpenCustomVmWizard: _onOpenCustomVmWizard,
 }: WelcomeModalProps) {
+  const [copiedBrew, setCopiedBrew] = useState(false);
+
   if (!open) return null;
+
+  const qemuStatus = evaluateQemuHostStatus(envReport);
+  const handleCopyBrew = async () => {
+    try {
+      await navigator.clipboard.writeText("brew install qemu");
+      setCopiedBrew(true);
+      window.setTimeout(() => setCopiedBrew(false), 2000);
+    } catch {
+      // Ignore clipboard permission errors
+    }
+  };
 
   return (
     <div
@@ -114,6 +142,102 @@ export function WelcomeModal({
 
         {/* Body */}
         <div className="p-6 space-y-5 overflow-y-auto overscroll-contain max-h-[72vh] bg-white dark:bg-[#111827]">
+          {/* Automatic Host QEMU Hypervisor Readiness Status */}
+          {envReport && !qemuStatus.ready && (
+            <div className="rounded-xl border border-[#F43F5E]/40 bg-rose-500/[0.08] dark:bg-[#1A1220] p-3.5 space-y-2.5">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-[#F43F5E] shrink-0 mt-0.5" />
+                  <div className="text-xs">
+                    <div className="font-semibold text-rose-900 dark:text-rose-200">
+                      Host Check: QEMU Is Not Installed Yet
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                      Missing:{" "}
+                      <code className="font-mono text-rose-700 dark:text-rose-300">
+                        {qemuStatus.missingItems.join(", ")}
+                      </code>
+                      . Install QEMU via Homebrew in Terminal to boot Apple HVF
+                      &amp; multi-arch virtual machines:
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyBrew()}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F59E0B] hover:bg-amber-400 text-[#090E18] text-xs font-semibold transition-colors"
+                  >
+                    {copiedBrew ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span className="font-mono">brew install qemu</span>
+                      </>
+                    )}
+                  </button>
+                  {onRefreshEnv && (
+                    <button
+                      type="button"
+                      disabled={envLoading}
+                      onClick={onRefreshEnv}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.2)] text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2B42]"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${
+                          envLoading ? "animate-spin text-[#22D3EE]" : ""
+                        }`}
+                      />
+                      <span>Re-check</span>
+                    </button>
+                  )}
+                  {onOpenDoctorModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenDoctorModal();
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.2)] text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#1E2B42]"
+                    >
+                      Details
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {envReport && qemuStatus.ready && (
+            <div className="rounded-xl border border-[#10B981]/35 bg-[#10B981]/[0.07] dark:bg-[#0D1A1C] px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-emerald-800 dark:text-[#34D399]">
+                <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
+                <span className="font-medium">
+                  Host Hypervisor Ready:{" "}
+                  <code className="font-mono text-[11px]">
+                    {qemuStatus.versionSummary ?? "QEMU installed"}
+                  </code>
+                </span>
+              </div>
+              {onOpenDoctorModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenDoctorModal();
+                  }}
+                  className="text-[11px] font-medium text-emerald-700 dark:text-[#22D3EE] hover:underline"
+                >
+                  View System Report
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Primary Featured Card: Networking Academy & Guided Labs */}
           <div className="rounded-xl border border-[#6366F1]/35 bg-[#6366F1]/[0.06] dark:bg-[#162032]/90 dark:border-[#6366F1]/40 p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">

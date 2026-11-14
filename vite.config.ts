@@ -14,6 +14,14 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   clearScreen: false,
+  esbuild: {
+    target: "esnext",
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: "esnext",
+    },
+  },
   build: {
     target: "esnext",
   },

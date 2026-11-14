@@ -12,16 +12,18 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::{oneshot, RwLock};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 pub(crate) const RUNTIME_SOCKET_DIR: &str = "/tmp/etherloom";
 const QMP_CONNECT_TIMEOUT: Duration = Duration::from_millis(1200);
 const DEFAULT_POWERDOWN_TIMEOUT: Duration = Duration::from_millis(4500);
 const SIGTERM_GRACE_TIMEOUT: Duration = Duration::from_millis(1800);
+const QEMU_STARTUP_READY_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_CAPTURED_STDERR_BYTES: usize = 8192;
 
 /// Guest CPU / machine architecture supported by Etherloom's QEMU engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -357,6 +359,8 @@ pub struct VmInstanceInfo {
     pub qemu_args: Vec<String>,
     pub started_at_ms: u64,
     pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 /// Typed Tauri event emitted on `"etherloom://vm-state"`.
@@ -394,10 +398,19 @@ pub struct ResolvedVmLaunchSpec {
     pub nics: Vec<ActiveVmNic>,
 }
 
+/// Escapes literal commas inside QEMU key=value option values (`foo,bar` -> `foo,,bar`).
+fn escape_qemu_opt_val(raw: &str) -> String {
+    if raw.contains(',') {
+        raw.replace(',', ",,")
+    } else {
+        raw.to_string()
+    }
+}
+
 /// Pure function constructing deterministic multi-architecture QEMU CLI arguments (`aarch64`, `x86_64`, `i386`, `riscv64`)
 /// according to `ARCHITECTURE.md`.
 pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
-    let mut args = vec!["-name".to_string(), spec.name.clone()];
+    let mut args = vec!["-name".to_string(), escape_qemu_opt_val(&spec.name)];
 
     // 1. Machine type, hardware acceleration (HVF vs multi-threaded TCG), CPU model, SMP & RAM
     match spec.arch {
@@ -554,6 +567,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
             explicit => explicit,
         };
 
+        let escaped_media = escape_qemu_opt_val(&media_path.display().to_string());
         match effective_bus {
             BootMediaBus::Cdrom => match effective_disk_bus {
                 DiskBus::VirtioBlk => {
@@ -562,8 +576,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
                         "virtio-scsi-pci,id=scsi0".to_string(),
                         "-drive".to_string(),
                         format!(
-                            "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
-                            media_path.display()
+                            "file={escaped_media},if=none,id=install0,format=raw,readonly=on,media=cdrom"
                         ),
                         "-device".to_string(),
                         "scsi-cd,bus=scsi0.0,drive=install0,bootindex=1".to_string(),
@@ -573,8 +586,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
                     args.extend([
                         "-drive".to_string(),
                         format!(
-                            "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
-                            media_path.display()
+                            "file={escaped_media},if=none,id=install0,format=raw,readonly=on,media=cdrom"
                         ),
                         "-device".to_string(),
                         "ide-cd,bus=ahci0.1,drive=install0,bootindex=1".to_string(),
@@ -584,8 +596,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
                     args.extend([
                         "-drive".to_string(),
                         format!(
-                            "file={},if=none,id=install0,format=raw,readonly=on,media=cdrom",
-                            media_path.display()
+                            "file={escaped_media},if=none,id=install0,format=raw,readonly=on,media=cdrom"
                         ),
                         "-device".to_string(),
                         "ide-cd,bus=ide.1,drive=install0,bootindex=1".to_string(),
@@ -599,8 +610,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
                 args.extend([
                     "-drive".to_string(),
                     format!(
-                        "file={},if=none,id=install0,format=raw,readonly=on",
-                        media_path.display()
+                        "file={escaped_media},if=none,id=install0,format=raw,readonly=on"
                     ),
                     "-device".to_string(),
                     "usb-storage,drive=install0,bootindex=1".to_string(),
@@ -616,7 +626,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         "-drive".to_string(),
         format!(
             "file={},if=none,id=hd0,format=qcow2",
-            spec.disk_path.display()
+            escape_qemu_opt_val(&spec.disk_path.display().to_string())
         ),
     ]);
     match effective_disk_bus {
@@ -663,7 +673,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         "-chardev".to_string(),
         format!(
             "socket,id=serial0,path={},server=on,wait=off",
-            spec.serial_socket_path.display()
+            escape_qemu_opt_val(&spec.serial_socket_path.display().to_string())
         ),
         "-serial".to_string(),
         "chardev:serial0".to_string(),
@@ -674,7 +684,7 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         "-chardev".to_string(),
         format!(
             "socket,id=qmp0,path={},server=on,wait=off",
-            spec.qmp_socket_path.display()
+            escape_qemu_opt_val(&spec.qmp_socket_path.display().to_string())
         ),
         "-mon".to_string(),
         "chardev=qmp0,mode=control".to_string(),
@@ -1017,7 +1027,7 @@ impl VmManager {
         let mut cmd = Command::new(&qemu_bin);
         cmd.args(&qemu_args)
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
@@ -1034,6 +1044,30 @@ impl VmManager {
             }
         };
 
+        // Drain QEMU stderr asynchronously into a bounded buffer so pipe buffers never stall
+        // and any startup/runtime failure can be surfaced verbatim to the user.
+        let captured_stderr: Arc<StdMutex<String>> = Arc::new(StdMutex::new(String::new()));
+        let stderr_pipe = child.stderr.take();
+        let stderr_buf_writer = Arc::clone(&captured_stderr);
+        let mut stderr_task = tokio::spawn(async move {
+            if let Some(mut pipe) = stderr_pipe {
+                let mut chunk = [0u8; 1024];
+                while let Ok(n) = pipe.read(&mut chunk).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let piece = String::from_utf8_lossy(&chunk[..n]);
+                    if let Ok(mut guard) = stderr_buf_writer.lock() {
+                        if guard.len() < MAX_CAPTURED_STDERR_BYTES {
+                            let remaining = MAX_CAPTURED_STDERR_BYTES - guard.len();
+                            let trimmed: String = piece.chars().take(remaining).collect();
+                            guard.push_str(&trimmed);
+                        }
+                    }
+                }
+            }
+        });
+
         let pid = child.id();
         if let Some(p) = pid {
             if let Ok(mut map) = self.inner.live_pids.lock() {
@@ -1042,10 +1076,10 @@ impl VmManager {
         }
 
         let vnc_tcp_port = vnc_port_offset.map(|off| 5900 + off);
-        let info = VmInstanceInfo {
+        let mut info = VmInstanceInfo {
             node_id: req.node_id.clone(),
             name: req.name.clone(),
-            status: VmStatus::Running,
+            status: VmStatus::Starting,
             pid,
             cpus: spec.cpus,
             ram_mb: spec.ram_mb,
@@ -1065,6 +1099,7 @@ impl VmManager {
             qemu_args,
             started_at_ms: now_epoch_ms(),
             exit_code: None,
+            last_error: None,
         };
 
         let (exit_tx, exit_rx) = tokio::sync::watch::channel(false);
@@ -1079,6 +1114,196 @@ impl VmManager {
                     exit_rx,
                 },
             );
+        }
+
+        self.emit_vm_event(
+            &info.node_id,
+            VmStatus::Starting,
+            info.pid,
+            info.vnc_tcp_port,
+            &info.serial_socket_path,
+            Some(format!(
+                "Initializing QEMU {} ({})…",
+                req.arch.as_str(),
+                accel_label.to_uppercase()
+            )),
+        )
+        .await;
+
+        // Wait until QEMU creates both its serial and QMP Unix domain sockets (or exits early).
+        // On macOS 27 / Apple Silicon, the first execution of Homebrew `qemu-system-*` after installation
+        // triggers `syspolicyd` dylib verification across ~45 shared libraries and can take several seconds.
+        let startup_deadline = std::time::Instant::now() + QEMU_STARTUP_READY_TIMEOUT;
+        let mut sockets_ready = false;
+        while std::time::Instant::now() < startup_deadline {
+            match child.try_wait() {
+                Ok(Some(exit_status)) => {
+                    let _ = timeout(Duration::from_millis(150), &mut stderr_task).await;
+                    let stderr_text = captured_stderr
+                        .lock()
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_default();
+
+                    if let Ok(mut map) = self.inner.live_pids.lock() {
+                        map.remove(&req.node_id);
+                    }
+                    if let Some(off) = vnc_port_offset {
+                        self.release_vnc_offset(off);
+                    }
+                    cleanup_node_sockets(&req.node_id);
+
+                    let exit_code = exit_status.code();
+                    let err_detail = if stderr_text.is_empty() {
+                        format!(
+                            "QEMU exited during startup ({})",
+                            exit_code
+                                .map(|c| format!("status {c}"))
+                                .unwrap_or_else(|| exit_status.to_string())
+                        )
+                    } else {
+                        format!(
+                            "QEMU exited during startup ({}): {}",
+                            exit_code
+                                .map(|c| format!("status {c}"))
+                                .unwrap_or_else(|| exit_status.to_string()),
+                            stderr_text
+                        )
+                    };
+
+                    let (final_status, ports_to_clean) = {
+                        let mut guard = self.inner.vms.write().await;
+                        if let Some(entry) = guard.get_mut(&req.node_id) {
+                            let was_stopping = entry.info.status == VmStatus::Stopping;
+                            let st = if was_stopping {
+                                VmStatus::Stopped
+                            } else {
+                                VmStatus::Crashed
+                            };
+                            entry.info.status = st;
+                            entry.info.pid = None;
+                            entry.info.exit_code = exit_code;
+                            entry.info.last_error = if st == VmStatus::Crashed {
+                                Some(err_detail.clone())
+                            } else {
+                                None
+                            };
+                            (st, std::mem::take(&mut entry.owned_fabric_ports))
+                        } else {
+                            (VmStatus::Crashed, owned_fabric_ports)
+                        }
+                    };
+                    for p in ports_to_clean {
+                        let _ = fabric.remove_port(&p).await;
+                    }
+                    let _ = exit_tx.send(true);
+                    self.emit_vm_event(
+                        &info.node_id,
+                        final_status,
+                        None,
+                        None,
+                        &info.serial_socket_path,
+                        Some(err_detail.clone()),
+                    )
+                    .await;
+                    return Err(err_detail);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return Err(format!("Failed polling QEMU startup state: {e}"));
+                }
+            }
+
+            if fs::symlink_metadata(&serial_socket_path).is_ok()
+                && fs::symlink_metadata(&qmp_socket_path).is_ok()
+            {
+                // Brief settle pause so QEMU finishes binding its local RFB VNC port right after chardevs
+                sleep(Duration::from_millis(30)).await;
+                if matches!(child.try_wait(), Ok(None)) {
+                    sockets_ready = true;
+                    break;
+                }
+            }
+
+            sleep(Duration::from_millis(40)).await;
+        }
+
+        if !sockets_ready {
+            let _ = child.kill().await;
+            let _ = timeout(Duration::from_millis(150), &mut stderr_task).await;
+            let stderr_text = captured_stderr
+                .lock()
+                .ok()
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+
+            if let Ok(mut map) = self.inner.live_pids.lock() {
+                map.remove(&req.node_id);
+            }
+            if let Some(off) = vnc_port_offset {
+                self.release_vnc_offset(off);
+            }
+            cleanup_node_sockets(&req.node_id);
+
+            let ports_to_clean = {
+                let mut guard = self.inner.vms.write().await;
+                if let Some(entry) = guard.get_mut(&req.node_id) {
+                    entry.info.status = VmStatus::Crashed;
+                    entry.info.pid = None;
+                    let msg = if stderr_text.is_empty() {
+                        format!(
+                            "Timed out waiting for QEMU serial socket {}",
+                            serial_socket_path.display()
+                        )
+                    } else {
+                        format!(
+                            "Timed out waiting for QEMU serial socket {}: {}",
+                            serial_socket_path.display(),
+                            stderr_text
+                        )
+                    };
+                    entry.info.last_error = Some(msg);
+                    std::mem::take(&mut entry.owned_fabric_ports)
+                } else {
+                    owned_fabric_ports
+                }
+            };
+            for p in ports_to_clean {
+                let _ = fabric.remove_port(&p).await;
+            }
+            let _ = exit_tx.send(true);
+
+            let err_msg = if stderr_text.is_empty() {
+                format!(
+                    "Timed out after {}s waiting for QEMU to initialize serial socket {}",
+                    QEMU_STARTUP_READY_TIMEOUT.as_secs(),
+                    serial_socket_path.display()
+                )
+            } else {
+                format!(
+                    "QEMU failed to initialize serial socket {}: {}",
+                    serial_socket_path.display(),
+                    stderr_text
+                )
+            };
+            self.emit_vm_event(
+                &info.node_id,
+                VmStatus::Crashed,
+                None,
+                None,
+                &info.serial_socket_path,
+                Some(err_msg.clone()),
+            )
+            .await;
+            return Err(err_msg);
+        }
+
+        info.status = VmStatus::Running;
+        {
+            let mut guard = self.inner.vms.write().await;
+            if let Some(entry) = guard.get_mut(&req.node_id) {
+                entry.info.status = VmStatus::Running;
+            }
         }
 
         self.emit_vm_event(
@@ -1105,7 +1330,13 @@ impl VmManager {
         let serial_str = info.serial_socket_path.clone();
         tokio::spawn(async move {
             let wait_res = child.wait().await;
+            let _ = timeout(Duration::from_millis(150), stderr_task).await;
             let exit_code = wait_res.as_ref().ok().and_then(|s| s.code());
+            let stderr_text = captured_stderr
+                .lock()
+                .ok()
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
 
             if let Ok(mut map) = mgr.inner.live_pids.lock() {
                 map.remove(&node_id);
@@ -1115,7 +1346,7 @@ impl VmManager {
             }
             cleanup_node_sockets(&node_id);
 
-            let (final_status, ports_to_clean) = {
+            let (final_status, ports_to_clean, event_msg) = {
                 let mut guard = mgr.inner.vms.write().await;
                 if let Some(entry) = guard.get_mut(&node_id) {
                     let was_stopping = entry.info.status == VmStatus::Stopping;
@@ -1124,13 +1355,31 @@ impl VmManager {
                     } else {
                         VmStatus::Crashed
                     };
+                    let msg = if final_status == VmStatus::Crashed && !stderr_text.is_empty() {
+                        Some(format!(
+                            "QEMU exited ({}): {}",
+                            exit_code
+                                .map(|c| format!("status {c}"))
+                                .unwrap_or_else(|| "terminated".to_string()),
+                            stderr_text
+                        ))
+                    } else {
+                        exit_code.map(|c| format!("Exited with status {c}"))
+                    };
                     entry.info.status = final_status;
                     entry.info.pid = None;
                     entry.info.exit_code = exit_code;
+                    if final_status == VmStatus::Crashed {
+                        entry.info.last_error = msg.clone();
+                    }
                     let ports = std::mem::take(&mut entry.owned_fabric_ports);
-                    (final_status, ports)
+                    (final_status, ports, msg)
                 } else {
-                    (VmStatus::Stopped, Vec::new())
+                    (
+                        VmStatus::Stopped,
+                        Vec::new(),
+                        exit_code.map(|c| format!("Exited with status {c}")),
+                    )
                 }
             };
 
@@ -1176,7 +1425,7 @@ impl VmManager {
                 None,
                 None,
                 &serial_str,
-                exit_code.map(|c| format!("Exited with status {c}")),
+                event_msg,
             )
             .await;
         });

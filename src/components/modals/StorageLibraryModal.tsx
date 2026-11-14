@@ -42,6 +42,7 @@ import {
 import type {
   CatalogDownloadProgressEvent,
   DiskTelemetry,
+  EnvDoctorReport,
   OsCatalogEntryDto,
   StorageMigrationMode,
   StorageMigrationProgress,
@@ -66,6 +67,8 @@ type FilterTabId =
 interface StorageLibraryModalProps {
   open: boolean;
   hostArch?: string;
+  envReport?: EnvDoctorReport | null;
+  onOpenEnvDoctor?: () => void;
   storageState: StorageStateSnapshot | null;
   migrationProgress: StorageMigrationProgress | null;
   focusedCatalogIds?: string[] | null;
@@ -84,9 +87,28 @@ interface StorageLibraryModalProps {
   onNotify: (kind: "ok" | "error", text: string) => void;
 }
 
+function formatProgressStageBadge(stage?: string): string {
+  switch ((stage ?? "").toLowerCase()) {
+    case "resolving":
+      return "Resolving Mirror…";
+    case "downloading":
+      return "Downloading";
+    case "verifying":
+      return "Verifying SHA-256";
+    case "extracting":
+      return "Extracting Archive";
+    case "converting qcow2":
+      return "Preparing qcow2";
+    default:
+      return stage || "Downloading";
+  }
+}
+
 export function StorageLibraryModal({
   open,
   hostArch = "aarch64",
+  envReport = null,
+  onOpenEnvDoctor,
   storageState,
   migrationProgress,
   focusedCatalogIds = null,
@@ -348,12 +370,20 @@ export function StorageLibraryModal({
       await startCatalogDownload(entry.id, customUrl);
       await refreshCatalog();
     } catch (err: unknown) {
-      setProgressById((prev) => {
-        const next = { ...prev };
-        delete next[entry.id];
-        return next;
-      });
-      onNotify("error", err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setProgressById((prev) => ({
+        ...prev,
+        [entry.id]: {
+          catalogId: entry.id,
+          stage: "error",
+          bytesDownloaded: 0,
+          totalBytes: null,
+          percent: 0,
+          message: msg,
+          error: msg,
+        },
+      }));
+      onNotify("error", msg);
     }
   };
 
@@ -918,6 +948,47 @@ export function StorageLibraryModal({
           </div>
         </div>
 
+        {/* Missing QEMU Host Dependency Callout */}
+        {envReport &&
+          (!envReport.qemuImg.found || !envReport.qemuSystemAarch64.found) && (
+            <div className="mx-5 mt-3 rounded-xl bg-amber-500/10 border border-amber-500/35 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+              <div className="flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200 max-w-3xl">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <span>
+                  <strong>QEMU is not installed on this Mac yet.</strong> Native{" "}
+                  <code className="font-mono">.qcow2</code> images (like Alpine,
+                  Debian &amp; FreeBSD) can still download right now, while
+                  converting raw disk archives and booting VMs requires{" "}
+                  <code className="font-mono text-amber-700 dark:text-amber-300">
+                    brew install qemu
+                  </code>
+                  .
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText("brew install qemu");
+                    onNotify("ok", "Copied `brew install qemu` to clipboard");
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-[#090E18] text-xs font-semibold transition-colors"
+                >
+                  Copy brew install qemu
+                </button>
+                {onOpenEnvDoctor && (
+                  <button
+                    type="button"
+                    onClick={onOpenEnvDoctor}
+                    className="px-2.5 py-1 rounded-lg border border-amber-500/40 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-500/15 transition-colors"
+                  >
+                    Env Doctor
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
         {/* Academy Lab Prerequisite Filter Banner (when deep-linked from AcademyModal) */}
         {focusedCatalogIds && focusedCatalogIds.length > 0 && (
           <div className="mx-5 mt-3 rounded-xl bg-[#6366F1]/10 border border-[#6366F1]/35 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
@@ -995,9 +1066,85 @@ export function StorageLibraryModal({
         )}
 
         {/* Scrollable 15-OS Catalog Grid (Opaque GPU-composited surface for macOS WKWebView stability) */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 bg-slate-50 dark:bg-[#0D1321]">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {filteredEntries.map((entry) => {
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 bg-slate-50 dark:bg-[#0D1321]"
+          aria-busy={loadingEntries}
+        >
+          {loadingEntries && entries.length === 0 ? (
+            <div className="min-h-[320px] flex flex-col items-center justify-center py-10 space-y-6">
+              <div className="rounded-2xl bg-white dark:bg-[#162032] border border-slate-200 dark:border-[rgba(34,211,238,0.24)] px-6 py-5 shadow-sm flex flex-col items-center text-center max-w-md space-y-2.5">
+                <div className="w-11 h-11 rounded-xl bg-[#22D3EE]/15 border border-[#22D3EE]/35 flex items-center justify-center text-cyan-600 dark:text-[#22D3EE]">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                </div>
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  Please wait, loading OS Library…
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Scanning <code className="font-mono text-[#22D3EE]">templates/</code>{" "}
+                  and <code className="font-mono text-[#22D3EE]">isos/</code>{" "}
+                  on active storage and preparing the 15 curated OS catalog
+                  cards.
+                </p>
+              </div>
+
+              <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4 opacity-55 pointer-events-none select-none">
+                {[0, 1, 2, 3].map((idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-xl border border-slate-200/80 dark:border-[rgba(34,211,238,0.12)] bg-white dark:bg-[#162032] p-4 space-y-3 animate-pulse"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-slate-200 dark:bg-[#1E2B42]" />
+                      <div className="space-y-1.5 flex-1">
+                        <div className="h-3.5 w-36 rounded bg-slate-200 dark:bg-[#1E2B42]" />
+                        <div className="h-2.5 w-24 rounded bg-slate-100 dark:bg-[#090E18]" />
+                      </div>
+                    </div>
+                    <div className="h-3 w-full rounded bg-slate-100 dark:bg-[#090E18]" />
+                    <div className="h-3 w-4/5 rounded bg-slate-100 dark:bg-[#090E18]" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {loadingEntries && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="rounded-xl bg-[#22D3EE]/10 dark:bg-[#162032] border border-[#22D3EE]/35 px-3.5 py-2 flex items-center gap-2.5 text-xs text-cyan-800 dark:text-[#22D3EE]"
+                >
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span className="font-medium">
+                    Please wait, refreshing OS Library &amp; checking disk
+                    templates…
+                  </span>
+                </div>
+              )}
+
+              {!loadingEntries &&
+              filteredEntries.length === 0 &&
+              entries.length > 0 ? (
+                <div className="min-h-[220px] rounded-xl border border-dashed border-slate-300 dark:border-[rgba(34,211,238,0.2)] bg-white/70 dark:bg-[#162032]/60 p-8 flex flex-col items-center justify-center text-center space-y-2.5">
+                  <Info className="w-5 h-5 text-slate-400 dark:text-[#22D3EE]" />
+                  <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                    No operating systems match the current filter
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterTab("all");
+                      setSearchQuery("");
+                      onClearFocusedCatalogIds?.();
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] text-xs font-semibold transition-colors"
+                  >
+                    Show All OSes
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {filteredEntries.map((entry) => {
               const prog = progressById[entry.id];
               const isDownloading =
                 entry.availability === "downloading" ||
@@ -1080,7 +1227,12 @@ export function StorageLibraryModal({
                       ) : isDownloading ? (
                         <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border border-[#22D3EE]/35">
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>{prog?.stage ?? "Downloading"}</span>
+                          <span>{formatProgressStageBadge(prog?.stage)}</span>
+                        </span>
+                      ) : prog?.stage === "error" ? (
+                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#F43F5E]/15 text-rose-700 dark:text-rose-300 border border-[#F43F5E]/40">
+                          <AlertTriangle className="w-3 h-3" />
+                          <span>Failed</span>
                         </span>
                       ) : (
                         <span className="shrink-0 text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-200/70 dark:bg-[#090E18] dark:border dark:border-[rgba(34,211,238,0.14)] text-slate-500 dark:text-slate-400">
@@ -1186,20 +1338,87 @@ export function StorageLibraryModal({
                           {prog.message}
                         </span>
                         <span className="font-mono text-cyan-700 dark:text-cyan-300 shrink-0">
-                          {formatByteSize(prog.bytesDownloaded)}
-                          {prog.totalBytes
-                            ? ` / ${formatByteSize(prog.totalBytes)}`
-                            : ""}{" "}
-                          ({Math.round(prog.percent)}%)
+                          {prog.stage === "resolving" && prog.bytesDownloaded === 0 ? (
+                            "Connecting…"
+                          ) : prog.bytesDownloaded > 0 ? (
+                            <>
+                              {formatByteSize(prog.bytesDownloaded)}
+                              {prog.totalBytes
+                                ? ` / ${formatByteSize(prog.totalBytes)}`
+                                : ""}
+                              {prog.percent > 0
+                                ? ` (${Math.round(prog.percent)}%)`
+                                : ""}
+                            </>
+                          ) : prog.percent > 0 ? (
+                            `${Math.round(prog.percent)}%`
+                          ) : (
+                            "Preparing…"
+                          )}
                         </span>
                       </div>
                       <div className="h-1.5 rounded-full bg-cyan-950/20 dark:bg-[#090E18] overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-[#22D3EE] to-[#10B981] transition-all duration-200"
+                          className={`h-full bg-gradient-to-r from-[#22D3EE] to-[#10B981] transition-all duration-200 ${
+                            prog.stage === "resolving" ? "animate-pulse" : ""
+                          }`}
                           style={{
-                            width: `${Math.max(2, Math.min(100, prog.percent))}%`,
+                            width:
+                              prog.stage === "resolving"
+                                ? "18%"
+                                : `${Math.max(4, Math.min(100, prog.percent || 8))}%`,
                           }}
                         />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inline Download / Conversion Error Banner */}
+                  {!isDownloading && prog?.stage === "error" && (
+                    <div className="rounded-lg bg-[#F43F5E]/10 border border-[#F43F5E]/35 p-2.5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 text-xs text-rose-800 dark:text-rose-200 min-w-0">
+                          <AlertTriangle className="w-4 h-4 text-[#F43F5E] shrink-0 mt-0.5" />
+                          <span className="leading-snug break-words">
+                            {prog.error || prog.message || "Download failed."}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          title="Dismiss error"
+                          onClick={() =>
+                            setProgressById((prev) => {
+                              const next = { ...prev };
+                              delete next[entry.id];
+                              return next;
+                            })
+                          }
+                          className="p-0.5 rounded text-rose-400 hover:text-rose-600 dark:hover:text-rose-200 shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 pl-6">
+                        <button
+                          type="button"
+                          onClick={() => void handleStartDownload(entry)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#F43F5E] hover:bg-rose-500 text-white text-[11px] font-semibold"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMirrorInputOpen((prev) => ({
+                              ...prev,
+                              [entry.id]: true,
+                            }))
+                          }
+                          className="px-2.5 py-1 rounded-md border border-[#F43F5E]/35 text-rose-700 dark:text-rose-200 hover:bg-[#F43F5E]/15 text-[11px] font-medium"
+                        >
+                          Custom Mirror URL
+                        </button>
                       </div>
                     </div>
                   )}
@@ -1397,7 +1616,10 @@ export function StorageLibraryModal({
                 </div>
               );
             })}
-          </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}

@@ -244,10 +244,16 @@ export function SerialTerminalPane({
     return () => window.cancelAnimationFrame(id);
   }, [visible]);
 
-  // Connect / reconnect WebSocket to Rust SerialNodeHub when VM is booting/running
+  // Connect / reconnect WebSocket to Rust SerialNodeHub once VM reaches "running"
   useEffect(() => {
     if (!isTauriRuntime()) {
-      setConnState(status === "running" ? "connected" : "standby");
+      setConnState(
+        status === "running"
+          ? "connected"
+          : status === "booting"
+          ? "connecting"
+          : "standby"
+      );
       return;
     }
 
@@ -258,50 +264,86 @@ export function SerialTerminalPane({
       return;
     }
 
+    if (status === "booting") {
+      // Wait for VmManager::spawn_vm to finish overlay prep & create `_serial.sock`
+      wsRef.current?.close();
+      wsRef.current = null;
+      setConnState("connecting");
+      return;
+    }
+
     let cancelled = false;
-    setConnState("connecting");
+    let retryTimer: number | null = null;
+    let retryCount = 0;
+    const MAX_AUTO_RETRIES = 4;
 
-    void getConsoleSessionEndpoints(nodeId)
-      .then((ep) => {
-        if (cancelled) return;
-        setSocketPath(ep.serialSocketPath);
-        if (!ep.serialWsUrl) {
-          setConnState("disconnected");
-          return;
-        }
+    const connectSerialWs = () => {
+      if (cancelled) return;
+      setConnState("connecting");
 
-        wsRef.current?.close();
-        const ws = new WebSocket(ep.serialWsUrl);
-        ws.binaryType = "arraybuffer";
-        wsRef.current = ws;
+      void getConsoleSessionEndpoints(nodeId)
+        .then((ep) => {
+          if (cancelled) return;
+          setSocketPath(ep.serialSocketPath);
+          if (!ep.serialWsUrl) {
+            setConnState("disconnected");
+            return;
+          }
 
-        ws.onopen = () => {
-          if (!cancelled) {
-            setConnState("connected");
+          wsRef.current?.close();
+          const ws = new WebSocket(ep.serialWsUrl);
+          ws.binaryType = "arraybuffer";
+          wsRef.current = ws;
+
+          let opened = false;
+          ws.onopen = () => {
+            opened = true;
+            retryCount = 0;
+            if (!cancelled) {
+              setConnState("connected");
+            }
+          };
+          ws.onmessage = (ev) => {
+            if (ev.data instanceof ArrayBuffer) {
+              termRef.current?.write(new Uint8Array(ev.data));
+            } else if (typeof ev.data === "string") {
+              termRef.current?.write(ev.data);
+            }
+          };
+          ws.onerror = () => {
+            if (!cancelled && !opened) {
+              setConnState("disconnected");
+            }
+          };
+          ws.onclose = () => {
+            if (cancelled) return;
+            if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
+              retryCount += 1;
+              setConnState("connecting");
+              retryTimer = window.setTimeout(connectSerialWs, 900);
+            } else {
+              setConnState(status === "running" ? "disconnected" : "standby");
+            }
+          };
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
+            retryCount += 1;
+            retryTimer = window.setTimeout(connectSerialWs, 900);
+          } else {
+            setConnState("disconnected");
           }
-        };
-        ws.onmessage = (ev) => {
-          if (ev.data instanceof ArrayBuffer) {
-            termRef.current?.write(new Uint8Array(ev.data));
-          } else if (typeof ev.data === "string") {
-            termRef.current?.write(ev.data);
-          }
-        };
-        ws.onerror = () => {
-          if (!cancelled) setConnState("disconnected");
-        };
-        ws.onclose = () => {
-          if (!cancelled) {
-            setConnState(status === "running" ? "disconnected" : "standby");
-          }
-        };
-      })
-      .catch(() => {
-        if (!cancelled) setConnState("disconnected");
-      });
+        });
+    };
+
+    connectSerialWs();
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
       wsRef.current?.close();
       wsRef.current = null;
     };
@@ -374,6 +416,11 @@ export function SerialTerminalPane({
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#162032] text-[#22D3EE] border border-[rgba(34,211,238,0.18)]">
             {dims.cols}×{dims.rows}
           </span>
+          {status === "booting" && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse">
+              Starting QEMU…
+            </span>
+          )}
           {actionFlash && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-[#22D3EE]">
               {actionFlash}
