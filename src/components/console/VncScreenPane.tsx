@@ -5,6 +5,7 @@ import {
   ClipboardCopy,
   ClipboardPaste,
   Info,
+  Loader2,
   Maximize,
   Monitor,
   Play,
@@ -151,7 +152,7 @@ export function VncScreenPane({
     let cancelled = false;
     let retryTimer: number | null = null;
     let retryCount = 0;
-    const MAX_AUTO_RETRIES = 4;
+    const MAX_AUTO_RETRIES = 10;
 
     const connectAttempt = async () => {
       if (cancelled) return;
@@ -188,7 +189,7 @@ export function VncScreenPane({
           if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
             retryCount += 1;
             setRfbState("connecting");
-            retryTimer = window.setTimeout(() => void connectAttempt(), 900);
+            retryTimer = window.setTimeout(() => void connectAttempt(), 600);
           } else {
             setRfbState(status === "running" ? "disconnected" : "standby");
           }
@@ -199,7 +200,7 @@ export function VncScreenPane({
         if (cancelled) return;
         if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
           retryCount += 1;
-          retryTimer = window.setTimeout(() => void connectAttempt(), 900);
+          retryTimer = window.setTimeout(() => void connectAttempt(), 600);
         } else {
           setRfbState("disconnected");
         }
@@ -333,9 +334,14 @@ export function VncScreenPane({
           {displayMode === "vnc" && (
             <button
               type="button"
+              disabled={status !== "running"}
               onClick={() => setReconnectTick((t) => t + 1)}
-              title="Reconnect VNC WebSocket"
-              className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+              title={
+                status === "booting"
+                  ? "Waiting for QEMU startup…"
+                  : "Reconnect VNC WebSocket"
+              }
+              className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 disabled:opacity-35"
             >
               <RefreshCw className="w-3 h-3" />
             </button>
@@ -447,12 +453,18 @@ export function VncScreenPane({
         ) : rfbState !== "connected" ? (
           <div className="max-w-md text-center p-4 space-y-3">
             <div className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center mx-auto">
-              <Monitor className="w-5 h-5" />
+              {status === "booting" ? (
+                <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+              ) : (
+                <Monitor className="w-5 h-5" />
+              )}
             </div>
             <div className="space-y-1">
               <h3 className="text-xs font-semibold text-zinc-100">
                 {status === "stopped"
                   ? `UEFI Graphical Screen Standby (${hostname})`
+                  : status === "booting"
+                  ? `Starting ${hostname} & Initializing UEFI Framebuffer…`
                   : rfbState === "connecting"
                   ? `Connecting to ${hostname} UEFI Framebuffer…`
                   : isTauriRuntime()
@@ -464,6 +476,8 @@ export function VncScreenPane({
                   ? "Boot the VM to interact with the EDK2 UEFI boot menu and complete FreeBSD, OpenBSD, NetBSD, or Linux ISO/IMG installations directly inside this tab."
                   : !isTauriRuntime()
                   ? "Run inside Tauri (`npm run tauri dev`) to stream live QEMU ramfb VNC frames."
+                  : status === "booting"
+                  ? "Preparing CoW disk overlay and QEMU ramfb socket. The graphical stream will attach automatically as soon as QEMU is ready."
                   : "Click Reconnect if QEMU is still initializing its UEFI framebuffer."}
               </p>
             </div>
@@ -487,7 +501,7 @@ export function VncScreenPane({
                     <span>Use Native Cocoa Window</span>
                   </button>
                 </>
-              ) : (
+              ) : status === "running" ? (
                 <button
                   type="button"
                   onClick={() => setReconnectTick((t) => t + 1)}
@@ -496,7 +510,7 @@ export function VncScreenPane({
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Reconnect VNC Stream</span>
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         ) : null}

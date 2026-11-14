@@ -4,6 +4,8 @@ import { AlertTriangle, RotateCcw } from "lucide-react";
 interface ErrorBoundaryProps {
   children: ReactNode;
   scopeLabel?: string;
+  /** When false (e.g. a background-mounted modal that is currently closed), never render a full-screen error overlay. */
+  active?: boolean;
   onReset?: () => void;
 }
 
@@ -33,6 +35,13 @@ export class ErrorBoundary extends Component<
     );
   }
 
+  public componentDidUpdate(prevProps: ErrorBoundaryProps): void {
+    // Clear any stale background error when transitioning from closed -> open so the child gets a clean mount attempt
+    if (!prevProps.active && this.props.active && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
   private handleRecover = () => {
     this.setState({ error: null });
     this.props.onReset?.();
@@ -41,6 +50,10 @@ export class ErrorBoundary extends Component<
   public render() {
     if (!this.state.error) {
       return this.props.children;
+    }
+
+    if (this.props.active === false) {
+      return null;
     }
 
     const isScoped = Boolean(this.props.onReset);

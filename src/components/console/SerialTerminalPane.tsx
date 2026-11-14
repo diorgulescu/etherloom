@@ -275,7 +275,7 @@ export function SerialTerminalPane({
     let cancelled = false;
     let retryTimer: number | null = null;
     let retryCount = 0;
-    const MAX_AUTO_RETRIES = 4;
+    const MAX_AUTO_RETRIES = 8;
 
     const connectSerialWs = () => {
       if (cancelled) return;
@@ -320,7 +320,7 @@ export function SerialTerminalPane({
             if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
               retryCount += 1;
               setConnState("connecting");
-              retryTimer = window.setTimeout(connectSerialWs, 900);
+              retryTimer = window.setTimeout(connectSerialWs, 600);
             } else {
               setConnState(status === "running" ? "disconnected" : "standby");
             }
@@ -330,7 +330,7 @@ export function SerialTerminalPane({
           if (cancelled) return;
           if (status === "running" && retryCount < MAX_AUTO_RETRIES) {
             retryCount += 1;
-            retryTimer = window.setTimeout(connectSerialWs, 900);
+            retryTimer = window.setTimeout(connectSerialWs, 600);
           } else {
             setConnState("disconnected");
           }
@@ -493,9 +493,14 @@ export function SerialTerminalPane({
 
           <button
             type="button"
+            disabled={status !== "running"}
             onClick={() => setReconnectTick((t) => t + 1)}
-            title="Reconnect serial socket"
-            className="p-1 rounded hover:bg-[#162032] text-slate-400 hover:text-slate-200"
+            title={
+              status === "booting"
+                ? "Waiting for QEMU startup…"
+                : "Reconnect serial socket"
+            }
+            className="p-1 rounded hover:bg-[#162032] text-slate-400 hover:text-slate-200 disabled:opacity-35"
           >
             <RefreshCw className="w-3 h-3" />
           </button>

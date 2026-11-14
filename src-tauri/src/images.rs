@@ -6,9 +6,12 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
+use tokio::time::timeout;
 use uuid::Uuid;
+
+const QEMU_IMG_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Built-in Guest OS Profile preset defining NIC naming conventions, architecture, and default compute sizing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -605,13 +608,23 @@ impl ImageStore {
 
     pub(crate) async fn run_qemu_img(&self, args: &[String]) -> Result<String, String> {
         let bin = self.require_qemu_img()?;
-        let output = Command::new(&bin)
-            .args(args)
+        let mut cmd = Command::new(&bin);
+        cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
+            .kill_on_drop(true);
+
+        let output = timeout(QEMU_IMG_TIMEOUT, cmd.output())
             .await
+            .map_err(|_| {
+                format!(
+                    "Timed out after {}s running {} {}",
+                    QEMU_IMG_TIMEOUT.as_secs(),
+                    bin.display(),
+                    args.first().map(String::as_str).unwrap_or("")
+                )
+            })?
             .map_err(|e| format!("Failed to execute {}: {e}", bin.display()))?;
 
         if !output.status.success() {
@@ -632,7 +645,8 @@ impl ImageStore {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    /// Inspects a disk file using `qemu-img info --output=json` when available, falling back to filesystem metadata.
+    /// Inspects a disk file using `qemu-img info -U --output=json` (`--force-share`) when available,
+    /// avoiding advisory lock contention against starting/shutting-down QEMU instances.
     pub async fn inspect_disk(&self, disk_path: &Path) -> Result<DiskInfo, String> {
         let meta = fs::metadata(disk_path)
             .map_err(|e| format!("Disk {} does not exist: {e}", disk_path.display()))?;
@@ -641,6 +655,7 @@ impl ImageStore {
         if self.resolve_qemu_img_bin().is_some() {
             let args = vec![
                 "info".to_string(),
+                "-U".to_string(),
                 "--output=json".to_string(),
                 disk_path.display().to_string(),
             ];

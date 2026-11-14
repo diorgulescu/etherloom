@@ -284,6 +284,7 @@ export function ActivityMonitorModal({
   }, [open, onClose]);
 
   const rows = useMemo<EnrichedNodeTelemetryRow[]>(() => {
+    if (!open || !Array.isArray(nodes)) return [];
     const vmById = new Map<string, VmProcessTelemetry>();
     for (const vm of snapshot?.vms ?? []) {
       vmById.set(vm.nodeId, vm);
@@ -429,7 +430,7 @@ export function ActivityMonitorModal({
     }
 
     return result;
-  }, [nodes, snapshot]);
+  }, [nodes, open, snapshot]);
 
   const counts = useMemo(() => {
     let running = 0;

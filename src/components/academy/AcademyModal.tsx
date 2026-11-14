@@ -37,8 +37,8 @@ interface AcademyModalProps {
   ) => void;
 }
 
-function difficultyBadgeClass(difficulty: string): string {
-  switch (difficulty.toLowerCase()) {
+function difficultyBadgeClass(difficulty: string | undefined): string {
+  switch ((difficulty ?? "").toLowerCase()) {
     case "beginner":
       return "bg-[#10B981]/15 text-emerald-700 dark:text-[#34D399] border-[#10B981]/35";
     case "intermediate":
@@ -51,8 +51,11 @@ function difficultyBadgeClass(difficulty: string): string {
 }
 
 function getMissingCatalogIds(lab: AcademyLabSummary): string[] {
-  return lab.requiredTemplates
-    .filter((r) => !r.satisfied)
+  const reqs = Array.isArray(lab.requiredTemplates)
+    ? lab.requiredTemplates
+    : [];
+  return reqs
+    .filter((r) => r && !r.satisfied)
     .map((r) => r.catalogId ?? r.osProfileId);
 }
 
@@ -92,38 +95,61 @@ export function AcademyModal({
     }
   }, [initialPromptLabId, onClearInitialPromptLab, open]);
 
+  const safeLabs = useMemo(
+    () =>
+      Array.isArray(labs)
+        ? labs.filter(
+            (l): l is AcademyLabSummary =>
+              Boolean(
+                l &&
+                  typeof l === "object" &&
+                  typeof l.id === "string" &&
+                  typeof l.title === "string"
+              )
+          )
+        : [],
+    [labs]
+  );
+
   const promptLab = useMemo(
     () =>
-      missingPromptLabId
-        ? labs.find((l) => l.id === missingPromptLabId) ?? null
+      open && missingPromptLabId
+        ? safeLabs.find((l) => l.id === missingPromptLabId) ?? null
         : null,
-    [labs, missingPromptLabId]
+    [missingPromptLabId, open, safeLabs]
   );
 
   const allTags = useMemo(() => {
+    if (!open) return [];
     const set = new Set<string>();
-    for (const lab of labs) {
-      for (const tag of lab.tags) {
-        set.add(tag);
+    for (const lab of safeLabs) {
+      const tags = Array.isArray(lab.tags) ? lab.tags : [];
+      for (const tag of tags) {
+        if (typeof tag === "string" && tag) {
+          set.add(tag);
+        }
       }
     }
     return Array.from(set);
-  }, [labs]);
+  }, [open, safeLabs]);
 
   const filteredLabs = useMemo(() => {
-    return labs.filter((lab) => {
+    if (!open) return [];
+    return safeLabs.filter((lab) => {
+      const diff = (lab.difficulty ?? "").toLowerCase();
+      const tags = Array.isArray(lab.tags) ? lab.tags : [];
       if (
         difficultyFilter !== "All" &&
-        lab.difficulty.toLowerCase() !== difficultyFilter.toLowerCase()
+        diff !== difficultyFilter.toLowerCase()
       ) {
         return false;
       }
-      if (selectedTag && !lab.tags.includes(selectedTag)) {
+      if (selectedTag && !tags.includes(selectedTag)) {
         return false;
       }
       return true;
     });
-  }, [difficultyFilter, labs, selectedTag]);
+  }, [difficultyFilter, open, safeLabs, selectedTag]);
 
   if (!open) return null;
 
@@ -177,7 +203,7 @@ export function AcademyModal({
                 <GraduationCap className="w-4 h-4 text-[#6366F1] dark:text-[#818CF8] shrink-0" />
                 <span>Etherloom Networking Academy &amp; Guided Labs</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#6366F1]/15 text-indigo-700 dark:text-[#818CF8] border border-[#6366F1]/30">
-                  {labs.length} Interactive Labs
+                  {safeLabs.length} Interactive Labs
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -264,9 +290,11 @@ export function AcademyModal({
           {filteredLabs.map((lab) => {
             const isActive = activeLabId === lab.id;
             const isLaunching = launchingLabId === lab.id;
-            const missingTemplates = lab.requiredTemplates.filter(
-              (r) => !r.satisfied
-            );
+            const labTags = Array.isArray(lab.tags) ? lab.tags : [];
+            const labReqs = Array.isArray(lab.requiredTemplates)
+              ? lab.requiredTemplates
+              : [];
+            const missingTemplates = labReqs.filter((r) => r && !r.satisfied);
 
             return (
               <div
@@ -323,7 +351,7 @@ export function AcademyModal({
 
                     {/* Tags & Required OS Templates Readiness */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      {lab.tags.map((tag) => (
+                      {labTags.map((tag) => (
                         <span
                           key={tag}
                           className="px-2 py-0.5 rounded bg-slate-100 dark:bg-[#090E18] dark:border dark:border-slate-700/70 text-[10.5px] font-mono text-slate-600 dark:text-slate-300"
@@ -336,7 +364,7 @@ export function AcademyModal({
                         |
                       </span>
 
-                      {lab.requiredTemplates.map((req) => (
+                      {labReqs.map((req) => (
                         <span
                           key={req.catalogId ?? req.osProfileId}
                           title={
@@ -490,7 +518,10 @@ export function AcademyModal({
                 </p>
 
                 <div className="space-y-2">
-                  {promptLab.requiredTemplates.map((req) => {
+                  {(Array.isArray(promptLab.requiredTemplates)
+                    ? promptLab.requiredTemplates
+                    : []
+                  ).map((req) => {
                     const catId = req.catalogId ?? req.osProfileId;
                     return (
                       <div

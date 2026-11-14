@@ -663,77 +663,116 @@ async fn start_topology_vm_node(
         ));
     }
 
-    let disk_path = workspace::resolve_effective_node_disk(request.bundle_path.as_deref(), &node)?;
-    if let Some(parent) = disk_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to prepare overlay directory {}: {e}", parent.display()))?;
-    }
+    // Register Starting state & cancellation token immediately so clicking Stop while
+    // qemu-img prepares overlays cancels cleanly instead of failing with "VM not found".
+    let cancel_rx = state
+        .vm_manager
+        .begin_pre_spawn(&node.id, &node.name)
+        .await?;
 
-    let mut template_id = node
-        .template_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToOwned::to_owned);
-    let boot_media_path = node
-        .boot_media_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToOwned::to_owned);
+    let node_id_for_cleanup = node.id.clone();
+    let prep_result: Result<(PathBuf, Option<String>, Option<String>), String> = async {
+        let disk_path =
+            workspace::resolve_effective_node_disk(request.bundle_path.as_deref(), &node)?;
+        if let Some(parent) = disk_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to prepare overlay directory {}: {e}", parent.display())
+            })?;
+        }
 
-    // If a node was dragged from Guest OS Profiles before downloading its OS image, auto-bind to a matching
-    // Base Template in `templates/` once downloaded so the user can boot immediately without re-wiring storage!
-    if template_id.is_none() && boot_media_path.is_none() {
-        if let Some(ref prof_id) = node.os_profile_id {
-            if let Ok(templates) = state.image_store.list_templates().await {
-                if let Some(matched) = templates.into_iter().find(|t| t.os_profile_id == *prof_id) {
-                    template_id = Some(matched.id);
+        let mut template_id = node
+            .template_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+        let boot_media_path = node
+            .boot_media_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+
+        // If a node was dragged from Guest OS Profiles before downloading its OS image, auto-bind to a matching
+        // Base Template in `templates/` once downloaded so the user can boot immediately without re-wiring storage!
+        if template_id.is_none() && boot_media_path.is_none() {
+            if let Some(ref prof_id) = node.os_profile_id {
+                if let Ok(templates) = state.image_store.list_templates().await {
+                    if let Some(matched) =
+                        templates.into_iter().find(|t| t.os_profile_id == *prof_id)
+                    {
+                        template_id = Some(matched.id);
+                    }
                 }
             }
         }
-    }
 
-    if !disk_path.is_file() {
-        if let Some(ref tpl_id) = template_id {
-            let overlays_dir = disk_path
-                .parent()
-                .ok_or_else(|| "Invalid node disk parent directory".to_string())?
-                .display()
-                .to_string();
-            let stem = disk_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&node.id)
-                .to_string();
-            state
-                .image_store
-                .create_node_overlay(CreateOverlayRequest {
-                    template_id_or_path: tpl_id.clone(),
-                    overlays_dir,
-                    node_id: stem,
-                })
-                .await?;
-        } else if boot_media_path.is_some() {
-            state
-                .image_store
-                .create_blank_disk(CreateBlankDiskRequest {
-                    disk_path: disk_path.display().to_string(),
-                    size_gb: node.disk_size_gb.unwrap_or(8).max(1),
-                })
-                .await?;
-        } else {
-            let profile_label = node
-                .os_profile_id
-                .as_deref()
-                .and_then(find_os_profile)
-                .map(|p| p.name)
-                .unwrap_or_else(|| "an OS image".to_string());
-            return Err(format!(
-                "Node '{}' has no OS disk image yet ({} is not downloaded in templates/). Open OS Library to download {}, or open Node Settings -> Storage to select a Base Template or attach an .iso / .img installer.",
-                node.name, profile_label, profile_label
-            ));
+        if *cancel_rx.borrow() {
+            return Ok((disk_path, template_id, boot_media_path));
         }
+
+        if !disk_path.is_file() {
+            if let Some(ref tpl_id) = template_id {
+                let overlays_dir = disk_path
+                    .parent()
+                    .ok_or_else(|| "Invalid node disk parent directory".to_string())?
+                    .display()
+                    .to_string();
+                let stem = disk_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&node.id)
+                    .to_string();
+                state
+                    .image_store
+                    .create_node_overlay(CreateOverlayRequest {
+                        template_id_or_path: tpl_id.clone(),
+                        overlays_dir,
+                        node_id: stem,
+                    })
+                    .await?;
+            } else if boot_media_path.is_some() {
+                state
+                    .image_store
+                    .create_blank_disk(CreateBlankDiskRequest {
+                        disk_path: disk_path.display().to_string(),
+                        size_gb: node.disk_size_gb.unwrap_or(8).max(1),
+                    })
+                    .await?;
+            } else {
+                let profile_label = node
+                    .os_profile_id
+                    .as_deref()
+                    .and_then(find_os_profile)
+                    .map(|p| p.name)
+                    .unwrap_or_else(|| "an OS image".to_string());
+                return Err(format!(
+                    "Node '{}' has no OS disk image yet ({} is not downloaded in templates/). Open OS Library to download {}, or open Node Settings -> Storage to select a Base Template or attach an .iso / .img installer.",
+                    node.name, profile_label, profile_label
+                ));
+            }
+        }
+
+        Ok((disk_path, template_id, boot_media_path))
+    }
+    .await;
+
+    let (disk_path, template_id, boot_media_path) = match prep_result {
+        Ok(vals) => vals,
+        Err(err) => {
+            state
+                .vm_manager
+                .abort_pre_spawn(&node_id_for_cleanup, Some(err.clone()))
+                .await;
+            return Err(err);
+        }
+    };
+
+    if *cancel_rx.borrow() {
+        return Ok(state
+            .vm_manager
+            .abort_pre_spawn(&node_id_for_cleanup, None)
+            .await);
     }
 
     let display_mode = match node.display_mode.as_deref() {
@@ -800,7 +839,7 @@ async fn start_topology_vm_node(
 
     state
         .vm_manager
-        .spawn_vm(
+        .spawn_vm_with_cancel(
             SpawnVmRequest {
                 node_id: node.id,
                 name: node.name,
@@ -822,6 +861,7 @@ async fn start_topology_vm_node(
             },
             &state.fabric,
             &state.image_store,
+            Some(cancel_rx),
         )
         .await
 }

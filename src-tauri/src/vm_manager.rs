@@ -699,6 +699,43 @@ struct ManagedVmEntry {
     owned_fabric_ports: Vec<String>,
     /// Notifies when the reaper task confirms process termination
     exit_rx: tokio::sync::watch::Receiver<bool>,
+    /// Cancels an in-flight pre-spawn / socket-readiness wait if `stop_vm` is invoked before `Running`
+    cancel_tx: Option<tokio::sync::watch::Sender<bool>>,
+}
+
+fn synthesized_stopped_vm_info(node_id: &str, name: &str) -> VmInstanceInfo {
+    let safe_id = sanitize_socket_id(node_id);
+    VmInstanceInfo {
+        node_id: node_id.to_string(),
+        name: name.to_string(),
+        status: VmStatus::Stopped,
+        pid: None,
+        cpus: 1,
+        ram_mb: 256,
+        arch: GuestArch::Aarch64,
+        nic_model: NicModel::VirtioNetPci,
+        firmware: FirmwareType::Uefi,
+        disk_bus: DiskBus::VirtioBlk,
+        accel: "hvf".to_string(),
+        disk_path: String::new(),
+        boot_media_path: None,
+        display_mode: VmDisplayMode::Vnc,
+        vnc_port_offset: None,
+        vnc_tcp_port: None,
+        serial_socket_path: PathBuf::from(RUNTIME_SOCKET_DIR)
+            .join(format!("{safe_id}_serial.sock"))
+            .display()
+            .to_string(),
+        qmp_socket_path: PathBuf::from(RUNTIME_SOCKET_DIR)
+            .join(format!("{safe_id}_qmp.sock"))
+            .display()
+            .to_string(),
+        nics: Vec::new(),
+        qemu_args: Vec::new(),
+        started_at_ms: now_epoch_ms(),
+        exit_code: None,
+        last_error: None,
+    }
 }
 
 struct VmManagerInner {
@@ -830,6 +867,112 @@ impl VmManager {
         Ok(full)
     }
 
+    /// Registers a `VmStatus::Starting` placeholder entry and cancellation channel BEFORE disk overlay
+    /// creation or rebasing begins so clicking `Stop` during pre-spawn immediately cancels the launch.
+    pub async fn begin_pre_spawn(
+        &self,
+        node_id: &str,
+        name: &str,
+    ) -> Result<tokio::sync::watch::Receiver<bool>, String> {
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let (_exit_tx, exit_rx) = tokio::sync::watch::channel(true);
+        let mut placeholder = synthesized_stopped_vm_info(node_id, name);
+        placeholder.status = VmStatus::Starting;
+        placeholder.started_at_ms = now_epoch_ms();
+
+        {
+            let mut guard = self.inner.vms.write().await;
+            if let Some(existing) = guard.get(node_id) {
+                if matches!(
+                    existing.info.status,
+                    VmStatus::Starting | VmStatus::Running | VmStatus::Stopping
+                ) {
+                    return Err(format!(
+                        "VM '{}' is already active ({:?})",
+                        node_id, existing.info.status
+                    ));
+                }
+            }
+            guard.insert(
+                node_id.to_string(),
+                ManagedVmEntry {
+                    info: placeholder.clone(),
+                    owned_fabric_ports: Vec::new(),
+                    exit_rx,
+                    cancel_tx: Some(cancel_tx),
+                },
+            );
+        }
+
+        self.emit_vm_event(
+            node_id,
+            VmStatus::Starting,
+            None,
+            None,
+            &placeholder.serial_socket_path,
+            Some("Preparing VM disk & virtual NICs…".to_string()),
+        )
+        .await;
+
+        Ok(cancel_rx)
+    }
+
+    /// Transitions an unspawned `Starting` placeholder entry to `Stopped` (on cancellation) or `Crashed`
+    /// (on pre-spawn error) so `VmManager` never stays stuck in `Starting`.
+    pub async fn abort_pre_spawn(
+        &self,
+        node_id: &str,
+        error_message: Option<String>,
+    ) -> VmInstanceInfo {
+        let updated = {
+            let mut guard = self.inner.vms.write().await;
+            if let Some(entry) = guard.get_mut(node_id) {
+                if entry.info.pid.is_none() {
+                    let was_cancelled = entry.cancel_tx.is_none()
+                        || error_message.is_none()
+                        || matches!(entry.info.status, VmStatus::Stopping | VmStatus::Stopped);
+                    let final_status = if was_cancelled {
+                        VmStatus::Stopped
+                    } else {
+                        VmStatus::Crashed
+                    };
+                    entry.info.status = final_status;
+                    entry.cancel_tx = None;
+                    entry.info.last_error = if final_status == VmStatus::Crashed {
+                        error_message.clone()
+                    } else {
+                        None
+                    };
+                    Some(entry.info.clone())
+                } else {
+                    Some(entry.info.clone())
+                }
+            } else {
+                None
+            }
+        };
+
+        cleanup_node_sockets(node_id);
+        let info = updated.unwrap_or_else(|| synthesized_stopped_vm_info(node_id, node_id));
+        if info.pid.is_none() {
+            let msg = if info.status == VmStatus::Stopped {
+                Some("VM startup stopped".to_string())
+            } else {
+                error_message
+            };
+            self.emit_vm_event(
+                node_id,
+                info.status,
+                None,
+                None,
+                &info.serial_socket_path,
+                msg,
+            )
+            .await;
+        }
+        info
+    }
+
     /// Spawns a supervised `qemu-system-{arch}` child process for `req.node_id`,
     /// automatically rebasing the node's CoW `.qcow2` overlay if `templates_dir` moved.
     pub async fn spawn_vm(
@@ -838,21 +981,47 @@ impl VmManager {
         fabric: &PacketFabric,
         image_store: &ImageStore,
     ) -> Result<VmInstanceInfo, String> {
-        {
-            let guard = self.inner.vms.read().await;
-            if let Some(existing) = guard.get(&req.node_id) {
-                if matches!(
-                    existing.info.status,
-                    VmStatus::Starting | VmStatus::Running | VmStatus::Stopping
-                ) {
-                    return Err(format!(
-                        "VM '{}' is already active ({:?})",
-                        req.node_id, existing.info.status
-                    ));
-                }
-            }
+        self.spawn_vm_with_cancel(req, fabric, image_store, None)
+            .await
+    }
+
+    pub async fn spawn_vm_with_cancel(
+        &self,
+        req: SpawnVmRequest,
+        fabric: &PacketFabric,
+        image_store: &ImageStore,
+        pre_cancel_rx: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> Result<VmInstanceInfo, String> {
+        let cancel_rx = match pre_cancel_rx {
+            Some(rx) => rx,
+            None => self.begin_pre_spawn(&req.node_id, &req.name).await?,
+        };
+
+        if *cancel_rx.borrow() {
+            return Ok(self.abort_pre_spawn(&req.node_id, None).await);
         }
 
+        let node_id_for_err = req.node_id.clone();
+        match self
+            .spawn_vm_after_pre_register(req, fabric, image_store, cancel_rx)
+            .await
+        {
+            Ok(info) => Ok(info),
+            Err(err) => {
+                self.abort_pre_spawn(&node_id_for_err, Some(err.clone()))
+                    .await;
+                Err(err)
+            }
+        }
+    }
+
+    async fn spawn_vm_after_pre_register(
+        &self,
+        req: SpawnVmRequest,
+        fabric: &PacketFabric,
+        image_store: &ImageStore,
+        cancel_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<VmInstanceInfo, String> {
         let bin_name = req.arch.qemu_binary_name();
         let qemu_bin = resolve_qemu_for_arch(req.arch.as_str()).ok_or_else(|| {
             format!(
@@ -899,6 +1068,10 @@ impl VmManager {
             image_store
                 .ensure_overlay_rebased(&disk_path, req.template_id.as_deref())
                 .await?;
+        }
+
+        if *cancel_rx.borrow() {
+            return Ok(self.abort_pre_spawn(&req.node_id, None).await);
         }
 
         let boot_media = match req.boot_media_path {
@@ -1023,6 +1196,16 @@ impl VmManager {
             nics: active_nics.clone(),
         };
 
+        if *cancel_rx.borrow() {
+            for created in &owned_fabric_ports {
+                let _ = fabric.remove_port(created).await;
+            }
+            if let Some(off) = vnc_port_offset {
+                self.release_vnc_offset(off);
+            }
+            return Ok(self.abort_pre_spawn(&req.node_id, None).await);
+        }
+
         let qemu_args = build_qemu_args(&spec);
         let mut cmd = Command::new(&qemu_bin);
         cmd.args(&qemu_args)
@@ -1106,12 +1289,16 @@ impl VmManager {
 
         {
             let mut guard = self.inner.vms.write().await;
+            let preserved_cancel = guard
+                .get_mut(&req.node_id)
+                .and_then(|existing| existing.cancel_tx.take());
             guard.insert(
                 req.node_id.clone(),
                 ManagedVmEntry {
                     info: info.clone(),
                     owned_fabric_ports: owned_fabric_ports.clone(),
                     exit_rx,
+                    cancel_tx: preserved_cancel,
                 },
             );
         }
@@ -1136,6 +1323,52 @@ impl VmManager {
         let startup_deadline = std::time::Instant::now() + QEMU_STARTUP_READY_TIMEOUT;
         let mut sockets_ready = false;
         while std::time::Instant::now() < startup_deadline {
+            if *cancel_rx.borrow() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                let _ = timeout(Duration::from_millis(150), &mut stderr_task).await;
+                if let Ok(mut map) = self.inner.live_pids.lock() {
+                    map.remove(&req.node_id);
+                }
+                if let Some(off) = vnc_port_offset {
+                    self.release_vnc_offset(off);
+                }
+                cleanup_node_sockets(&req.node_id);
+
+                let (stopped_info, ports_to_clean) = {
+                    let mut guard = self.inner.vms.write().await;
+                    if let Some(entry) = guard.get_mut(&req.node_id) {
+                        entry.info.status = VmStatus::Stopped;
+                        entry.info.pid = None;
+                        entry.info.last_error = None;
+                        entry.cancel_tx = None;
+                        (
+                            entry.info.clone(),
+                            std::mem::take(&mut entry.owned_fabric_ports),
+                        )
+                    } else {
+                        let mut stopped = info.clone();
+                        stopped.status = VmStatus::Stopped;
+                        stopped.pid = None;
+                        (stopped, owned_fabric_ports)
+                    }
+                };
+                for p in ports_to_clean {
+                    let _ = fabric.remove_port(&p).await;
+                }
+                let _ = exit_tx.send(true);
+                self.emit_vm_event(
+                    &stopped_info.node_id,
+                    VmStatus::Stopped,
+                    None,
+                    None,
+                    &stopped_info.serial_socket_path,
+                    Some("VM startup stopped".to_string()),
+                )
+                .await;
+                return Ok(stopped_info);
+            }
+
             match child.try_wait() {
                 Ok(Some(exit_status)) => {
                     let _ = timeout(Duration::from_millis(150), &mut stderr_task).await;
@@ -1171,10 +1404,13 @@ impl VmManager {
                         )
                     };
 
-                    let (final_status, ports_to_clean) = {
+                    let (final_status, updated_info, ports_to_clean) = {
                         let mut guard = self.inner.vms.write().await;
                         if let Some(entry) = guard.get_mut(&req.node_id) {
-                            let was_stopping = entry.info.status == VmStatus::Stopping;
+                            let was_stopping = matches!(
+                                entry.info.status,
+                                VmStatus::Stopping | VmStatus::Stopped
+                            ) || *cancel_rx.borrow();
                             let st = if was_stopping {
                                 VmStatus::Stopped
                             } else {
@@ -1183,29 +1419,45 @@ impl VmManager {
                             entry.info.status = st;
                             entry.info.pid = None;
                             entry.info.exit_code = exit_code;
+                            entry.cancel_tx = None;
                             entry.info.last_error = if st == VmStatus::Crashed {
                                 Some(err_detail.clone())
                             } else {
                                 None
                             };
-                            (st, std::mem::take(&mut entry.owned_fabric_ports))
+                            (
+                                st,
+                                entry.info.clone(),
+                                std::mem::take(&mut entry.owned_fabric_ports),
+                            )
                         } else {
-                            (VmStatus::Crashed, owned_fabric_ports)
+                            let mut crashed = info.clone();
+                            crashed.status = VmStatus::Crashed;
+                            crashed.pid = None;
+                            (VmStatus::Crashed, crashed, owned_fabric_ports)
                         }
                     };
                     for p in ports_to_clean {
                         let _ = fabric.remove_port(&p).await;
                     }
                     let _ = exit_tx.send(true);
+                    let ev_msg = if final_status == VmStatus::Stopped {
+                        Some("VM stopped".to_string())
+                    } else {
+                        Some(err_detail.clone())
+                    };
                     self.emit_vm_event(
                         &info.node_id,
                         final_status,
                         None,
                         None,
                         &info.serial_socket_path,
-                        Some(err_detail.clone()),
+                        ev_msg,
                     )
                     .await;
+                    if final_status == VmStatus::Stopped {
+                        return Ok(updated_info);
+                    }
                     return Err(err_detail);
                 }
                 Ok(None) => {}
@@ -1250,6 +1502,7 @@ impl VmManager {
                 if let Some(entry) = guard.get_mut(&req.node_id) {
                     entry.info.status = VmStatus::Crashed;
                     entry.info.pid = None;
+                    entry.cancel_tx = None;
                     let msg = if stderr_text.is_empty() {
                         format!(
                             "Timed out waiting for QEMU serial socket {}",
@@ -1303,6 +1556,7 @@ impl VmManager {
             let mut guard = self.inner.vms.write().await;
             if let Some(entry) = guard.get_mut(&req.node_id) {
                 entry.info.status = VmStatus::Running;
+                entry.cancel_tx = None;
             }
         }
 
@@ -1433,26 +1687,93 @@ impl VmManager {
         Ok(info)
     }
 
-    /// Cleanly shuts down a running VM:
-    /// 1. Sends QMP `system_powerdown` over `/tmp/etherloom/{node_id}_qmp.sock` (unless `force == true`)
-    /// 2. Waits for graceful ACPI exit; falls back to `SIGTERM`, then `SIGKILL`.
+    /// Cleanly shuts down a running or starting VM (idempotent even if already exited or out-of-sync):
+    /// 1. Cancels any in-flight pre-spawn / socket readiness wait
+    /// 2. Sends QMP `system_powerdown` over `/tmp/etherloom/{node_id}_qmp.sock` (unless `force == true` or socket absent)
+    /// 3. Waits for graceful ACPI exit; falls back to `SIGTERM`, then `SIGKILL`.
     pub async fn stop_vm(&self, node_id: &str, force: bool) -> Result<VmInstanceInfo, String> {
-        let (pid_opt, qmp_sock, serial_sock, vnc_port, mut exit_rx) = {
+        enum StopLookup {
+            NotRegistered,
+            AlreadyStopped(VmInstanceInfo),
+            CancelledPreSpawn(VmInstanceInfo),
+            ActiveProcess {
+                pid_opt: Option<u32>,
+                qmp_sock: PathBuf,
+                serial_sock: String,
+                vnc_port: Option<u16>,
+                exit_rx: tokio::sync::watch::Receiver<bool>,
+            },
+        }
+
+        let lookup = {
             let mut guard = self.inner.vms.write().await;
-            let entry = guard
-                .get_mut(node_id)
-                .ok_or_else(|| format!("VM '{node_id}' not found"))?;
-            if matches!(entry.info.status, VmStatus::Stopped | VmStatus::Crashed) {
-                return Ok(entry.info.clone());
+            match guard.get_mut(node_id) {
+                None => StopLookup::NotRegistered,
+                Some(entry) => {
+                    if matches!(entry.info.status, VmStatus::Stopped | VmStatus::Crashed) {
+                        StopLookup::AlreadyStopped(entry.info.clone())
+                    } else {
+                        if let Some(cancel_tx) = entry.cancel_tx.take() {
+                            let _ = cancel_tx.send(true);
+                        }
+                        if entry.info.pid.is_none() {
+                            entry.info.status = VmStatus::Stopped;
+                            entry.info.last_error = None;
+                            StopLookup::CancelledPreSpawn(entry.info.clone())
+                        } else {
+                            entry.info.status = VmStatus::Stopping;
+                            StopLookup::ActiveProcess {
+                                pid_opt: entry.info.pid,
+                                qmp_sock: PathBuf::from(&entry.info.qmp_socket_path),
+                                serial_sock: entry.info.serial_socket_path.clone(),
+                                vnc_port: entry.info.vnc_tcp_port,
+                                exit_rx: entry.exit_rx.clone(),
+                            }
+                        }
+                    }
+                }
             }
-            entry.info.status = VmStatus::Stopping;
-            (
-                entry.info.pid,
-                PathBuf::from(&entry.info.qmp_socket_path),
-                entry.info.serial_socket_path.clone(),
-                entry.info.vnc_tcp_port,
-                entry.exit_rx.clone(),
-            )
+        };
+
+        let (pid_opt, qmp_sock, serial_sock, vnc_port, mut exit_rx) = match lookup {
+            StopLookup::NotRegistered => {
+                cleanup_node_sockets(node_id);
+                let info = synthesized_stopped_vm_info(node_id, node_id);
+                self.emit_vm_event(
+                    node_id,
+                    VmStatus::Stopped,
+                    None,
+                    None,
+                    &info.serial_socket_path,
+                    Some("VM stopped".to_string()),
+                )
+                .await;
+                return Ok(info);
+            }
+            StopLookup::AlreadyStopped(info) => {
+                cleanup_node_sockets(node_id);
+                return Ok(info);
+            }
+            StopLookup::CancelledPreSpawn(info) => {
+                cleanup_node_sockets(node_id);
+                self.emit_vm_event(
+                    node_id,
+                    VmStatus::Stopped,
+                    None,
+                    None,
+                    &info.serial_socket_path,
+                    Some("VM startup cancelled".to_string()),
+                )
+                .await;
+                return Ok(info);
+            }
+            StopLookup::ActiveProcess {
+                pid_opt,
+                qmp_sock,
+                serial_sock,
+                vnc_port,
+                exit_rx,
+            } => (pid_opt, qmp_sock, serial_sock, vnc_port, exit_rx),
         };
 
         self.emit_vm_event(
@@ -1465,13 +1786,14 @@ impl VmManager {
         )
         .await;
 
-        if !force {
+        if !force && qmp_sock.exists() {
             if send_qmp_system_powerdown(&qmp_sock).await.is_ok()
                 && wait_for_exit_signal(&mut exit_rx, DEFAULT_POWERDOWN_TIMEOUT).await
             {
-                return self.get_vm_info(node_id).await.ok_or_else(|| {
-                    format!("VM '{node_id}' entry disappeared after clean powerdown")
-                });
+                return Ok(self
+                    .get_vm_info(node_id)
+                    .await
+                    .unwrap_or_else(|| synthesized_stopped_vm_info(node_id, node_id)));
             }
         }
 
@@ -1481,9 +1803,10 @@ impl VmManager {
                     libc::kill(pid as i32, libc::SIGTERM);
                 }
                 if wait_for_exit_signal(&mut exit_rx, SIGTERM_GRACE_TIMEOUT).await {
-                    return self.get_vm_info(node_id).await.ok_or_else(|| {
-                        format!("VM '{node_id}' entry disappeared after SIGTERM")
-                    });
+                    return Ok(self
+                        .get_vm_info(node_id)
+                        .await
+                        .unwrap_or_else(|| synthesized_stopped_vm_info(node_id, node_id)));
                 }
             }
 
@@ -1494,9 +1817,10 @@ impl VmManager {
         }
 
         cleanup_node_sockets(node_id);
-        self.get_vm_info(node_id)
+        Ok(self
+            .get_vm_info(node_id)
             .await
-            .ok_or_else(|| format!("VM '{node_id}' not found after stop"))
+            .unwrap_or_else(|| synthesized_stopped_vm_info(node_id, node_id)))
     }
 
     /// Terminates all active child QEMU processes (invoked automatically when the Tauri app exits).
@@ -1854,5 +2178,48 @@ mod tests {
         let rv_joined = build_qemu_args(&rv).join(" ");
         assert!(rv_joined.contains("-M virt -accel tcg,thread=multi -cpu rv64"));
         assert!(rv_joined.contains("-device ne2k_pci,netdev=net0"));
+    }
+
+    #[tokio::test]
+    async fn stop_vm_is_idempotent_when_node_not_registered() {
+        let mgr = VmManager::new();
+        let stopped = mgr
+            .stop_vm("node-debian5-tigq", false)
+            .await
+            .expect("stop_vm should succeed gracefully when node is unregistered");
+        assert_eq!(stopped.node_id, "node-debian5-tigq");
+        assert_eq!(stopped.status, VmStatus::Stopped);
+        assert!(stopped.pid.is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_vm_cancels_in_flight_pre_spawn_and_allows_restart() {
+        let mgr = VmManager::new();
+        let cancel_rx = mgr
+            .begin_pre_spawn("node-alpine6-w2u4", "alpine6")
+            .await
+            .expect("pre-spawn registration should succeed");
+        assert!(!*cancel_rx.borrow());
+
+        // Duplicate concurrent launch while Starting must be rejected
+        assert!(mgr
+            .begin_pre_spawn("node-alpine6-w2u4", "alpine6")
+            .await
+            .is_err());
+
+        // Clicking Stop during pre-spawn must cancel immediately and mark Stopped
+        let stopped = mgr
+            .stop_vm("node-alpine6-w2u4", false)
+            .await
+            .expect("stop_vm should cancel pre-spawn cleanly");
+        assert_eq!(stopped.status, VmStatus::Stopped);
+        assert!(*cancel_rx.borrow(), "cancel_rx should be signalled");
+
+        // Subsequent launch after cancellation must succeed again
+        let next_rx = mgr
+            .begin_pre_spawn("node-alpine6-w2u4", "alpine6")
+            .await
+            .expect("restart after cancelled pre-spawn should succeed");
+        assert!(!*next_rx.borrow());
     }
 }

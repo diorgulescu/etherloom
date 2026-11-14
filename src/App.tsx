@@ -63,6 +63,7 @@ import {
   listBaseTemplates,
   listOsProfiles,
   listProjectCaptures,
+  listVms,
   onFabricMetrics,
   onStorageMigrationProgress,
   onStorageStatusChanged,
@@ -95,6 +96,7 @@ import type {
   ConsoleTabSession,
   EnvDoctorReport,
   GuestFamily,
+  NodeRunStatus,
   OsCatalogEntryDto,
   OsProfile,
   PortLinkState,
@@ -420,6 +422,10 @@ export function App() {
     Map<string, { totalPkts: number; tsMs: number }>
   >(new Map());
 
+  // Track in-flight VM launches & user-requested Stop cancellations so UI state never gets trapped
+  const startingNodesRef = useRef<Map<string, number>>(new Map());
+  const cancelledStartsRef = useRef<Set<string>>(new Set());
+
   const showToast = useCallback(
     (
       kind: "ok" | "error",
@@ -485,7 +491,26 @@ export function App() {
     setAcademyLoading(true);
     try {
       const list = await listAcademyLabs();
-      setAcademyLabs(list);
+      const normalized = Array.isArray(list)
+        ? list
+            .filter(
+              (l): l is AcademyLabSummary =>
+                Boolean(
+                  l &&
+                    typeof l === "object" &&
+                    typeof l.id === "string" &&
+                    typeof l.title === "string"
+                )
+            )
+            .map((l) => ({
+              ...l,
+              tags: Array.isArray(l.tags) ? l.tags : [],
+              requiredTemplates: Array.isArray(l.requiredTemplates)
+                ? l.requiredTemplates
+                : [],
+            }))
+        : [];
+      setAcademyLabs(normalized);
     } catch {
       setAcademyLabs([]);
     } finally {
@@ -516,6 +541,79 @@ export function App() {
     const snap = await getStorageState();
     setStorageState(snap);
   }, []);
+
+  // Reconciles React VM node status badges against ground-truth `VmManager::list_vms()`
+  // so missed IPC events, Vite HMR reloads, or dev backend restarts never leave nodes stuck in "booting".
+  const reconcileVmStates = useCallback(async () => {
+    if (!isTauriRuntime()) return;
+    try {
+      const vms = await listVms();
+      const vmMap = new Map(vms.map((v) => [v.nodeId, v]));
+      const now = Date.now();
+
+      const resolveNodeStatus = (
+        nodeId: string,
+        currentStatus: NodeRunStatus
+      ): NodeRunStatus => {
+        const vm = vmMap.get(nodeId);
+        const bootStartedAt = startingNodesRef.current.get(nodeId);
+        const withinLaunchGrace =
+          bootStartedAt !== undefined && now - bootStartedAt < 4500;
+
+        if (vm) {
+          if (vm.status === "running") return "running";
+          if (vm.status === "starting") return "booting";
+          if (vm.status === "stopping") return "stopped";
+          if (withinLaunchGrace && currentStatus === "booting") {
+            return "booting";
+          }
+          return "stopped";
+        }
+
+        if (withinLaunchGrace && currentStatus === "booting") {
+          return "booting";
+        }
+        return "stopped";
+      };
+
+      setNodes((curr) => {
+        let changed = false;
+        const next = curr.map((n) => {
+          if (n.data.kind !== "vm") return n;
+          const effective = resolveNodeStatus(n.id, n.data.status);
+          if (effective === n.data.status) return n;
+          changed = true;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              status: effective,
+            },
+          };
+        });
+        return changed ? next : curr;
+      });
+
+      setGuidedSetupVms((curr) => {
+        let changed = false;
+        const next = curr.map((g) => {
+          const effective = resolveNodeStatus(g.id, g.data.status);
+          if (effective === g.data.status) return g;
+          changed = true;
+          return {
+            ...g,
+            data: {
+              ...g.data,
+              status: effective,
+            },
+          };
+        });
+        return changed ? next : curr;
+      });
+    } catch {
+      // Ignore transient IPC errors during app shutdown
+    }
+  }, [setNodes]);
 
   const refreshCaptures = useCallback(
     async (explicitBundle?: string | null) => {
@@ -568,6 +666,7 @@ export function App() {
     void refreshTemplates();
     void loadDiagnostics(false);
     void loadStorage();
+    void reconcileVmStates();
     void getTcpflowyStatus()
       .then(setTcpflowyStatus)
       .catch(() => {});
@@ -747,7 +846,48 @@ export function App() {
       unlistenVm?.();
       unlistenMetrics?.();
     };
-  }, [loadDiagnostics, loadStorage, refreshTemplates, setEdges, setNodes]);
+  }, [
+    loadDiagnostics,
+    loadStorage,
+    reconcileVmStates,
+    refreshTemplates,
+    setEdges,
+    setNodes,
+  ]);
+
+  // Periodically & on window focus reconcile VM statuses whenever any VM is booting or running
+  const anyVmActiveOrBooting = useMemo(
+    () =>
+      nodes.some(
+        (n) =>
+          n.data.kind === "vm" &&
+          (n.data.status === "booting" || n.data.status === "running")
+      ) ||
+      guidedSetupVms.some(
+        (g) => g.data.status === "booting" || g.data.status === "running"
+      ),
+    [guidedSetupVms, nodes]
+  );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const onFocus = () => {
+      void reconcileVmStates();
+    };
+    window.addEventListener("focus", onFocus);
+    let timer: number | null = null;
+    if (anyVmActiveOrBooting) {
+      timer = window.setInterval(() => {
+        void reconcileVmStates();
+      }, 2500);
+    }
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (timer !== null) {
+        window.clearInterval(timer);
+      }
+    };
+  }, [anyVmActiveOrBooting, reconcileVmStates]);
 
   // Keep PacketFabric switches, hubs, UDP endpoints, and wires synchronized when topology structure changes
   const structuralKey = useMemo(() => {
@@ -1211,9 +1351,17 @@ export function App() {
         try {
           await stopVm(nodeId, false);
         } catch (err) {
-          showToast(
-            "error",
-            err instanceof Error ? err.message : String(err)
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.toLowerCase().includes("not found")) {
+            showToast("error", msg);
+          }
+        } finally {
+          setGuidedSetupVms((curr) =>
+            curr.map((vm) =>
+              vm.id === nodeId
+                ? { ...vm, data: { ...vm.data, status: "stopped" } }
+                : vm
+            )
           );
         }
         return;
@@ -1242,8 +1390,16 @@ export function App() {
       }
 
       if (currentlyUp) {
+        cancelledStartsRef.current.add(nodeId);
+        startingNodesRef.current.delete(nodeId);
         try {
           await stopVm(nodeId, false);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.toLowerCase().includes("not found")) {
+            showToast("error", msg);
+          }
+        } finally {
           setNodes((nds) =>
             nds.map((n) =>
               n.id === nodeId
@@ -1251,14 +1407,15 @@ export function App() {
                 : n
             )
           );
-        } catch (err) {
-          showToast(
-            "error",
-            err instanceof Error ? err.message : String(err)
-          );
         }
         return;
       }
+
+      if (startingNodesRef.current.has(nodeId)) {
+        return;
+      }
+      cancelledStartsRef.current.delete(nodeId);
+      startingNodesRef.current.set(nodeId, Date.now());
 
       // Transition to booting & spawn via QEMU HVF supervisor
       setNodes((nds) =>
@@ -1270,15 +1427,29 @@ export function App() {
       );
 
       try {
-        await startTopologyVmNode(bundlePath, flowNodeToWorkspaceNode(target));
+        const vmInfo = await startTopologyVmNode(
+          bundlePath,
+          flowNodeToWorkspaceNode(target)
+        );
+        const wasStoppedOrCancelled =
+          cancelledStartsRef.current.has(nodeId) ||
+          vmInfo.status === "stopped" ||
+          vmInfo.status === "crashed";
         setNodes((nds) =>
           nds.map((n) =>
             n.id === nodeId
-              ? { ...n, data: { ...n.data, status: "running" } }
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    status: wasStoppedOrCancelled ? "stopped" : "running",
+                  },
+                }
               : n
           )
         );
       } catch (err) {
+        const wasCancelled = cancelledStartsRef.current.has(nodeId);
         setNodes((nds) =>
           nds.map((n) =>
             n.id === nodeId
@@ -1286,29 +1457,34 @@ export function App() {
               : n
           )
         );
-        const msg = err instanceof Error ? err.message : String(err);
-        const profId = target.data.osProfileId;
-        const hasMatchingTemplate = profId
-          ? baseTemplates.some((t) => t.osProfileId === profId)
-          : baseTemplates.length > 0;
-        if (msg.includes("OS Library") && !hasMatchingTemplate) {
-          showToast("error", msg, "Open OS Library", () => {
-            setLibraryFocusedCatalogIds(profId ? [profId] : null);
-            setLibraryFocusedLabTitle(null);
-            setStorageLibraryOpen(true);
-          });
-        } else if (msg.includes("Node Settings")) {
-          showToast("error", msg, "Configure Storage", () => {
-            setConfigNodeInitialTab("storage");
-            setConfigNodeId(nodeId);
-          });
-        } else if (msg.toLowerCase().includes("qemu")) {
-          showToast("error", msg, "Env Doctor", () =>
-            setDoctorModalOpen(true)
-          );
-        } else {
-          showToast("error", msg);
+        if (!wasCancelled) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const profId = target.data.osProfileId;
+          const hasMatchingTemplate = profId
+            ? baseTemplates.some((t) => t.osProfileId === profId)
+            : baseTemplates.length > 0;
+          if (msg.includes("OS Library") && !hasMatchingTemplate) {
+            showToast("error", msg, "Open OS Library", () => {
+              setLibraryFocusedCatalogIds(profId ? [profId] : null);
+              setLibraryFocusedLabTitle(null);
+              setStorageLibraryOpen(true);
+            });
+          } else if (msg.includes("Node Settings")) {
+            showToast("error", msg, "Configure Storage", () => {
+              setConfigNodeInitialTab("storage");
+              setConfigNodeId(nodeId);
+            });
+          } else if (msg.toLowerCase().includes("qemu")) {
+            showToast("error", msg, "Env Doctor", () =>
+              setDoctorModalOpen(true)
+            );
+          } else {
+            showToast("error", msg);
+          }
         }
+      } finally {
+        startingNodesRef.current.delete(nodeId);
+        cancelledStartsRef.current.delete(nodeId);
       }
     },
     [baseTemplates, bundlePath, nodes, setNodes, showToast]
@@ -2439,42 +2615,45 @@ export function App() {
         onOpenActivityMonitor={() => setActivityMonitorOpen(true)}
       />
 
-      {/* Modals */}
-      <ErrorBoundary
-        scopeLabel="Activity Monitor"
-        onReset={() => setActivityMonitorOpen(false)}
-      >
-        <ActivityMonitorModal
-          open={activityMonitorOpen}
-          nodes={[
-            ...enrichedNodes.map(
-              (n): ActivityMonitorNodeInput => ({
-                id: n.id,
-                data: n.data,
-                isGuidedSetup: false,
-              })
-            ),
-            ...guidedSetupVms.map(
-              (g): ActivityMonitorNodeInput => ({
-                id: g.id,
-                data: g.data,
-                isGuidedSetup: true,
-              })
-            ),
-          ]}
-          onClose={() => setActivityMonitorOpen(false)}
-          onToggleNodeRun={(nodeId) => void handleToggleNodeRun(nodeId)}
-          onOpenNodeConsole={(nodeId) => {
-            handleOpenVmConsoleTab(nodeId);
-            setDockOpen(true);
-          }}
-          onSelectNode={(nodeId) => {
-            setSelectedNodeId(nodeId);
-          }}
-        />
-      </ErrorBoundary>
+      {/* Modals — conditionally mount transient modals so closed dialogs do zero background work and can never throw over an active session */}
+      {activityMonitorOpen && (
+        <ErrorBoundary
+          scopeLabel="Activity Monitor"
+          onReset={() => setActivityMonitorOpen(false)}
+        >
+          <ActivityMonitorModal
+            open={activityMonitorOpen}
+            nodes={[
+              ...enrichedNodes.map(
+                (n): ActivityMonitorNodeInput => ({
+                  id: n.id,
+                  data: n.data,
+                  isGuidedSetup: false,
+                })
+              ),
+              ...guidedSetupVms.map(
+                (g): ActivityMonitorNodeInput => ({
+                  id: g.id,
+                  data: g.data,
+                  isGuidedSetup: true,
+                })
+              ),
+            ]}
+            onClose={() => setActivityMonitorOpen(false)}
+            onToggleNodeRun={(nodeId) => void handleToggleNodeRun(nodeId)}
+            onOpenNodeConsole={(nodeId) => {
+              handleOpenVmConsoleTab(nodeId);
+              setDockOpen(true);
+            }}
+            onSelectNode={(nodeId) => {
+              setSelectedNodeId(nodeId);
+            }}
+          />
+        </ErrorBoundary>
+      )}
       <ErrorBoundary
         scopeLabel="Storage & OS Library Manager"
+        active={storageLibraryOpen}
         onReset={handleCloseStorageLibrary}
       >
         <StorageLibraryModal
@@ -2508,134 +2687,155 @@ export function App() {
         />
       </ErrorBoundary>
 
-      <WelcomeModal
-        open={welcomeModalOpen}
-        labs={academyLabs}
-        envReport={envReport}
-        envLoading={envLoading}
-        onRefreshEnv={() => void loadDiagnostics(true)}
-        onOpenDoctorModal={() => setDoctorModalOpen(true)}
-        showOnStartup={showWelcomeOnStartup}
-        onChangeShowOnStartup={handleChangeShowWelcomeOnStartup}
-        onClose={() => setWelcomeModalOpen(false)}
-        onOpenAcademy={() => {
-          setWelcomeModalOpen(false);
-          setAcademyModalOpen(true);
-        }}
-        onOpenStorageLibrary={() => {
-          setWelcomeModalOpen(false);
-          setLibraryFocusedCatalogIds(null);
-          setLibraryFocusedLabTitle(null);
-          setStorageLibraryOpen(true);
-        }}
-        onLaunchLab={(labId) => {
-          const summary = academyLabs.find((l) => l.id === labId);
-          if (summary && !summary.allTemplatesReady) {
-            setWelcomeModalOpen(false);
-            setAcademyPromptLabId(labId);
-            setAcademyModalOpen(true);
-            return;
-          }
-          void handleLaunchAcademyLab(labId);
-        }}
-        onNewProject={() => setNewProjectModalOpen(true)}
-        onOpenProject={() => void handleOpenProject()}
-        onOpenCustomVmWizard={() => setCustomVmWizardOpen(true)}
-      />
+      {welcomeModalOpen && (
+        <ErrorBoundary
+          scopeLabel="Welcome Launchpad"
+          onReset={() => setWelcomeModalOpen(false)}
+        >
+          <WelcomeModal
+            open={welcomeModalOpen}
+            labs={academyLabs}
+            envReport={envReport}
+            envLoading={envLoading}
+            onRefreshEnv={() => void loadDiagnostics(true)}
+            onOpenDoctorModal={() => setDoctorModalOpen(true)}
+            showOnStartup={showWelcomeOnStartup}
+            onChangeShowOnStartup={handleChangeShowWelcomeOnStartup}
+            onClose={() => setWelcomeModalOpen(false)}
+            onOpenAcademy={() => {
+              setWelcomeModalOpen(false);
+              setAcademyModalOpen(true);
+            }}
+            onOpenStorageLibrary={() => {
+              setWelcomeModalOpen(false);
+              setLibraryFocusedCatalogIds(null);
+              setLibraryFocusedLabTitle(null);
+              setStorageLibraryOpen(true);
+            }}
+            onLaunchLab={(labId) => {
+              const summary = Array.isArray(academyLabs)
+                ? academyLabs.find((l) => l && l.id === labId)
+                : undefined;
+              if (summary && !summary.allTemplatesReady) {
+                setWelcomeModalOpen(false);
+                setAcademyPromptLabId(labId);
+                setAcademyModalOpen(true);
+                return;
+              }
+              void handleLaunchAcademyLab(labId);
+            }}
+            onNewProject={() => setNewProjectModalOpen(true)}
+            onOpenProject={() => void handleOpenProject()}
+            onOpenCustomVmWizard={() => setCustomVmWizardOpen(true)}
+          />
+        </ErrorBoundary>
+      )}
 
-      <ErrorBoundary
-        scopeLabel="Networking Academy"
-        onReset={() => setAcademyModalOpen(false)}
-      >
-        <AcademyModal
-          open={academyModalOpen}
-          labs={academyLabs}
-          loading={academyLoading}
-          launchingLabId={launchingLabId}
-          activeLabId={activeLab?.summary.id ?? null}
-          initialPromptLabId={academyPromptLabId}
-          onClearInitialPromptLab={handleClearAcademyPrompt}
-          onClose={() => setAcademyModalOpen(false)}
-          onRefresh={() => void refreshAcademyLabs()}
-          onLaunchLab={(labId) => void handleLaunchAcademyLab(labId)}
-          onOpenTemplateWizard={() => {
-            setAcademyModalOpen(false);
-            setLibraryFocusedCatalogIds(null);
+      {academyModalOpen && (
+        <ErrorBoundary
+          scopeLabel="Networking Academy"
+          onReset={() => setAcademyModalOpen(false)}
+        >
+          <AcademyModal
+            open={academyModalOpen}
+            labs={academyLabs}
+            loading={academyLoading}
+            launchingLabId={launchingLabId}
+            activeLabId={activeLab?.summary.id ?? null}
+            initialPromptLabId={academyPromptLabId}
+            onClearInitialPromptLab={handleClearAcademyPrompt}
+            onClose={() => setAcademyModalOpen(false)}
+            onRefresh={() => void refreshAcademyLabs()}
+            onLaunchLab={(labId) => void handleLaunchAcademyLab(labId)}
+            onOpenTemplateWizard={() => {
+              setAcademyModalOpen(false);
+              setLibraryFocusedCatalogIds(null);
+              setLibraryFocusedLabTitle(null);
+              setStorageLibraryOpen(true);
+            }}
+            onOpenOsLibraryForCatalogIds={(catalogIds, labTitle) => {
+              setAcademyModalOpen(false);
+              setLibraryFocusedCatalogIds(catalogIds);
+              setLibraryFocusedLabTitle(labTitle ?? null);
+              setStorageLibraryOpen(true);
+            }}
+          />
+        </ErrorBoundary>
+      )}
+
+      {configNode && (
+        <NodeConfigModal
+          open={Boolean(configNode)}
+          node={configNode}
+          initialTab={configNodeInitialTab}
+          bundlePath={bundlePath}
+          isosDir={storageState?.resolvedIsosDir}
+          osProfiles={osProfiles}
+          baseTemplates={baseTemplates}
+          onClose={() => {
+            setConfigNodeId(null);
+            setConfigNodeInitialTab("general");
+          }}
+          onSaveNode={handleSaveNodeConfig}
+          onDeleteNode={handleDeleteNode}
+          onTemplatesChanged={refreshTemplates}
+          onOpenOsLibrary={(profId) => {
+            setLibraryFocusedCatalogIds(profId ? [profId] : null);
             setLibraryFocusedLabTitle(null);
             setStorageLibraryOpen(true);
           }}
-          onOpenOsLibraryForCatalogIds={(catalogIds, labTitle) => {
-            setAcademyModalOpen(false);
-            setLibraryFocusedCatalogIds(catalogIds);
-            setLibraryFocusedLabTitle(labTitle ?? null);
-            setStorageLibraryOpen(true);
-          }}
         />
-      </ErrorBoundary>
+      )}
 
-      <NodeConfigModal
-        open={Boolean(configNode)}
-        node={configNode}
-        initialTab={configNodeInitialTab}
-        bundlePath={bundlePath}
-        isosDir={storageState?.resolvedIsosDir}
-        osProfiles={osProfiles}
-        baseTemplates={baseTemplates}
-        onClose={() => {
-          setConfigNodeId(null);
-          setConfigNodeInitialTab("general");
-        }}
-        onSaveNode={handleSaveNodeConfig}
-        onDeleteNode={handleDeleteNode}
-        onTemplatesChanged={refreshTemplates}
-        onOpenOsLibrary={(profId) => {
-          setLibraryFocusedCatalogIds(profId ? [profId] : null);
-          setLibraryFocusedLabTitle(null);
-          setStorageLibraryOpen(true);
-        }}
-      />
+      {customVmWizardOpen && (
+        <CustomVmWizardModal
+          open={customVmWizardOpen}
+          isosDir={storageState?.resolvedIsosDir}
+          osProfiles={osProfiles}
+          baseTemplates={baseTemplates}
+          onClose={() => setCustomVmWizardOpen(false)}
+          onCreateVm={handleCreateCustomVm}
+        />
+      )}
 
-      <CustomVmWizardModal
-        open={customVmWizardOpen}
-        isosDir={storageState?.resolvedIsosDir}
-        osProfiles={osProfiles}
-        baseTemplates={baseTemplates}
-        onClose={() => setCustomVmWizardOpen(false)}
-        onCreateVm={handleCreateCustomVm}
-      />
+      {newProjectModalOpen && (
+        <NewProjectModal
+          open={newProjectModalOpen}
+          defaultParentDir={activeWorkspacesDir}
+          onClose={() => setNewProjectModalOpen(false)}
+          onCreate={handleCreateNewProjectConfirm}
+        />
+      )}
 
-      <NewProjectModal
-        open={newProjectModalOpen}
-        defaultParentDir={activeWorkspacesDir}
-        onClose={() => setNewProjectModalOpen(false)}
-        onCreate={handleCreateNewProjectConfirm}
-      />
+      {doctorModalOpen && (
+        <DependencyCheckModal
+          open={doctorModalOpen}
+          report={envReport}
+          loading={envLoading}
+          onClose={() => setDoctorModalOpen(false)}
+          onRefresh={() => void loadDiagnostics(true)}
+        />
+      )}
 
-      <DependencyCheckModal
-        open={doctorModalOpen}
-        report={envReport}
-        loading={envLoading}
-        onClose={() => setDoctorModalOpen(false)}
-        onRefresh={() => void loadDiagnostics(true)}
-      />
-
-      <SettingsModal
-        open={settingsModalOpen}
-        initialSection={settingsInitialSection}
-        storageState={storageState}
-        migrationProgress={migrationProgress}
-        tcpflowyStatus={tcpflowyStatus}
-        tcpflowyProgress={tcpflowyProgress}
-        installingTcpflowy={installingTcpflowy}
-        themePreference={preference}
-        onChangeTheme={setPreference}
-        onClose={() => setSettingsModalOpen(false)}
-        onApplyStorageUpdate={handleApplyStorageUpdate}
-        onRetryDetection={handleRetryStorage}
-        onFallbackInternal={handleFallbackInternalStorage}
-        onInstallTcpflowy={handleInstallTcpflowy}
-        onTcpflowyStatusChanged={setTcpflowyStatus}
-      />
+      {settingsModalOpen && (
+        <SettingsModal
+          open={settingsModalOpen}
+          initialSection={settingsInitialSection}
+          storageState={storageState}
+          migrationProgress={migrationProgress}
+          tcpflowyStatus={tcpflowyStatus}
+          tcpflowyProgress={tcpflowyProgress}
+          installingTcpflowy={installingTcpflowy}
+          themePreference={preference}
+          onChangeTheme={setPreference}
+          onClose={() => setSettingsModalOpen(false)}
+          onApplyStorageUpdate={handleApplyStorageUpdate}
+          onRetryDetection={handleRetryStorage}
+          onFallbackInternal={handleFallbackInternalStorage}
+          onInstallTcpflowy={handleInstallTcpflowy}
+          onTcpflowyStatusChanged={setTcpflowyStatus}
+        />
+      )}
 
       {/* Non-blocking Toast Notification (z-[100] so notifications stay visible above any open modal) */}
       {toast && (

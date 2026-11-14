@@ -61,6 +61,18 @@ export function WelcomeModal({
 
   if (!open) return null;
 
+  const safeLabs = Array.isArray(labs)
+    ? labs.filter(
+        (l): l is AcademyLabSummary =>
+          Boolean(
+            l &&
+              typeof l === "object" &&
+              typeof l.id === "string" &&
+              typeof l.title === "string"
+          )
+      )
+    : [];
+
   const qemuStatus = evaluateQemuHostStatus(envReport);
   const handleCopyBrew = async () => {
     try {
@@ -256,12 +268,12 @@ export function WelcomeModal({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#6366F1] hover:bg-indigo-500 text-white shadow-xs transition-colors"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Browse All {labs.length || 8} Guided Labs</span>
+                <span>Browse All {safeLabs.length || 8} Guided Labs</span>
               </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {labs.slice(0, 4).map((lab) => (
+              {safeLabs.slice(0, 4).map((lab) => (
                 <button
                   key={lab.id}
                   type="button"

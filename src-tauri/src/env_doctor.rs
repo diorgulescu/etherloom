@@ -7,9 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
+use tokio::sync::OnceCell;
 use tokio::time::timeout;
 
 const PROBE_TIMEOUT: Duration = Duration::from_millis(2500);
+static HVF_SUPPORT_CACHE: OnceCell<bool> = OnceCell::const_new();
 
 /// Severity / readiness state mapped directly to Green (`ok`) and Amber (`warning`) UI badges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -384,22 +386,27 @@ async fn probe_wireshark(homebrew_dirs: &[PathBuf], home_dir: Option<&Path>) -> 
     }
 }
 
-/// Checks Apple `Hypervisor.framework` availability via `sysctl -n kern.hv_support` (non-root).
+/// Checks Apple `Hypervisor.framework` availability via `sysctl -n kern.hv_support` (non-root),
+/// cached for the lifetime of the process so VM launches do not repeatedly spawn `sysctl`.
 pub async fn check_hvf_support() -> bool {
-    if env::consts::OS != "macos" {
-        return false;
-    }
-    let sysctl = Path::new("/usr/sbin/sysctl");
-    let bin = if is_executable_file(sysctl) {
-        sysctl
-    } else {
-        Path::new("sysctl")
-    };
+    *HVF_SUPPORT_CACHE
+        .get_or_init(|| async {
+            if env::consts::OS != "macos" {
+                return false;
+            }
+            let sysctl = Path::new("/usr/sbin/sysctl");
+            let bin = if is_executable_file(sysctl) {
+                sysctl
+            } else {
+                Path::new("sysctl")
+            };
 
-    match query_version_line(bin, &["-n", "kern.hv_support"]).await {
-        Some(val) => val.trim() == "1",
-        None => false,
-    }
+            match query_version_line(bin, &["-n", "kern.hv_support"]).await {
+                Some(val) => val.trim() == "1",
+                None => false,
+            }
+        })
+        .await
 }
 
 /// Runs all environment checks concurrently and builds the complete `EnvDoctorReport`.

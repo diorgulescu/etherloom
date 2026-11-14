@@ -243,27 +243,44 @@ export function StorageLibraryModal({
     };
   }, [refreshCatalog]);
 
-  const readyCount = useMemo(
+  const safeEntries = useMemo(
     () =>
-      entries.filter(
-        (e) =>
-          e.availability === "ready" || e.availability === "installer_ready"
-      ).length,
+      Array.isArray(entries)
+        ? entries.filter(
+            (e): e is OsCatalogEntryDto =>
+              Boolean(
+                e &&
+                  typeof e === "object" &&
+                  typeof e.id === "string" &&
+                  typeof e.name === "string"
+              )
+          )
+        : [],
     [entries]
   );
 
+  const readyCount = useMemo(
+    () =>
+      safeEntries.filter(
+        (e) =>
+          e.availability === "ready" || e.availability === "installer_ready"
+      ).length,
+    [safeEntries]
+  );
+
   const filteredEntries = useMemo(() => {
+    if (!open) return [];
     const q = searchQuery.trim().toLowerCase();
     const focusSet =
       focusedCatalogIds && focusedCatalogIds.length > 0
-        ? new Set(focusedCatalogIds.map((id) => id.toLowerCase()))
+        ? new Set(focusedCatalogIds.map((id) => String(id).toLowerCase()))
         : null;
 
-    return entries.filter((entry) => {
+    return safeEntries.filter((entry) => {
       if (focusSet) {
         if (
-          !focusSet.has(entry.id.toLowerCase()) &&
-          !focusSet.has(entry.osProfileId.toLowerCase())
+          !focusSet.has((entry.id ?? "").toLowerCase()) &&
+          !focusSet.has((entry.osProfileId ?? "").toLowerCase())
         ) {
           return false;
         }
@@ -291,15 +308,15 @@ export function StorageLibraryModal({
 
       if (!q) return true;
       return (
-        entry.name.toLowerCase().includes(q) ||
-        entry.version.toLowerCase().includes(q) ||
-        entry.category.toLowerCase().includes(q) ||
-        entry.summary.toLowerCase().includes(q) ||
-        entry.nicNamingHint.toLowerCase().includes(q) ||
-        entry.arch.toLowerCase().includes(q)
+        (entry.name ?? "").toLowerCase().includes(q) ||
+        (entry.version ?? "").toLowerCase().includes(q) ||
+        (entry.category ?? "").toLowerCase().includes(q) ||
+        (entry.summary ?? "").toLowerCase().includes(q) ||
+        (entry.nicNamingHint ?? "").toLowerCase().includes(q) ||
+        (entry.arch ?? "").toLowerCase().includes(q)
       );
     });
-  }, [entries, filterTab, focusedCatalogIds, searchQuery]);
+  }, [filterTab, focusedCatalogIds, open, safeEntries, searchQuery]);
 
   if (!open) return null;
 
