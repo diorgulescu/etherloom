@@ -2483,6 +2483,7 @@ export function App() {
     !isTauriRuntime() || (envReport ? envReport.wireshark.found : true);
 
   const anyModalOpen =
+    activityMonitorOpen ||
     storageLibraryOpen ||
     welcomeModalOpen ||
     academyModalOpen ||
@@ -2491,6 +2492,26 @@ export function App() {
     newProjectModalOpen ||
     doctorModalOpen ||
     settingsModalOpen;
+
+  const activityMonitorNodes = useMemo<ActivityMonitorNodeInput[]>(
+    () => [
+      ...enrichedNodes.map(
+        (n): ActivityMonitorNodeInput => ({
+          id: n.id,
+          data: n.data,
+          isGuidedSetup: false,
+        })
+      ),
+      ...guidedSetupVms.map(
+        (g): ActivityMonitorNodeInput => ({
+          id: g.id,
+          data: g.data,
+          isGuidedSetup: true,
+        })
+      ),
+    ],
+    [enrichedNodes, guidedSetupVms]
+  );
 
   const handleClearLibraryFocus = useCallback(() => {
     setLibraryFocusedCatalogIds(null);
@@ -2718,22 +2739,7 @@ export function App() {
         >
           <ActivityMonitorModal
             open={activityMonitorOpen}
-            nodes={[
-              ...enrichedNodes.map(
-                (n): ActivityMonitorNodeInput => ({
-                  id: n.id,
-                  data: n.data,
-                  isGuidedSetup: false,
-                })
-              ),
-              ...guidedSetupVms.map(
-                (g): ActivityMonitorNodeInput => ({
-                  id: g.id,
-                  data: g.data,
-                  isGuidedSetup: true,
-                })
-              ),
-            ]}
+            nodes={activityMonitorNodes}
             onClose={() => setActivityMonitorOpen(false)}
             onToggleNodeRun={(nodeId) => void handleToggleNodeRun(nodeId)}
             onOpenNodeConsole={(nodeId) => {
