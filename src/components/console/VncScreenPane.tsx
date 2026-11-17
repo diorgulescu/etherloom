@@ -219,6 +219,29 @@ export function VncScreenPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId, status, displayMode, reconnectTick]);
 
+  // Re-fit VNC framebuffer scale whenever the console container itself is resized
+  // (e.g. dragging edges/corners of the Floating Console or toggling expanded mode)
+  useEffect(() => {
+    const host = screenHostRef.current?.parentElement;
+    if (!host) return;
+    let rafId: number | null = null;
+    const ro = new ResizeObserver(() => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        if (rfbRef.current && scaleToFit) {
+          // `@novnc/novnc` RFB listens to `window` resize to recompute `_updateScale()`
+          window.dispatchEvent(new Event("resize"));
+        }
+      });
+    });
+    ro.observe(host);
+    return () => {
+      ro.disconnect();
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
+  }, [scaleToFit, visible]);
+
   const handleSendCtrlAltDel = async () => {
     if (rfbRef.current && rfbState === "connected") {
       rfbRef.current.sendCtrlAltDel();

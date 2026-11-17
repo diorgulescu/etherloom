@@ -24,6 +24,55 @@ const MAX_WS_CLIENT_PAYLOAD: usize = 4 * 1024 * 1024;
 /// RFC 6455 WebSocket GUID for `Sec-WebSocket-Accept` computation.
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/// Origins allowed to open the loopback console WebSocket bridge.
+///
+/// Browsers always attach an `Origin` header to WebSocket handshakes, so any web page open in the
+/// user's browser (e.g. `https://evil.example`) can be rejected here, while the Etherloom WebView
+/// itself (`tauri://localhost` in production, `http://localhost:1420` under `vite dev`) is allowed.
+/// Requests without an `Origin` header (non-browser local tools, unit tests) are permitted.
+const ALLOWED_WS_ORIGINS: &[&str] = &[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:1420",
+    "https://localhost:1420",
+    "http://127.0.0.1:1420",
+    "https://127.0.0.1:1420",
+];
+
+/// Validates the `Host` and `Origin` headers of a WebSocket upgrade request against the
+/// loopback-only trust boundary of the console bridge.
+fn validate_ws_handshake(req: &WsUpgradeRequest) -> Result<(), String> {
+    // DNS-rebinding guard: the Host must be a loopback literal, never an external name.
+    if let Some(host) = req.host.as_deref() {
+        let host_lower = host.trim().to_ascii_lowercase();
+        let host_name = host_lower.split(':').next().unwrap_or("");
+        let is_loopback_host = host_name == "127.0.0.1"
+            || host_name == "localhost"
+            || host_name == "[::1]"
+            || host_name == "::1";
+        if !is_loopback_host {
+            return Err(format!(
+                "WebSocket bridge rejects non-loopback Host header '{host}'"
+            ));
+        }
+    }
+
+    if let Some(origin) = req.origin.as_deref() {
+        let origin_lower = origin.trim().to_ascii_lowercase();
+        if origin_lower == "null" {
+            return Err("WebSocket bridge rejects opaque 'null' Origin".to_string());
+        }
+        if !ALLOWED_WS_ORIGINS.contains(&origin_lower.as_str()) {
+            return Err(format!(
+                "WebSocket bridge rejects cross-origin handshake from '{origin}'"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Descriptor returned to the React Console Dock to attach `xterm.js` and `@novnc/novnc`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -427,6 +476,21 @@ impl ConsoleBridge {
         vm_manager: VmManager,
     ) -> Result<(), String> {
         let req = read_ws_upgrade_request(&mut stream).await?;
+        if let Err(reason) = validate_ws_handshake(&req) {
+            let body = format!("403 Forbidden: {reason}\n");
+            let _ = stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await;
+            let _ = stream.flush().await;
+            return Err(reason);
+        }
         let accept_val = compute_ws_accept_key(&req.sec_ws_key);
 
         let mut response = format!(
@@ -687,6 +751,8 @@ struct WsUpgradeRequest {
     path: String,
     sec_ws_key: String,
     negotiated_protocol: Option<String>,
+    host: Option<String>,
+    origin: Option<String>,
 }
 
 enum WsClientEvent {
@@ -732,6 +798,8 @@ async fn read_ws_upgrade_request(stream: &mut TcpStream) -> Result<WsUpgradeRequ
 
     let mut sec_ws_key: Option<String> = None;
     let mut negotiated_protocol: Option<String> = None;
+    let mut host: Option<String> = None;
+    let mut origin: Option<String> = None;
 
     for line in lines {
         if line.is_empty() {
@@ -742,6 +810,10 @@ async fn read_ws_upgrade_request(stream: &mut TcpStream) -> Result<WsUpgradeRequ
             let val_trim = val.trim();
             if name_trim.eq_ignore_ascii_case("Sec-WebSocket-Key") {
                 sec_ws_key = Some(val_trim.to_string());
+            } else if name_trim.eq_ignore_ascii_case("Host") {
+                host = Some(val_trim.to_string());
+            } else if name_trim.eq_ignore_ascii_case("Origin") {
+                origin = Some(val_trim.to_string());
             } else if name_trim.eq_ignore_ascii_case("Sec-WebSocket-Protocol") {
                 // Prefer `binary` if requested by @novnc/novnc, else echo first offered subprotocol
                 let offered: Vec<&str> = val_trim.split(',').map(str::trim).collect();
@@ -761,6 +833,8 @@ async fn read_ws_upgrade_request(stream: &mut TcpStream) -> Result<WsUpgradeRequ
         path,
         sec_ws_key,
         negotiated_protocol,
+        host,
+        origin,
     })
 }
 
@@ -778,6 +852,10 @@ async fn read_ws_message<R: AsyncReadExt + Unpin>(
         let fin = (hdr[0] & 0x80) != 0;
         let opcode = hdr[0] & 0x0F;
         let masked = (hdr[1] & 0x80) != 0;
+        // RFC 6455 §5.1: servers MUST close the connection on unmasked client frames.
+        if !masked {
+            return Err("WebSocket client frame was not masked (RFC 6455 violation)".to_string());
+        }
         let len_code = (hdr[1] & 0x7F) as usize;
 
         let payload_len: usize = match len_code {
@@ -1189,5 +1267,125 @@ mod tests {
         let (op2, sec_types) = read_server_frame(&mut ws_client).await;
         assert_eq!(op2, 0x2);
         assert_eq!(sec_types, vec![0x01, 0x01]);
+    }
+
+    /// Reads an HTTP response head (until `\r\n\r\n`) from a raw TCP client.
+    async fn read_http_response_head(client: &mut TcpStream) -> String {
+        let mut resp = Vec::new();
+        let mut b = [0u8; 1];
+        while !resp.ends_with(b"\r\n\r\n") {
+            let n = client.read(&mut b).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            resp.push(b[0]);
+        }
+        String::from_utf8_lossy(&resp).into_owned()
+    }
+
+    #[tokio::test]
+    async fn ws_handshake_rejects_cross_origin_and_non_loopback_host() {
+        let bridge = ConsoleBridge::new();
+        let ws_port = bridge.ensure_started(VmManager::new()).await.unwrap();
+
+        // 1. Cross-origin browser page must be rejected with HTTP 403
+        let mut evil = TcpStream::connect(("127.0.0.1", ws_port)).await.unwrap();
+        evil.write_all(
+            "GET /serial/node-fw1 HTTP/1.1\r\n\
+             Host: 127.0.0.1\r\n\
+             Origin: https://evil.example\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\r\n"
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let resp = read_http_response_head(&mut evil).await;
+        assert!(resp.starts_with("HTTP/1.1 403"), "got: {resp}");
+
+        // 2. DNS-rebinding style non-loopback Host must be rejected even with a trusted Origin
+        let mut rebind = TcpStream::connect(("127.0.0.1", ws_port)).await.unwrap();
+        rebind
+            .write_all(
+                "GET /serial/node-fw1 HTTP/1.1\r\n\
+                 Host: evil.example\r\n\
+                 Origin: tauri://localhost\r\n\
+                 Upgrade: websocket\r\n\
+                 Connection: Upgrade\r\n\
+                 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                 Sec-WebSocket-Version: 13\r\n\r\n"
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let resp = read_http_response_head(&mut rebind).await;
+        assert!(resp.starts_with("HTTP/1.1 403"), "got: {resp}");
+    }
+
+    #[tokio::test]
+    async fn ws_handshake_accepts_tauri_webview_origin_and_rejects_unmasked_frames() {
+        // Register a mock serial socket so the relay loop starts reading WS frames immediately
+        let sock_path = PathBuf::from(format!(
+            "/tmp/el-serial-{}.sock",
+            &Uuid::new_v4().to_string()[..8]
+        ));
+        let _ = std::fs::remove_file(&sock_path);
+        let unix_listener = UnixListener::bind(&sock_path).unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = unix_listener.accept().await.unwrap();
+            let mut buf = [0u8; 64];
+            let _ = sock.read(&mut buf).await;
+        });
+
+        let bridge = ConsoleBridge::new();
+        bridge
+            .register_custom_serial_socket("node-orig", sock_path.clone())
+            .await;
+        let ws_port = bridge.ensure_started(VmManager::new()).await.unwrap();
+
+        let mut client = TcpStream::connect(("127.0.0.1", ws_port)).await.unwrap();
+        client
+            .write_all(
+                "GET /serial/node-orig HTTP/1.1\r\n\
+                 Host: 127.0.0.1\r\n\
+                 Origin: tauri://localhost\r\n\
+                 Upgrade: websocket\r\n\
+                 Connection: Upgrade\r\n\
+                 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                 Sec-WebSocket-Version: 13\r\n\r\n"
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let resp = read_http_response_head(&mut client).await;
+        assert!(resp.starts_with("HTTP/1.1 101"), "got: {resp}");
+
+        // Give the relay loop a moment to start reading frames
+        sleep(Duration::from_millis(100)).await;
+
+        // Unmasked client frame (RFC 6455 violation) must terminate the connection
+        // (server replies with a Close frame, then drops the socket).
+        client.write_all(&[0x82, 0x01, b'x']).await.unwrap();
+        let mut saw_close = false;
+        loop {
+            let mut hdr = [0u8; 2];
+            let r = tokio::time::timeout(Duration::from_secs(2), client.read_exact(&mut hdr)).await;
+            match r {
+                Ok(Ok(_)) => {
+                    if hdr[0] & 0x0F == 0x8 {
+                        saw_close = true;
+                    }
+                    let len = (hdr[1] & 0x7F) as usize;
+                    let mut payload = vec![0u8; len];
+                    let _ = client.read_exact(&mut payload).await;
+                }
+                _ => break, // timeout or EOF
+            }
+        }
+        assert!(saw_close, "server should send a WS Close frame after an unmasked client frame");
+
+        let _ = std::fs::remove_file(&sock_path);
     }
 }

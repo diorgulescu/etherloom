@@ -99,6 +99,9 @@ function formatProgressStageBadge(stage?: string): string {
       return "Extracting Archive";
     case "converting qcow2":
       return "Preparing qcow2";
+    case "ready":
+    case "installer_ready":
+      return "Finalizing…";
     default:
       return stage || "Downloading";
   }
@@ -142,6 +145,9 @@ export function StorageLibraryModal({
   const [customMirrorUrl, setCustomMirrorUrl] = useState<
     Record<string, string>
   >({});
+  const [customMirrorSha256, setCustomMirrorSha256] = useState<
+    Record<string, string>
+  >({});
   const [busyCardId, setBusyCardId] = useState<string | null>(null);
   const [confirmDeleteEntry, setConfirmDeleteEntry] =
     useState<OsCatalogEntryDto | null>(null);
@@ -181,6 +187,27 @@ export function StorageLibraryModal({
     try {
       const list = await listCatalogEntries();
       setEntries(list);
+      // Prune any completed/stale non-error progress entries once the catalog reports Ready / InstallerReady
+      setProgressById((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const item of list) {
+          const cur = next[item.id];
+          if (
+            cur &&
+            cur.stage !== "error" &&
+            (item.availability === "ready" ||
+              item.availability === "installer_ready") &&
+            (cur.stage === "ready" ||
+              cur.stage === "installer_ready" ||
+              cur.stage === "cancelled")
+          ) {
+            delete next[item.id];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
     } catch (err: unknown) {
       onNotifyRef.current(
         "error",
@@ -200,15 +227,55 @@ export function StorageLibraryModal({
     void refreshCatalog();
   }, [focusedKey, open, refreshCatalog, storageState?.resolvedTemplatesDir]);
 
-  // Sync storage drafts from active `storageState`
+  const lastSyncedConfigKeyRef = useRef<string | null>(null);
+
+  // Sync storage drafts ONLY on modal open or when persisted `storageState.config` actually changes
+  // (never overwrite in-progress Finder selections or user typing on background telemetry refreshes!)
   useEffect(() => {
+    if (!open) {
+      lastSyncedConfigKeyRef.current = null;
+      return;
+    }
     if (!storageState) return;
+
+    const configKey = [
+      storageState.config.storageRoot,
+      storageState.config.templatesDirOverride ?? "",
+      storageState.config.isosDirOverride ?? "",
+      storageState.config.workspacesDirOverride ?? "",
+    ].join("|");
+
+    if (lastSyncedConfigKeyRef.current === configKey) {
+      return;
+    }
+    lastSyncedConfigKeyRef.current = configKey;
+
     setStorageRootDraft(storageState.config.storageRoot);
     setTemplatesOverride(storageState.config.templatesDirOverride ?? "");
     setIsosOverride(storageState.config.isosDirOverride ?? "");
     setWorkspacesOverride(storageState.config.workspacesDirOverride ?? "");
     setProbedTelemetry(storageState.diskTelemetry);
-  }, [storageState]);
+  }, [open, storageState]);
+
+  // Live disk telemetry preview while editing or browsing a new `storageRootDraft`
+  useEffect(() => {
+    if (!open || !storageEditorOpen || !storageRootDraft.trim()) {
+      return;
+    }
+    let cancelled = false;
+    probeStoragePathTelemetry(storageRootDraft.trim())
+      .then((tele) => {
+        if (!cancelled) {
+          setProbedTelemetry(tele);
+        }
+      })
+      .catch(() => {
+        // Keep last valid telemetry if path cannot be probed
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, storageEditorOpen, storageRootDraft]);
 
   // Subscribe once to `"catalog://download-progress"` events (StrictMode & async-cleanup safe)
   useEffect(() => {
@@ -216,16 +283,34 @@ export function StorageLibraryModal({
     let unlisten: (() => void) | null = null;
     void onCatalogDownloadProgress((ev) => {
       if (disposed) return;
-      setProgressById((prev) => ({ ...prev, [ev.catalogId]: ev }));
-      if (
-        ev.stage === "ready" ||
-        ev.stage === "error" ||
-        ev.stage === "cancelled"
-      ) {
-        if (ev.stage === "ready") {
+      const isSuccess =
+        ev.stage === "ready" || ev.stage === "installer_ready";
+      const isCancelled = ev.stage === "cancelled";
+      const isError = ev.stage === "error";
+
+      setProgressById((prev) => {
+        if (isSuccess || isCancelled) {
+          if (!(ev.catalogId in prev)) return prev;
+          const next = { ...prev };
+          delete next[ev.catalogId];
+          return next;
+        }
+        const prevEntry = prev[ev.catalogId];
+        return {
+          ...prev,
+          [ev.catalogId]: {
+            ...ev,
+            resolvedVersion:
+              ev.resolvedVersion ?? prevEntry?.resolvedVersion ?? null,
+          },
+        };
+      });
+
+      if (isSuccess || isError || isCancelled) {
+        if (isSuccess) {
           onNotifyRef.current("ok", ev.message);
           void onTemplatesChangedRef.current();
-        } else if (ev.stage === "error" && ev.error) {
+        } else if (isError && ev.error) {
           onNotifyRef.current("error", `${ev.catalogId}: ${ev.error}`);
         }
         void refreshCatalog();
@@ -371,6 +456,7 @@ export function StorageLibraryModal({
 
   const handleStartDownload = async (entry: OsCatalogEntryDto) => {
     const customUrl = customMirrorUrl[entry.id]?.trim() || null;
+    const customSha256 = customMirrorSha256[entry.id]?.trim() || null;
     setProgressById((prev) => ({
       ...prev,
       [entry.id]: {
@@ -384,7 +470,7 @@ export function StorageLibraryModal({
       },
     }));
     try {
-      await startCatalogDownload(entry.id, customUrl);
+      await startCatalogDownload(entry.id, customUrl, customSha256);
       await refreshCatalog();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -427,13 +513,19 @@ export function StorageLibraryModal({
     setBusyCardId(entry.id);
     try {
       const updated = await importCatalogLocalFile(entry.id, picked);
+      setProgressById((prev) => {
+        if (!(entry.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[entry.id];
+        return next;
+      });
       await onTemplatesChanged();
       await refreshCatalog();
       onNotify(
         "ok",
         updated.availability === "ready"
-          ? `Imported ${entry.name} as a Read-Only Golden Template!`
-          : `Imported ${entry.name} installer media — ready for 1-Click Guided Setup!`
+          ? `Imported ${updated.name} (${updated.version}) as a Read-Only Golden Template!`
+          : `Imported ${updated.name} (${updated.version}) installer media — ready for 1-Click Guided Setup!`
       );
     } catch (err: unknown) {
       onNotify("error", err instanceof Error ? err.message : String(err));
@@ -473,6 +565,12 @@ export function StorageLibraryModal({
         return;
       }
       setConfirmDeleteEntry(null);
+      setProgressById((prev) => {
+        if (!(entry.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[entry.id];
+        return next;
+      });
       await onTemplatesChanged();
       await refreshCatalog();
       onNotify(
@@ -641,11 +739,19 @@ export function StorageLibraryModal({
                 )}
               </div>
 
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <code className="text-xs font-mono text-slate-800 dark:text-slate-200 truncate">
                   {storageState?.config.storageRoot ??
                     "~/Library/Application Support/Etherloom/Library"}
                 </code>
+                {storageEditorOpen &&
+                  storageRootDraft.trim() !== "" &&
+                  storageRootDraft.trim() !==
+                    (storageState?.config.storageRoot ?? "").trim() && (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#22D3EE]/15 text-cyan-700 dark:text-[#22D3EE] border border-[#22D3EE]/35">
+                      New path selected — click &ldquo;Apply Storage Location&rdquo; below
+                    </span>
+                  )}
               </div>
             </div>
 
@@ -898,7 +1004,22 @@ export function StorageLibraryModal({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setStorageEditorOpen(false)}
+                    onClick={() => {
+                      if (storageState) {
+                        setStorageRootDraft(storageState.config.storageRoot);
+                        setTemplatesOverride(
+                          storageState.config.templatesDirOverride ?? ""
+                        );
+                        setIsosOverride(
+                          storageState.config.isosDirOverride ?? ""
+                        );
+                        setWorkspacesOverride(
+                          storageState.config.workspacesDirOverride ?? ""
+                        );
+                        setProbedTelemetry(storageState.diskTelemetry);
+                      }
+                      setStorageEditorOpen(false);
+                    }}
                     className="px-3 py-1 rounded-lg text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-[#1E2B42]"
                   >
                     Cancel
@@ -1163,14 +1284,18 @@ export function StorageLibraryModal({
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {filteredEntries.map((entry) => {
               const prog = progressById[entry.id];
+              const isTerminalProg =
+                !prog ||
+                prog.stage === "ready" ||
+                prog.stage === "installer_ready" ||
+                prog.stage === "error" ||
+                prog.stage === "cancelled";
               const isDownloading =
-                entry.availability === "downloading" ||
-                (prog &&
-                  prog.stage !== "ready" &&
-                  prog.stage !== "error" &&
-                  prog.stage !== "cancelled");
-              const isReady = entry.availability === "ready";
-              const isInstallerReady = entry.availability === "installer_ready";
+                entry.availability === "downloading" || !isTerminalProg;
+              const isReady = !isDownloading && entry.availability === "ready";
+              const isInstallerReady =
+                !isDownloading && entry.availability === "installer_ready";
+              const displayVersion = prog?.resolvedVersion || entry.version;
               const isBusy = busyCardId === entry.id;
               const archInfo = describeArchAccel(entry);
               const tipsOpen = Boolean(expandedTips[entry.id]);
@@ -1205,7 +1330,7 @@ export function StorageLibraryModal({
                               {entry.name}
                             </h3>
                             <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                              {entry.version}
+                              {displayVersion}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 flex-wrap mt-1">
@@ -1442,26 +1567,40 @@ export function StorageLibraryModal({
 
                   {/* Optional Custom Mirror URL Input */}
                   {mirrorOpen && !isDownloading && (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="url"
+                          value={customMirrorUrl[entry.id] ?? entry.downloadUrl ?? ""}
+                          onChange={(e) =>
+                            setCustomMirrorUrl((prev) => ({
+                              ...prev,
+                              [entry.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="https://mirror.example.org/os-image.qcow2.xz"
+                          className="flex-1 px-2.5 py-1 text-xs font-mono rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleStartDownload(entry)}
+                          className="px-2.5 py-1 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] text-xs font-semibold"
+                        >
+                          Fetch URL
+                        </button>
+                      </div>
                       <input
-                        type="url"
-                        value={customMirrorUrl[entry.id] ?? entry.downloadUrl ?? ""}
+                        type="text"
+                        value={customMirrorSha256[entry.id] ?? ""}
                         onChange={(e) =>
-                          setCustomMirrorUrl((prev) => ({
+                          setCustomMirrorSha256((prev) => ({
                             ...prev,
                             [entry.id]: e.target.value,
                           }))
                         }
-                        placeholder="https://mirror.example.org/os-image.qcow2.xz"
-                        className="flex-1 px-2.5 py-1 text-xs font-mono rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100"
+                        placeholder="Optional SHA-256 of the mirror file (64 hex chars) — verified before install"
+                        className="w-full px-2.5 py-1 text-xs font-mono rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
                       />
-                      <button
-                        type="button"
-                        onClick={() => void handleStartDownload(entry)}
-                        className="px-2.5 py-1 rounded-lg bg-[#06B6D4] hover:bg-[#22D3EE] text-[#090E18] text-xs font-semibold"
-                      >
-                        Fetch URL
-                      </button>
                     </div>
                   )}
 

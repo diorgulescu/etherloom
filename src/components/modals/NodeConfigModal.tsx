@@ -6,6 +6,7 @@ import {
   Disc,
   Download,
   FolderOpen,
+  Globe,
   HardDrive,
   Layers,
   Monitor,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Server,
   Sparkles,
   Trash2,
   X,
@@ -27,26 +29,32 @@ import {
   resetNodeOverlayDisk,
   resolveNodeDiskPath,
 } from "../../services/tauriBridge";
-import type {
-  BaseTemplateInfo,
-  BootMediaBus,
-  DiskBus,
-  FirmwareType,
-  GuestArch,
-  GuestFamily,
-  InstallerMediaInfo,
-  NicModel,
-  NodeDiskStatusDto,
-  NodePort,
-  OsProfile,
-  TopologyNodeData,
-  VmDisplayMode,
+import {
+  createDefaultDhcpServerConfig,
+  createDefaultNatGatewayConfig,
+  type BaseTemplateInfo,
+  type BootMediaBus,
+  type DhcpServerConfig,
+  type DiskBus,
+  type FirmwareType,
+  type GuestArch,
+  type GuestFamily,
+  type InstallerMediaInfo,
+  type NatGatewayConfig,
+  type NicModel,
+  type NodeDiskStatusDto,
+  type NodePort,
+  type OsProfile,
+  type TopologyNodeData,
+  type VmDisplayMode,
 } from "../../types/studio";
 import {
   flowNodeToWorkspaceNode,
   formatByteSize,
   formatInterfaceLabel,
   generateQemuMac,
+  ipv4MaskToPrefixLen,
+  resolveTemplateProfileMismatch,
 } from "../../utils/topology";
 
 export type ConfigTab = "general" | "interfaces" | "storage";
@@ -96,6 +104,12 @@ export function NodeConfigModal({
   const [displayMode, setDisplayMode] = useState<VmDisplayMode>("vnc");
   const [notes, setNotes] = useState<string>("");
   const [ports, setPorts] = useState<NodePort[]>([]);
+  const [dhcpConfig, setDhcpConfig] = useState<DhcpServerConfig>(() =>
+    createDefaultDhcpServerConfig()
+  );
+  const [natConfig, setNatConfig] = useState<NatGatewayConfig>(() =>
+    createDefaultNatGatewayConfig()
+  );
 
   // Storage & OS Installer fields
   const [storageSource, setStorageSource] = useState<"template" | "installer">(
@@ -159,10 +173,29 @@ export function NodeConfigModal({
     setDisplayMode(d.displayMode ?? "vnc");
     setNotes(d.notes ?? "");
     setPorts(d.ports.map((p) => ({ ...p })));
+    setDhcpConfig(
+      d.dhcpConfig
+        ? { ...createDefaultDhcpServerConfig(), ...d.dhcpConfig }
+        : createDefaultDhcpServerConfig()
+    );
+    setNatConfig(
+      d.natConfig
+        ? { ...createDefaultNatGatewayConfig(), ...d.natConfig }
+        : createDefaultNatGatewayConfig()
+    );
 
-    const matchedTpl = d.templateId
+    const hasProfileMismatch = resolveTemplateProfileMismatch(
+      d.osProfileId ? resolvedProfId : null,
+      d.templateId,
+      baseTemplates
+    );
+    const effectiveNodeTemplateId = hasProfileMismatch ? null : d.templateId;
+
+    const matchedTpl = effectiveNodeTemplateId
       ? baseTemplates.find(
-          (t) => t.id === d.templateId || t.filename === d.templateId
+          (t) =>
+            t.id === effectiveNodeTemplateId ||
+            t.filename === effectiveNodeTemplateId
         )
       : baseTemplates.find((t) => t.osProfileId === resolvedProfId);
 
@@ -172,9 +205,9 @@ export function NodeConfigModal({
     } else if (d.bootMediaPath) {
       setStorageSource("installer");
       setTemplateId("");
-    } else if (baseTemplates.length > 0) {
+    } else if (effectiveNodeTemplateId) {
       setStorageSource("template");
-      setTemplateId(d.templateId || baseTemplates[0].id);
+      setTemplateId(effectiveNodeTemplateId);
     } else {
       setStorageSource("template");
       setTemplateId("");
@@ -198,22 +231,34 @@ export function NodeConfigModal({
     }
   }, [open, node, initialTab, bundlePath, baseTemplates, osProfiles]);
 
-  // If templates finish downloading while the modal is open and no template is selected yet, populate gently
+  // If templates finish downloading while the modal is open and no template is selected yet, populate only a profile match
   useEffect(() => {
     if (!open || !node || node.data.kind !== "vm") return;
     if (templateId || baseTemplates.length === 0) return;
     const byProfile = baseTemplates.find((t) => t.osProfileId === osProfileId);
-    setTemplateId((byProfile ?? baseTemplates[0]).id);
+    if (byProfile) {
+      setTemplateId(byProfile.id);
+    }
   }, [open, node, baseTemplates, osProfileId, templateId]);
 
   if (!open || !node) return null;
 
   const isVm = node.data.kind === "vm";
+  const isDhcpServer = node.data.kind === "dhcp_server";
+  const isNatGateway = node.data.kind === "nat_gateway";
   const isRunning =
     node.data.status === "running" || node.data.status === "booting";
 
-  const handleSelectProfile = (profileId: string) => {
+  const handleSelectProfile = (
+    profileId: string,
+    overrideTemplateId?: string
+  ) => {
     setOsProfileId(profileId);
+    setTemplateId(
+      overrideTemplateId ??
+        baseTemplates.find((t) => t.osProfileId === profileId)?.id ??
+        ""
+    );
     const prof = osProfiles.find((p) => p.id === profileId);
     if (prof) {
       const nextNic: NicModel = prof.defaultNicModel ?? "virtio-net-pci";
@@ -240,6 +285,19 @@ export function NodeConfigModal({
           ),
         }))
       );
+    }
+  };
+
+  const handleSelectTemplate = (nextTplId: string) => {
+    setTemplateId(nextTplId);
+    const chosen = baseTemplates.find((t) => t.id === nextTplId);
+    if (
+      chosen &&
+      chosen.osProfileId &&
+      chosen.description !== "Discovered qcow2 base template" &&
+      chosen.osProfileId !== osProfileId
+    ) {
+      handleSelectProfile(chosen.osProfileId, chosen.id);
     }
   };
 
@@ -419,18 +477,112 @@ export function NodeConfigModal({
         diskSizeGb: Math.max(1, diskSizeGb),
       });
     } else {
-      // Ensure switch / hub port IDs stay `{node.id}-p{idx}` so PacketFabric maps 1:1
-      const normalizedSwitchPorts: NodePort[] = ports.map((p, idx) => ({
-        ...p,
-        id: `${node.id}-p${idx}`,
-        index: idx,
-        label: `p${idx + 1}`,
-      }));
-      onSaveNode(node.id, {
+      // Ensure switch / hub / fabric appliance port IDs stay `{node.id}-p{idx}` so PacketFabric maps 1:1
+      const prevDefaultIpBadge = isDhcpServer
+        ? (() => {
+            const prevCfg =
+              node.data.dhcpConfig ?? createDefaultDhcpServerConfig();
+            return `${prevCfg.server_ip_v4}/${ipv4MaskToPrefixLen(
+              prevCfg.subnet_mask_v4
+            )}`;
+          })()
+        : isNatGateway
+        ? (() => {
+            const prevCfg =
+              node.data.natConfig ?? createDefaultNatGatewayConfig();
+            return `${prevCfg.lan_ip_v4}/${prevCfg.prefix_len_v4}`;
+          })()
+        : null;
+
+      const nextDefaultIpBadge = isDhcpServer
+        ? dhcpConfig.v4_enabled
+          ? `${dhcpConfig.server_ip_v4.trim() || "10.0.10.2"}/${ipv4MaskToPrefixLen(
+              dhcpConfig.subnet_mask_v4
+            )}`
+          : dhcpConfig.v6_enabled
+          ? `${dhcpConfig.server_ip_v6.trim() || "fd00:10::2"}/${
+              dhcpConfig.prefix_len_v6
+            }`
+          : null
+        : isNatGateway
+        ? `${natConfig.lan_ip_v4.trim() || "10.0.2.1"}/${
+            natConfig.prefix_len_v4
+          }`
+        : null;
+
+      const normalizedSwitchPorts: NodePort[] = ports.map((p, idx) => {
+        let nextIpLabel = p.ipLabel ?? null;
+        if (
+          idx === 0 &&
+          nextDefaultIpBadge &&
+          (!nextIpLabel || nextIpLabel === prevDefaultIpBadge)
+        ) {
+          nextIpLabel = nextDefaultIpBadge;
+        }
+        return {
+          ...p,
+          id: `${node.id}-p${idx}`,
+          index: idx,
+          label: `p${idx + 1}`,
+          ipLabel: nextIpLabel,
+        };
+      });
+
+      const patch: Partial<TopologyNodeData> = {
         label: cleanName,
         notes: notes.trim() || null,
         ports: normalizedSwitchPorts,
-      });
+      };
+      if (isDhcpServer) {
+        patch.dhcpConfig = {
+          ...dhcpConfig,
+          server_ip_v4: dhcpConfig.server_ip_v4.trim() || "10.0.10.2",
+          subnet_mask_v4: dhcpConfig.subnet_mask_v4.trim() || "255.255.255.0",
+          pool_start_v4: dhcpConfig.pool_start_v4.trim() || "10.0.10.100",
+          pool_end_v4: dhcpConfig.pool_end_v4.trim() || "10.0.10.200",
+          gateway_v4: dhcpConfig.gateway_v4?.trim()
+            ? dhcpConfig.gateway_v4.trim()
+            : null,
+          dns_v4: dhcpConfig.dns_v4.trim(),
+          domain_name: dhcpConfig.domain_name.trim() || "lab.local",
+          lease_time_secs: Math.max(60, Number(dhcpConfig.lease_time_secs) || 3600),
+          server_ip_v6: dhcpConfig.server_ip_v6.trim() || "fd00:10::2",
+          prefix_len_v6: Math.min(
+            126,
+            Math.max(16, Number(dhcpConfig.prefix_len_v6) || 64)
+          ),
+          pool_start_v6: dhcpConfig.pool_start_v6.trim() || "fd00:10::100",
+          pool_end_v6: dhcpConfig.pool_end_v6.trim() || "fd00:10::200",
+          gateway_v6: dhcpConfig.gateway_v6?.trim()
+            ? dhcpConfig.gateway_v6.trim()
+            : null,
+          dns_v6: dhcpConfig.dns_v6.trim(),
+        };
+      }
+      if (isNatGateway) {
+        patch.natConfig = {
+          ...natConfig,
+          lan_ip_v4: natConfig.lan_ip_v4.trim() || "10.0.2.1",
+          prefix_len_v4: Math.min(
+            30,
+            Math.max(8, Number(natConfig.prefix_len_v4) || 24)
+          ),
+          dhcp_pool_start_v4:
+            natConfig.dhcp_pool_start_v4.trim() || "10.0.2.15",
+          dhcp_pool_end_v4: natConfig.dhcp_pool_end_v4.trim() || "10.0.2.200",
+          upstream_dns: natConfig.upstream_dns.trim(),
+          domain_name: natConfig.domain_name.trim() || "wan.lab",
+          lan_ip_v6: natConfig.lan_ip_v6.trim() || "fd00:2::1",
+          prefix_len_v6: Math.min(
+            126,
+            Math.max(16, Number(natConfig.prefix_len_v6) || 64)
+          ),
+          dhcp_pool_start_v6:
+            natConfig.dhcp_pool_start_v6.trim() || "fd00:2::15",
+          dhcp_pool_end_v6: natConfig.dhcp_pool_end_v6.trim() || "fd00:2::200",
+        };
+      }
+      onSaveNode(node.id, patch);
     }
     onClose();
   };
@@ -450,13 +602,25 @@ export function NodeConfigModal({
             <div className="w-8 h-8 rounded-lg bg-[#22D3EE]/15 border border-[#22D3EE]/35 text-cyan-600 dark:text-[#22D3EE] flex items-center justify-center">
               {isVm ? (
                 <Cpu className="w-4 h-4" />
+              ) : isDhcpServer ? (
+                <Server className="w-4 h-4" />
+              ) : isNatGateway ? (
+                <Globe className="w-4 h-4" />
               ) : (
                 <Network className="w-4 h-4" />
               )}
             </div>
             <div>
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Configure {isVm ? "Virtual Machine" : "Fabric Device"} —{" "}
+                Configure{" "}
+                {isVm
+                  ? "Virtual Machine"
+                  : isDhcpServer
+                  ? "Dual-Stack DHCP Appliance"
+                  : isNatGateway
+                  ? "Host NAT Internet Gateway"
+                  : "Fabric Device"}{" "}
+                —{" "}
                 <span className="font-mono text-cyan-600 dark:text-[#22D3EE]">
                   {node.data.label}
                 </span>
@@ -482,7 +646,17 @@ export function NodeConfigModal({
         <div className="px-5 pt-2 border-b border-slate-200 dark:border-[rgba(34,211,238,0.14)] flex items-center gap-1 bg-slate-50/70 dark:bg-[#0D1321]/80">
           {(
             [
-              { id: "general", label: "General & Compute", icon: Cpu },
+              {
+                id: "general",
+                label: isVm
+                  ? "General & Compute"
+                  : isDhcpServer
+                  ? "DHCPv4 & DHCPv6 Pools"
+                  : isNatGateway
+                  ? "Internet Uplink & NAT"
+                  : "General",
+                icon: isDhcpServer ? Server : isNatGateway ? Globe : Cpu,
+              },
               {
                 id: "interfaces",
                 label: `Network Interfaces (${ports.length})`,
@@ -795,6 +969,684 @@ export function NodeConfigModal({
                 </>
               )}
 
+              {isDhcpServer && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-2 rounded-xl bg-indigo-500/8 dark:bg-indigo-500/10 border border-indigo-400/25 px-3.5 py-2.5">
+                    <div className="text-[11.5px] text-slate-700 dark:text-slate-200">
+                      <span className="font-semibold text-indigo-700 dark:text-[#818CF8]">
+                        Zero-VM Userspace DHCPv4 + DHCPv6 Appliance:
+                      </span>{" "}
+                      Answers ARP, ICMPv4/v6 ping, DHCPv4 DORA, ICMPv6 Router
+                      Solicitations (SLAAC + RDNSS), and stateful DHCPv6{" "}
+                      <code className="font-mono">IA_NA</code> directly on{" "}
+                      <code className="font-mono">PacketFabric</code>.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDhcpConfig(createDefaultDhcpServerConfig())
+                      }
+                      className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-slate-200 hover:border-indigo-400/50"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset Defaults</span>
+                    </button>
+                  </div>
+
+                  {/* DHCPv4 Section */}
+                  <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={dhcpConfig.v4_enabled}
+                          onChange={(e) =>
+                            setDhcpConfig((prev) => ({
+                              ...prev,
+                              v4_enabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                        />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
+                          Enable DHCPv4 Server (ARP + ICMP + DORA)
+                        </span>
+                      </label>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE]">
+                        UDP 67 / 68
+                      </span>
+                    </div>
+
+                    {dhcpConfig.v4_enabled && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Appliance IPv4 Address
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.server_ip_v4}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                server_ip_v4: e.target.value,
+                              }))
+                            }
+                            placeholder="10.0.10.2"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Subnet Mask (Option 1)
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.subnet_mask_v4}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                subnet_mask_v4: e.target.value,
+                              }))
+                            }
+                            placeholder="255.255.255.0"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Pool Start IPv4
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.pool_start_v4}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                pool_start_v4: e.target.value,
+                              }))
+                            }
+                            placeholder="10.0.10.100"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Pool End IPv4
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.pool_end_v4}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                pool_end_v4: e.target.value,
+                              }))
+                            }
+                            placeholder="10.0.10.200"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Default Gateway (Option 3, optional)
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.gateway_v4 ?? ""}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                gateway_v4: e.target.value,
+                              }))
+                            }
+                            placeholder="10.0.10.1 (leave blank for isolated L2)"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Lease Time (Seconds, Option 51)
+                          </span>
+                          <input
+                            type="number"
+                            min={60}
+                            max={604800}
+                            step={60}
+                            value={dhcpConfig.lease_time_secs}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                lease_time_secs:
+                                  Number(e.target.value) || 3600,
+                              }))
+                            }
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            DNS Servers (Option 6, comma-separated)
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.dns_v4}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                dns_v4: e.target.value,
+                              }))
+                            }
+                            placeholder="1.1.1.1, 9.9.9.9"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Search Domain (Option 15 &amp; DHCPv6 Opt 24)
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.domain_name}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                domain_name: e.target.value,
+                              }))
+                            }
+                            placeholder="lab.local"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* DHCPv6 + SLAAC Section */}
+                  <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={dhcpConfig.v6_enabled}
+                          onChange={(e) =>
+                            setDhcpConfig((prev) => ({
+                              ...prev,
+                              v6_enabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
+                          Enable DHCPv6 + ICMPv6 Router Advertisements
+                        </span>
+                      </label>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-[#818CF8]">
+                        UDP 546/547 + ICMPv6 RA
+                      </span>
+                    </div>
+
+                    {dhcpConfig.v6_enabled && (
+                      <div className="space-y-3 pt-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                              Appliance IPv6 Address
+                            </span>
+                            <input
+                              type="text"
+                              value={dhcpConfig.server_ip_v6}
+                              onChange={(e) =>
+                                setDhcpConfig((prev) => ({
+                                  ...prev,
+                                  server_ip_v6: e.target.value,
+                                }))
+                              }
+                              placeholder="fd00:10::2"
+                              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                            />
+                          </label>
+
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                              IPv6 Prefix Length
+                            </span>
+                            <input
+                              type="number"
+                              min={16}
+                              max={126}
+                              value={dhcpConfig.prefix_len_v6}
+                              onChange={(e) =>
+                                setDhcpConfig((prev) => ({
+                                  ...prev,
+                                  prefix_len_v6:
+                                    Number(e.target.value) || 64,
+                                }))
+                              }
+                              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                            />
+                          </label>
+
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                              Stateful DHCPv6 Pool Start (IA_NA)
+                            </span>
+                            <input
+                              type="text"
+                              value={dhcpConfig.pool_start_v6}
+                              onChange={(e) =>
+                                setDhcpConfig((prev) => ({
+                                  ...prev,
+                                  pool_start_v6: e.target.value,
+                                }))
+                              }
+                              placeholder="fd00:10::100"
+                              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                            />
+                          </label>
+
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                              Stateful DHCPv6 Pool End (IA_NA)
+                            </span>
+                            <input
+                              type="text"
+                              value={dhcpConfig.pool_end_v6}
+                              onChange={(e) =>
+                                setDhcpConfig((prev) => ({
+                                  ...prev,
+                                  pool_end_v6: e.target.value,
+                                }))
+                              }
+                              placeholder="fd00:10::200"
+                              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                            />
+                          </label>
+                        </div>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            DNSv6 Recursive Resolvers (RDNSS Opt 25 &amp; DHCPv6 Opt 23)
+                          </span>
+                          <input
+                            type="text"
+                            value={dhcpConfig.dns_v6}
+                            onChange={(e) =>
+                              setDhcpConfig((prev) => ({
+                                ...prev,
+                                dns_v6: e.target.value,
+                              }))
+                            }
+                            placeholder="2606:4700:4700::1111, 2001:4860:4860::8888"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
+                          <label className="inline-flex items-start gap-2 cursor-pointer text-[11px] text-slate-700 dark:text-zinc-300">
+                            <input
+                              type="checkbox"
+                              checked={dhcpConfig.slaac_enabled}
+                              onChange={(e) =>
+                                setDhcpConfig((prev) => ({
+                                  ...prev,
+                                  slaac_enabled: e.target.checked,
+                                }))
+                              }
+                              className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span>
+                              Advertise SLAAC Autonomous Prefix (
+                              <code className="font-mono">A=1</code> in RA PIO)
+                            </span>
+                          </label>
+
+                          <label className="inline-flex items-start gap-2 cursor-pointer text-[11px] text-slate-700 dark:text-zinc-300">
+                            <input
+                              type="checkbox"
+                              checked={dhcpConfig.advertise_default_route_v6}
+                              onChange={(e) =>
+                                setDhcpConfig((prev) => ({
+                                  ...prev,
+                                  advertise_default_route_v6: e.target.checked,
+                                }))
+                              }
+                              className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span>
+                              Advertise IPv6 Default Router (
+                              <code className="font-mono">fe80::</code> RA
+                              lifetime &gt; 0)
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {isNatGateway && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-2 rounded-xl bg-emerald-500/8 dark:bg-emerald-500/10 border border-emerald-400/25 px-3.5 py-2.5">
+                    <div className="text-[11.5px] text-slate-700 dark:text-slate-200">
+                      <span className="font-semibold text-emerald-700 dark:text-[#34D399]">
+                        Zero-Root Host Internet Uplink:
+                      </span>{" "}
+                      Translates guest TCP, UDP, DNS, and ICMP/ICMPv6 ping flows
+                      out through unprivileged macOS sockets —{" "}
+                      <span className="font-medium">no sudo required</span>, and
+                      every WAN frame remains capturable in Wiretap &amp;
+                      Wireshark!
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNatConfig(createDefaultNatGatewayConfig())
+                      }
+                      className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-slate-200 hover:border-emerald-400/50"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset Defaults</span>
+                    </button>
+                  </div>
+
+                  {/* IPv4 NAT + DHCP + DNS Proxy */}
+                  <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={natConfig.enabled}
+                          onChange={(e) =>
+                            setNatConfig((prev) => ({
+                              ...prev,
+                              enabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
+                          Enable Outbound Internet Uplink (IPv4 NAT44 + ICMP)
+                        </span>
+                      </label>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-[#34D399]">
+                        TCP / UDP / ICMP
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          Gateway LAN IPv4 Address
+                        </span>
+                        <input
+                          type="text"
+                          value={natConfig.lan_ip_v4}
+                          onChange={(e) =>
+                            setNatConfig((prev) => ({
+                              ...prev,
+                              lan_ip_v4: e.target.value,
+                            }))
+                          }
+                          placeholder="10.0.2.1"
+                          className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        />
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                          LAN Prefix Length (CIDR)
+                        </span>
+                        <input
+                          type="number"
+                          min={8}
+                          max={30}
+                          value={natConfig.prefix_len_v4}
+                          onChange={(e) =>
+                            setNatConfig((prev) => ({
+                              ...prev,
+                              prefix_len_v4: Number(e.target.value) || 24,
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="pt-1 border-t border-slate-200/70 dark:border-zinc-800/80 space-y-2.5">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={natConfig.dhcp_enabled}
+                          onChange={(e) =>
+                            setNatConfig((prev) => ({
+                              ...prev,
+                              dhcp_enabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                        />
+                        <span className="text-[11.5px] font-medium text-slate-800 dark:text-zinc-200">
+                          Built-in DHCP Server on WAN Segment (auto-configures
+                          connected VMs or router WAN ports)
+                        </span>
+                      </label>
+
+                      {natConfig.dhcp_enabled && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                              DHCPv4 Pool Start
+                            </span>
+                            <input
+                              type="text"
+                              value={natConfig.dhcp_pool_start_v4}
+                              onChange={(e) =>
+                                setNatConfig((prev) => ({
+                                  ...prev,
+                                  dhcp_pool_start_v4: e.target.value,
+                                }))
+                              }
+                              placeholder="10.0.2.15"
+                              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                            />
+                          </label>
+
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                              DHCPv4 Pool End
+                            </span>
+                            <input
+                              type="text"
+                              value={natConfig.dhcp_pool_end_v4}
+                              onChange={(e) =>
+                                setNatConfig((prev) => ({
+                                  ...prev,
+                                  dhcp_pool_end_v4: e.target.value,
+                                }))
+                              }
+                              placeholder="10.0.2.200"
+                              className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-1 border-t border-slate-200/70 dark:border-zinc-800/80 space-y-2.5">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={natConfig.dns_proxy_enabled}
+                          onChange={(e) =>
+                            setNatConfig((prev) => ({
+                              ...prev,
+                              dns_proxy_enabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                        />
+                        <span className="text-[11.5px] font-medium text-slate-800 dark:text-zinc-200">
+                          Built-in DNS Resolver Proxy on{" "}
+                          <code className="font-mono">
+                            {natConfig.lan_ip_v4 || "10.0.2.1"}:53
+                          </code>{" "}
+                          (UDP &amp; TCP)
+                        </span>
+                      </label>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Upstream DNS Override (blank = host /etc/resolv.conf)
+                          </span>
+                          <input
+                            type="text"
+                            value={natConfig.upstream_dns}
+                            onChange={(e) =>
+                              setNatConfig((prev) => ({
+                                ...prev,
+                                upstream_dns: e.target.value,
+                              }))
+                            }
+                            placeholder="Auto (macOS DNS + 1.1.1.1)"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            WAN Search Domain
+                          </span>
+                          <input
+                            type="text"
+                            value={natConfig.domain_name}
+                            onChange={(e) =>
+                              setNatConfig((prev) => ({
+                                ...prev,
+                                domain_name: e.target.value,
+                              }))
+                            }
+                            placeholder="wan.lab"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* IPv6 NAT66 + SLAAC */}
+                  <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={natConfig.v6_enabled}
+                          onChange={(e) =>
+                            setNatConfig((prev) => ({
+                              ...prev,
+                              v6_enabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-zinc-100">
+                          Enable IPv6 Gateway (SLAAC RA + DHCPv6 + NAT66)
+                        </span>
+                      </label>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-[#818CF8]">
+                        NAT66
+                      </span>
+                    </div>
+
+                    {natConfig.v6_enabled && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            Gateway LAN IPv6 Address
+                          </span>
+                          <input
+                            type="text"
+                            value={natConfig.lan_ip_v6}
+                            onChange={(e) =>
+                              setNatConfig((prev) => ({
+                                ...prev,
+                                lan_ip_v6: e.target.value,
+                              }))
+                            }
+                            placeholder="fd00:2::1"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            IPv6 Prefix Length
+                          </span>
+                          <input
+                            type="number"
+                            min={16}
+                            max={126}
+                            value={natConfig.prefix_len_v6}
+                            onChange={(e) =>
+                              setNatConfig((prev) => ({
+                                ...prev,
+                                prefix_len_v6: Number(e.target.value) || 64,
+                              }))
+                            }
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            DHCPv6 Pool Start
+                          </span>
+                          <input
+                            type="text"
+                            value={natConfig.dhcp_pool_start_v6}
+                            onChange={(e) =>
+                              setNatConfig((prev) => ({
+                                ...prev,
+                                dhcp_pool_start_v6: e.target.value,
+                              }))
+                            }
+                            placeholder="fd00:2::15"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">
+                            DHCPv6 Pool End
+                          </span>
+                          <input
+                            type="text"
+                            value={natConfig.dhcp_pool_end_v6}
+                            onChange={(e) =>
+                              setNatConfig((prev) => ({
+                                ...prev,
+                                dhcp_pool_end_v6: e.target.value,
+                              }))
+                            }
+                            placeholder="fd00:2::200"
+                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">
                   Role / Topology Notes (Optional)
@@ -992,7 +1844,7 @@ export function NodeConfigModal({
                         <select
                           value={templateId}
                           disabled={isRunning}
-                          onChange={(e) => setTemplateId(e.target.value)}
+                          onChange={(e) => handleSelectTemplate(e.target.value)}
                           className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-[#090E18] border border-slate-200 dark:border-[rgba(34,211,238,0.18)] text-slate-900 dark:text-slate-100"
                         >
                           <option value="">-- Choose a Base Template --</option>

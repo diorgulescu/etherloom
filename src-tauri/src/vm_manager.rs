@@ -256,6 +256,8 @@ pub struct FinalizeTemplateOnExit {
     pub template_name: String,
     pub os_profile_id: String,
     #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
     pub arch: GuestArch,
     #[serde(default)]
     pub default_nic_model: NicModel,
@@ -306,6 +308,9 @@ pub struct SpawnVmRequest {
     pub cpus: u8,
     pub ram_mb: u32,
     pub disk_path: String,
+    /// Optional Guest OS Profile ID (`"alpine-linux"`, `"omnios"`, etc.) used to auto-attach NoCloud `cidata` seeds.
+    #[serde(default)]
+    pub os_profile_id: Option<String>,
     /// Optional logical `template_id` / filename so `spawn_vm` auto-rebases relocated CoW overlays before boot.
     pub template_id: Option<String>,
     pub boot_media_path: Option<String>,
@@ -391,6 +396,7 @@ pub struct ResolvedVmLaunchSpec {
     pub bios_path: Option<PathBuf>,
     pub disk_path: PathBuf,
     pub boot_media: Option<(PathBuf, BootMediaBus)>,
+    pub cidata_seed_path: Option<PathBuf>,
     pub display_mode: VmDisplayMode,
     pub vnc_port_offset: Option<u16>,
     pub serial_socket_path: PathBuf,
@@ -668,6 +674,54 @@ pub fn build_qemu_args(spec: &ResolvedVmLaunchSpec) -> Vec<String> {
         ]);
     }
 
+    // 5b. Optional NoCloud `cidata` Seed Drive (attached AFTER NICs so PCI slot numbering never shifts,
+    //     and without `bootindex` so firmware always boots from `hd0` / `install0` first).
+    if let Some(ref cidata_path) = spec.cidata_seed_path {
+        let escaped_cidata = escape_qemu_opt_val(&cidata_path.display().to_string());
+        match effective_disk_bus {
+            DiskBus::VirtioBlk => {
+                args.extend([
+                    "-drive".to_string(),
+                    format!("file={escaped_cidata},if=none,id=cidata0,format=raw,readonly=on"),
+                    "-device".to_string(),
+                    "virtio-blk-pci,drive=cidata0".to_string(),
+                ]);
+            }
+            DiskBus::Ahci => {
+                args.extend([
+                    "-drive".to_string(),
+                    format!(
+                        "file={escaped_cidata},if=none,id=cidata0,format=raw,readonly=on,media=cdrom"
+                    ),
+                    "-device".to_string(),
+                    "ide-cd,bus=ahci0.2,drive=cidata0".to_string(),
+                ]);
+            }
+            DiskBus::Ide => {
+                if spec.boot_media.is_none() {
+                    args.extend([
+                        "-drive".to_string(),
+                        format!(
+                            "file={escaped_cidata},if=none,id=cidata0,format=raw,readonly=on,media=cdrom"
+                        ),
+                        "-device".to_string(),
+                        "ide-cd,bus=ide.1,drive=cidata0".to_string(),
+                    ]);
+                } else {
+                    if !has_xhci {
+                        args.extend(["-device".to_string(), "qemu-xhci".to_string()]);
+                    }
+                    args.extend([
+                        "-drive".to_string(),
+                        format!("file={escaped_cidata},if=none,id=cidata0,format=raw,readonly=on"),
+                        "-device".to_string(),
+                        "usb-storage,drive=cidata0".to_string(),
+                    ]);
+                }
+            }
+        }
+    }
+
     // 6. Unix Domain Socket Serial Console (`xterm.js` target)
     args.extend([
         "-chardev".to_string(),
@@ -738,10 +792,80 @@ fn synthesized_stopped_vm_info(node_id: &str, name: &str) -> VmInstanceInfo {
     }
 }
 
+/// A registered child process PID plus a unique marker string that appears in the QEMU
+/// command line of this exact VM (the node's serial socket path, embedded in `-chardev`).
+/// Before signalling, we verify via `sysctl(KERN_PROCARGS2)` that the PID's argv still contains
+/// the marker, so a recycled PID is never signalled.
+#[derive(Debug, Clone)]
+struct LiveChildPid {
+    pid: u32,
+    marker: String,
+}
+
+/// Returns the raw `KERN_PROCARGS2` buffer (argc + exec path + argv strings) of `pid`,
+/// or `None` if the process no longer exists.
+fn proc_args2(pid: u32) -> Option<Vec<u8>> {
+    unsafe {
+        let mut mib: [libc::c_int; 3] = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+        let mut len: usize = 0;
+        let rc = libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as u32,
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        );
+        if rc != 0 || len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        let rc = libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as u32,
+            buf.as_mut_ptr() as *mut libc::c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        );
+        if rc != 0 {
+            return None;
+        }
+        buf.truncate(len);
+        Some(buf)
+    }
+}
+
+/// True if `pid` is still alive AND its argv contains `marker` (identity proof against PID reuse).
+fn proc_argv_contains(pid: u32, marker: &str) -> bool {
+    let Some(buf) = proc_args2(pid) else {
+        return false;
+    };
+    let needle = marker.as_bytes();
+    !needle.is_empty() && buf.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Signals `pid` with `sig` only if the process is still our own child (verified via its argv
+/// marker). Returns true if the signal was delivered.
+fn kill_pid_if_ours(pid: u32, marker: &str, sig: libc::c_int) -> bool {
+    if proc_argv_contains(pid, marker) {
+        return unsafe { libc::kill(pid as i32, sig) == 0 };
+    }
+    false // PID gone or recycled — do NOT signal
+}
+
+/// The unique argv marker for a node's QEMU process: its serial socket path.
+fn node_argv_marker(node_id: &str) -> String {
+    PathBuf::from(RUNTIME_SOCKET_DIR)
+        .join(format!("{}_serial.sock", sanitize_socket_id(node_id)))
+        .display()
+        .to_string()
+}
+
 struct VmManagerInner {
     vms: RwLock<HashMap<String, ManagedVmEntry>>,
     /// Synchronous PID registry so `Drop` can terminate orphaned QEMU children even outside async context
-    live_pids: StdMutex<HashMap<String, u32>>,
+    live_pids: StdMutex<HashMap<String, LiveChildPid>>,
     reserved_vnc_offsets: StdMutex<HashSet<u16>>,
     app_handle: RwLock<Option<AppHandle>>,
 }
@@ -762,11 +886,9 @@ impl Drop for VmManager {
     fn drop(&mut self) {
         if Arc::strong_count(&self.inner) == 1 {
             if let Ok(mut map) = self.inner.live_pids.lock() {
-                for (node_id, pid) in map.drain() {
-                    unsafe {
-                        libc::kill(pid as i32, libc::SIGTERM);
-                        libc::kill(pid as i32, libc::SIGKILL);
-                    }
+                for (node_id, child) in map.drain() {
+                    kill_pid_if_ours(child.pid, &child.marker, libc::SIGTERM);
+                    kill_pid_if_ours(child.pid, &child.marker, libc::SIGKILL);
                     cleanup_node_sockets(&node_id);
                 }
             }
@@ -836,6 +958,11 @@ impl VmManager {
                 .as_ref()
                 .filter(|p| !p.trim().is_empty())
                 .map(|p| (PathBuf::from(p), req.boot_media_bus)),
+            cidata_seed_path: if should_attach_nocloud_seed(req) {
+                Some(PathBuf::from(RUNTIME_SOCKET_DIR).join(format!("{safe_id}_cidata.iso")))
+            } else {
+                None
+            },
             display_mode: req.display_mode,
             vnc_port_offset: match req.display_mode {
                 VmDisplayMode::Vnc => Some(req.vnc_port_offset.unwrap_or(1)),
@@ -1096,6 +1223,18 @@ impl VmManager {
             PathBuf::from(RUNTIME_SOCKET_DIR).join(format!("{safe_id}_serial.sock"));
         let qmp_socket_path = PathBuf::from(RUNTIME_SOCKET_DIR).join(format!("{safe_id}_qmp.sock"));
 
+        let cidata_seed_path = if should_attach_nocloud_seed(&req) {
+            let iso_path = PathBuf::from(RUNTIME_SOCKET_DIR).join(format!("{safe_id}_cidata.iso"));
+            generate_cidata_seed_iso(&req.node_id, &req.name, &iso_path).await.ok();
+            if iso_path.is_file() {
+                Some(iso_path)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Allocate VNC offset (`5900 + offset`) if running in Embedded VNC display mode
         let vnc_port_offset = match req.display_mode {
             VmDisplayMode::Vnc => Some(self.allocate_vnc_offset(req.vnc_port_offset)?),
@@ -1189,6 +1328,7 @@ impl VmManager {
             bios_path,
             disk_path: disk_path.clone(),
             boot_media: boot_media.clone(),
+            cidata_seed_path,
             display_mode: req.display_mode,
             vnc_port_offset,
             serial_socket_path: serial_socket_path.clone(),
@@ -1254,7 +1394,13 @@ impl VmManager {
         let pid = child.id();
         if let Some(p) = pid {
             if let Ok(mut map) = self.inner.live_pids.lock() {
-                map.insert(req.node_id.clone(), p);
+                map.insert(
+                    req.node_id.clone(),
+                    LiveChildPid {
+                        pid: p,
+                        marker: node_argv_marker(&req.node_id),
+                    },
+                );
             }
         }
 
@@ -1798,10 +1944,17 @@ impl VmManager {
         }
 
         if let Some(pid) = pid_opt {
+            // PID-reuse guard: only signal the process while its argv still carries this
+            // node's unique serial-socket marker.
+            let marker = self
+                .inner
+                .live_pids
+                .lock()
+                .ok()
+                .and_then(|map| map.get(node_id).map(|c| c.marker.clone()))
+                .unwrap_or_else(|| node_argv_marker(node_id));
             if !force {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGTERM);
-                }
+                kill_pid_if_ours(pid, &marker, libc::SIGTERM);
                 if wait_for_exit_signal(&mut exit_rx, SIGTERM_GRACE_TIMEOUT).await {
                     return Ok(self
                         .get_vm_info(node_id)
@@ -1810,9 +1963,7 @@ impl VmManager {
                 }
             }
 
-            unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-            }
+            kill_pid_if_ours(pid, &marker, libc::SIGKILL);
             let _ = wait_for_exit_signal(&mut exit_rx, Duration::from_secs(2)).await;
         }
 
@@ -2009,6 +2160,171 @@ fn cleanup_node_sockets(node_id: &str) {
     let base = Path::new(RUNTIME_SOCKET_DIR);
     let _ = fs::remove_file(base.join(format!("{safe_id}_serial.sock")));
     let _ = fs::remove_file(base.join(format!("{safe_id}_qmp.sock")));
+    let _ = fs::remove_file(base.join(format!("{safe_id}_cidata.iso")));
+}
+
+/// Determines whether a VM is booted from a cloud image (`alpine-linux` `tiny-cloud` / `cloud-init`,
+/// or `omnios` `.cloud.qcow2`) that locks `root` out of the box unless a `cidata` NoCloud seed is attached.
+fn should_attach_nocloud_seed(req: &SpawnVmRequest) -> bool {
+    if req.finalize_template_on_exit.is_some() {
+        return false;
+    }
+    let has_installer_only = req
+        .boot_media_path
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+        && req
+            .template_id
+            .as_deref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+    if has_installer_only {
+        return false;
+    }
+
+    if let Some(prof) = req.os_profile_id.as_deref() {
+        let lower = prof.trim().to_ascii_lowercase();
+        if lower == "alpine-linux" || lower == "omnios" {
+            return true;
+        }
+    }
+    for candidate in [req.template_id.as_deref(), Some(req.disk_path.as_str())]
+        .into_iter()
+        .flatten()
+    {
+        let lower = candidate.to_ascii_lowercase();
+        if lower.contains("alpine-aarch64-base")
+            || lower.contains("nocloud_alpine")
+            || lower.contains("generic_alpine")
+            || lower.contains("omnios-x86_64-base")
+            || lower.contains(".cloud.qcow2")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn sanitize_guest_hostname(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.trim().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if (c == '-' || c == '_' || c == ' ') && !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "etherloom-vm".to_string()
+    } else {
+        trimmed.chars().take(63).collect()
+    }
+}
+
+/// Builds a tiny hybrid ISO9660 + Rock Ridge + Joliet NoCloud seed image (`LABEL="cidata"`)
+/// containing `meta-data` and a portable POSIX `#!/bin/sh` `user-data` script that:
+/// 1. Unlocks passwordless `root` login on the serial/VNC console (`passwd -d root` + `/etc/shadow` + OmniOS `PASSREQ=NO`),
+/// 2. Sets `alpine` / `alpine` if the `alpine` cloud account exists,
+/// 3. Configures the guest hostname to match the canvas node label, and
+/// 4. Adds `udhcpc_opts -b -t 3` on Alpine so unplugged NICs background DHCP quickly instead of stalling boot.
+pub(crate) async fn generate_cidata_seed_iso(
+    node_id: &str,
+    hostname: &str,
+    dest_iso: &Path,
+) -> Result<(), String> {
+    let safe_id = sanitize_socket_id(node_id);
+    let clean_host = sanitize_guest_hostname(hostname);
+    let stage_dir = PathBuf::from(RUNTIME_SOCKET_DIR).join(format!("cidata_stage_{safe_id}"));
+    let _ = fs::remove_dir_all(&stage_dir);
+    fs::create_dir_all(&stage_dir)
+        .map_err(|e| format!("Failed creating cidata stage dir {}: {e}", stage_dir.display()))?;
+    if let Ok(meta) = fs::metadata(&stage_dir) {
+        let mut perms = meta.permissions();
+        perms.set_mode(0o755);
+        let _ = fs::set_permissions(&stage_dir, perms);
+    }
+
+    let meta_data = format!(
+        "instance-id: etherloom-{safe_id}-v1\nlocal-hostname: {clean_host}\n"
+    );
+    let user_data = concat!(
+        "#!/bin/sh\n",
+        "# Etherloom NoCloud lab bootstrap (Alpine tiny-cloud / cloud-init & OmniOS illumos)\n",
+        "if [ -f /etc/default/login ]; then\n",
+        "  awk '{ sub(/^PASSREQ=YES/, \"PASSREQ=NO\"); print }' /etc/default/login > /etc/default/login.el && mv /etc/default/login.el /etc/default/login\n",
+        "fi\n",
+        "passwd -d root >/dev/null 2>&1 || true\n",
+        "if [ -f /etc/shadow ]; then\n",
+        "  awk -F: 'BEGIN{OFS=\":\"} $1==\"root\" && ($2 ~ /^[!*]/ || $2==\"NP\" || $2==\"UP\") {$2=\"\"} {print}' /etc/shadow > /etc/shadow.el && cat /etc/shadow.el > /etc/shadow && rm -f /etc/shadow.el\n",
+        "fi\n",
+        "if id alpine >/dev/null 2>&1; then\n",
+        "  echo \"alpine:alpine\" | chpasswd >/dev/null 2>&1 || true\n",
+        "fi\n",
+        "if [ -f /etc/network/interfaces ] && ! grep -q \"udhcpc_opts\" /etc/network/interfaces 2>/dev/null; then\n",
+        "  awk '{ print; if ($0 ~ /iface eth0 inet dhcp/) print \"\\tudhcpc_opts -b -t 3\" }' /etc/network/interfaces > /etc/network/interfaces.el && mv /etc/network/interfaces.el /etc/network/interfaces\n",
+        "fi\n",
+    );
+
+    let meta_path = stage_dir.join("meta-data");
+    let user_path = stage_dir.join("user-data");
+    fs::write(&meta_path, meta_data.as_bytes()).map_err(|e| e.to_string())?;
+    fs::write(&user_path, user_data.as_bytes()).map_err(|e| e.to_string())?;
+    if let Ok(m) = fs::metadata(&meta_path) {
+        let mut p = m.permissions();
+        p.set_mode(0o644);
+        let _ = fs::set_permissions(&meta_path, p);
+    }
+    if let Ok(m) = fs::metadata(&user_path) {
+        let mut p = m.permissions();
+        p.set_mode(0o755);
+        let _ = fs::set_permissions(&user_path, p);
+    }
+
+    let out = Command::new("/usr/bin/hdiutil")
+        .args([
+            "makehybrid",
+            "-o",
+            &dest_iso.display().to_string(),
+            "-iso",
+            "-joliet",
+            "-default-volume-name",
+            "cidata",
+            "-ov",
+            "-quiet",
+            &stage_dir.display().to_string(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .await;
+
+    let _ = fs::remove_dir_all(&stage_dir);
+
+    let out = out.map_err(|e| format!("Failed running hdiutil makehybrid: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "hdiutil makehybrid failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    // `hdiutil makehybrid` uppercases the ISO9660 Primary Volume Descriptor label to `CIDATA\0...`.
+    // Patch PVD Volume Identifier (sector 16, bytes 40..72) to space-padded lowercase `"cidata"` so
+    // BusyBox `findfs LABEL=cidata` and `blkid` match case-sensitively across all Linux & illumos kernels.
+    if let Ok(mut bytes) = fs::read(dest_iso) {
+        const PVD_OFFSET: usize = 16 * 2048;
+        if bytes.len() >= PVD_OFFSET + 72 && &bytes[PVD_OFFSET..PVD_OFFSET + 6] == b"\x01CD001" {
+            let mut label = [b' '; 32];
+            label[..6].copy_from_slice(b"cidata");
+            bytes[PVD_OFFSET + 40..PVD_OFFSET + 72].copy_from_slice(&label);
+            let _ = fs::write(dest_iso, bytes);
+        }
+    }
+
+    Ok(())
 }
 
 fn now_epoch_ms() -> u64 {
@@ -2041,6 +2357,7 @@ mod tests {
             )),
             disk_path: PathBuf::from("/tmp/lab.etherloom/overlays/fw1.qcow2"),
             boot_media,
+            cidata_seed_path: None,
             display_mode,
             vnc_port_offset: Some(3),
             serial_socket_path: PathBuf::from(
@@ -2180,6 +2497,37 @@ mod tests {
         assert!(rv_joined.contains("-device ne2k_pci,netdev=net0"));
     }
 
+    #[test]
+    fn kill_pid_if_ours_only_signals_our_own_child_process() {
+        // Spawn a real child; its argv contains "/bin/sleep", which we use as the marker.
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+
+        assert!(proc_argv_contains(pid, "/bin/sleep"));
+
+        // A wrong marker (simulating PID reuse by a different program) must NOT signal
+        assert!(!kill_pid_if_ours(
+            pid,
+            "no-such-marker-9f8e7d6c",
+            libc::SIGKILL
+        ));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "process must still be alive after mismatched-marker kill attempt"
+        );
+
+        // Matching marker delivers the signal
+        assert!(kill_pid_if_ours(pid, "/bin/sleep", libc::SIGKILL));
+        let _ = child.wait();
+
+        // A dead PID must never be signalled
+        assert!(!kill_pid_if_ours(pid, "/bin/sleep", libc::SIGKILL));
+        assert!(!proc_argv_contains(pid, "/bin/sleep"));
+    }
+
     #[tokio::test]
     async fn stop_vm_is_idempotent_when_node_not_registered() {
         let mgr = VmManager::new();
@@ -2221,5 +2569,47 @@ mod tests {
             .await
             .expect("restart after cancelled pre-spawn should succeed");
         assert!(!*next_rx.borrow());
+    }
+
+    #[tokio::test]
+    async fn generates_valid_lowercase_cidata_seed_iso_and_attaches_after_nics() {
+        ensure_socket_dir().unwrap();
+        let iso_path = PathBuf::from(RUNTIME_SOCKET_DIR).join("unit_test_alpine_cidata.iso");
+        let _ = fs::remove_file(&iso_path);
+
+        generate_cidata_seed_iso("node-alpine1", "alpine1", &iso_path)
+            .await
+            .expect("hdiutil makehybrid should generate cidata seed ISO");
+
+        let bytes = fs::read(&iso_path).expect("cidata ISO must exist");
+        let pvd = 16 * 2048;
+        assert_eq!(&bytes[pvd..pvd + 6], b"\x01CD001");
+        assert_eq!(
+            &bytes[pvd + 40..pvd + 72],
+            b"cidata                          ",
+            "PVD Volume Identifier must be exact lowercase space-padded 'cidata'"
+        );
+
+        let extracted_user = std::process::Command::new("/usr/bin/tar")
+            .args(["-xOf", &iso_path.display().to_string(), "user-data"])
+            .output()
+            .expect("bsdtar must extract user-data from Rock Ridge/Joliet cidata ISO");
+        assert!(extracted_user.status.success());
+        let script = String::from_utf8_lossy(&extracted_user.stdout);
+        assert!(script.starts_with("#!/bin/sh\n"));
+        assert!(script.contains("passwd -d root"));
+        assert!(script.contains("alpine:alpine"));
+
+        let mut spec = sample_spec(VmDisplayMode::Vnc, None);
+        spec.cidata_seed_path = Some(iso_path.clone());
+        let joined = build_qemu_args(&spec).join(" ");
+        let net1_pos = joined.find("netdev=net1").unwrap();
+        let cidata_pos = joined.find("virtio-blk-pci,drive=cidata0").unwrap();
+        assert!(
+            cidata_pos > net1_pos,
+            "cidata drive must attach after guest NICs so PCI slot numbering stays unchanged"
+        );
+
+        let _ = fs::remove_file(&iso_path);
     }
 }

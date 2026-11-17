@@ -610,6 +610,7 @@ mod tests {
             name: "Alpine Linux ARM64".to_string(),
             filename: "alpine-aarch64-base.qcow2".to_string(),
             os_profile_id: "alpine-linux".to_string(),
+            version: None,
             arch: crate::vm_manager::GuestArch::Aarch64,
             default_nic_model: crate::vm_manager::NicModel::VirtioNetPci,
             default_firmware: crate::vm_manager::FirmwareType::Uefi,

@@ -2,6 +2,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import {
   Cpu,
   Disc,
+  Globe,
   GripVertical,
   HardDrive,
   HardDriveDownload,
@@ -69,6 +70,8 @@ function resolveFamilyFromProfileId(profileId: string): GuestFamily {
 function getComponentIcon(item: CatalogComponent) {
   if (item.kind === "l2_switch") return Network;
   if (item.kind === "l1_hub") return Radio;
+  if (item.kind === "dhcp_server") return Server;
+  if (item.kind === "nat_gateway") return Globe;
   if (item.guestFamily === "openbsd") return Shield;
   if (item.guestFamily === "freebsd" || item.guestFamily === "netbsd") {
     return Server;
@@ -82,6 +85,12 @@ function getAccentClasses(
 ): string {
   if (kind === "l2_switch" || kind === "l1_hub") {
     return "bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE] border-cyan-400/30";
+  }
+  if (kind === "dhcp_server") {
+    return "bg-indigo-500/15 text-indigo-700 dark:text-[#818CF8] border-indigo-400/30";
+  }
+  if (kind === "nat_gateway") {
+    return "bg-emerald-500/15 text-emerald-700 dark:text-[#34D399] border-emerald-400/30";
   }
   switch (guestFamily) {
     case "openbsd":
@@ -228,13 +237,27 @@ export function LeftSidebar({
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         {item.subtitle}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-1.5">
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/20">
-                          p1..p{item.defaultPorts}
+                          {item.defaultPorts === 1
+                            ? "p1"
+                            : `p1..p${item.defaultPorts}`}
                         </span>
                         <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
-                          {item.defaultPorts} ports
+                          {item.defaultPorts === 1
+                            ? "1 port (expandable)"
+                            : `${item.defaultPorts} ports`}
                         </span>
+                        {item.kind === "dhcp_server" && (
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/12 text-indigo-700 dark:text-[#818CF8] border border-indigo-400/25">
+                            Dual-Stack
+                          </span>
+                        )}
+                        {item.kind === "nat_gateway" && (
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/12 text-emerald-700 dark:text-[#34D399] border border-emerald-400/25">
+                            Zero-Root WAN
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -52,6 +52,7 @@ interface TcpflowyInspectorPaneProps {
   onSelectPcap: (pcapPath: string | null) => void;
   onRefreshCaptures: () => Promise<void>;
   onInstallTcpflowy: () => Promise<void>;
+  onRefreshTcpflowyStatus?: () => void;
   onOpenSettingsTcpflowy: () => void;
   onNotify: (
     kind: "ok" | "error",
@@ -124,6 +125,7 @@ export function TcpflowyInspectorPane({
   onSelectPcap,
   onRefreshCaptures,
   onInstallTcpflowy,
+  onRefreshTcpflowyStatus,
   onOpenSettingsTcpflowy,
   onNotify,
 }: TcpflowyInspectorPaneProps) {
@@ -162,6 +164,13 @@ export function TcpflowyInspectorPane({
     }, 1600);
   }, []);
 
+  // Clear stale environment-setup errors once tcpflowy installation starts or finishes cleanly
+  useEffect(() => {
+    if (installingTcpflowy || tcpflowyStatus?.state === "ready") {
+      setDissectError(null);
+    }
+  }, [installingTcpflowy, tcpflowyStatus?.state]);
+
   const runDissection = useCallback(
     async (targetPath: string) => {
       if (!targetPath) return;
@@ -186,9 +195,12 @@ export function TcpflowyInspectorPane({
         setDissectError(msg);
       } finally {
         setDissecting(false);
+        if (tcpflowyStatus?.state !== "ready") {
+          onRefreshTcpflowyStatus?.();
+        }
       }
     },
-    [filterNoise, noIpLookup]
+    [filterNoise, noIpLookup, onRefreshTcpflowyStatus, tcpflowyStatus?.state]
   );
 
   // Trigger automatic dissection when "Stop & Dissect with tcpflowy" increments `dissectNonce`

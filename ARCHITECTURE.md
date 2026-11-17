@@ -203,6 +203,8 @@ Many BSD installers (`FreeBSD`, `OpenBSD`, `NetBSD`) boot into the EFI framebuff
    *(Alternatively, if QEMU's built-in VNC WebSocket option is not compiled in a given build, Etherloom's Rust backend runs a lightweight `tokio-tungstenite` TCP-to-WebSocket RFB proxy on `127.0.0.1:<ws_port>` connected to QEMU's raw VNC TCP port, or launches QEMU with `-display cocoa` when the user selects "Native macOS Window".)*  
    Inside the UI, `@novnc/novnc` connects to `ws://127.0.0.1:<ws_port>` so users can perform full ISO/IMG installations of FreeBSD, OpenBSD, and NetBSD directly inside Etherloom.
 
+   **WebSocket Bridge Hardening:** The Rust TCP-to-WebSocket bridge binds `127.0.0.1` only and validates every upgrade request: the `Host` header must be a loopback literal (DNS-rebinding guard) and, when present, the `Origin` header must be an allowlisted Etherloom origin (`tauri://localhost`, `http://tauri.localhost`, or the `http://localhost:1420` Vite dev server) — cross-origin browser pages receive `HTTP 403`. Client frames must be masked per RFC 6455 and are capped at 4 MiB. The app also ships a strict CSP (`script-src 'self'`, `object-src 'none'`, `connect-src` limited to self + the loopback WS bridge + dev server), with the pre-paint theme bootstrap externalized to `/brand/theme-init.js` so no inline script is needed.
+
 ---
 
 ## 7. `tcpflowy` Native GUI Integration
@@ -255,7 +257,7 @@ QEMU stores an absolute backing-file path inside each Copy-on-Write overlay `.qc
   Using `-u` (unsafe header-only mode) updates the backing pointer instantaneously even when the previous mount point or host path no longer exists.
 
 ### 8.4 Self-Contained `*.etherloom` Project Bundle
-Each user lab is a portable directory ending in `.etherloom`:
+Each user lab is a portable directory ending in `.etherloom`. Because bundles may be shared between machines, relative `disk_path` values in `topology.toml` are **confined to the bundle**: any `..` component is rejected at resolution time (`resolve_node_disk_in_bundle`), so an untrusted project can never point QEMU's read-write disk at files outside the `.etherloom` directory. Absolute paths remain an explicit, user-chosen override:
 
 ```text
 campus-bgp-lab.etherloom/
@@ -341,3 +343,4 @@ Before starting VMs, wiretaps, or flow inspections, the Rust `env_doctor` module
 2. **Real-Time Progress & Cancellation:** Emits `"catalog://download-progress"` events (`stage`, `bytesDownloaded`, `totalBytes`, `percent`, `message`) every 220 ms and supports instant task cancellation with deterministic `.staging/` cleanup.
 3. **1-Click Guided Template Setup & Auto-Promotion:** For installer-delivered OSes (OpenBSD `install76.img`, VyOS, DragonFly BSD, Haiku, FreeDOS), `catalog_launch_guided_setup` creates a target `.qcow2` disk, boots the installer with Serial + VNC attached, and registers a `FinalizeTemplateOnExit` hook in `VmManager`. Upon clean guest shutdown (`halt -p` / `poweroff`) with a populated disk (`> 2 MB`), Etherloom automatically detaches the installer, writes `<slug>-<arch>-base.qcow2.etherloom-template.json`, and locks the Golden Template to POSIX `0444` read-only.
 4. **Reference-Checked Deletion:** Before deleting any template, `find_referencing_projects` inspects `.qcow2` overlays across `projects/*.etherloom/overlays/` via `qemu-img info` and warns the user if any saved topologies depend on that backing file.
+5. **Download Integrity & URL Hygiene (fail-closed):** Custom mirror URLs are restricted to `https://` (plain `http://` only for loopback hosts such as `127.0.0.1`/`localhost`/`[::1]`) — `file://`, `ftp://`, etc. are rejected before any network or disk activity. Upstream resolvers prefer HTTPS variants of mirror links (e.g. 9front/OmniOS) and emit a loud progress warning if a plaintext HTTP URL has to be used. Checksum verification **fails closed**: if the upstream `SHA256` manifest does not list the artifact, the download is rejected instead of silently accepted. Users may optionally supply a `customSha256` (64 hex chars) for a custom mirror, verified with `shasum -a 256` before extraction. URL-derived filenames are sanitized to a single safe path component, and `.zip` archives are pre-scanned with `zipinfo -1` (plus a post-extraction canonicalization containment check) so `..`/absolute entries (zip-slip) are refused.

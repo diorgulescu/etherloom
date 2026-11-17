@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   ChevronDown,
   ChevronUp,
   Download,
   ExternalLink,
+  GripVertical,
   Layers,
   Maximize2,
   Minimize2,
@@ -71,6 +78,7 @@ interface BottomDockProps {
   onSelectPcap: (pcapPath: string | null) => void;
   onRefreshCaptures: () => Promise<void>;
   onInstallTcpflowy: () => Promise<void>;
+  onRefreshTcpflowyStatus?: () => void;
   onOpenSettingsTcpflowy: () => void;
   onNotify: (
     kind: "ok" | "error",
@@ -82,6 +90,12 @@ interface BottomDockProps {
   onToggleExpanded: () => void;
   onToggleFloating: () => void;
 }
+
+const MIN_FLOATING_WIDTH = 460;
+const MIN_FLOATING_HEIGHT = 260;
+const FLOATING_VIEWPORT_MARGIN = 16;
+
+type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 export function BottomDock({
   open,
@@ -115,6 +129,7 @@ export function BottomDock({
   onSelectPcap,
   onRefreshCaptures,
   onInstallTcpflowy,
+  onRefreshTcpflowyStatus,
   onOpenSettingsTcpflowy,
   onNotify,
   onToggleOpen,
@@ -131,6 +146,265 @@ export function BottomDock({
   const [fallbackStartMs, setFallbackStartMs] = useState<number>(() =>
     Date.now()
   );
+
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [floatingPos, setFloatingPos] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [floatingSize, setFloatingSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const dragSessionRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const resizeSessionRef = useRef<{
+    pointerId: number;
+    dir: ResizeDirection;
+    startClientX: number;
+    startClientY: number;
+    startLeft: number;
+    startTop: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+
+  const isMoveableFloating = floating && open && !expanded;
+
+  const clampFloatingSize = useCallback((width: number, height: number) => {
+    const maxW = Math.max(
+      MIN_FLOATING_WIDTH,
+      window.innerWidth - FLOATING_VIEWPORT_MARGIN
+    );
+    const maxH = Math.max(
+      MIN_FLOATING_HEIGHT,
+      window.innerHeight - FLOATING_VIEWPORT_MARGIN
+    );
+    return {
+      width: Math.round(Math.min(Math.max(MIN_FLOATING_WIDTH, width), maxW)),
+      height: Math.round(Math.min(Math.max(MIN_FLOATING_HEIGHT, height), maxH)),
+    };
+  }, []);
+
+  const clampFloatingPos = useCallback(
+    (x: number, y: number, width: number, height: number) => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const minVisibleX = Math.min(240, width);
+      const minX = Math.min(8, -(width - minVisibleX));
+      const maxX = Math.max(8, vw - minVisibleX);
+      const minY = 8;
+      const maxY = Math.max(8, vh - Math.min(height, 48));
+      return {
+        x: Math.round(Math.min(Math.max(minX, x), maxX)),
+        y: Math.round(Math.min(Math.max(minY, y), maxY)),
+      };
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!floating || (!floatingPos && !floatingSize)) return;
+    const onResize = () => {
+      const rect = sectionRef.current?.getBoundingClientRect();
+      const nextSize = floatingSize
+        ? clampFloatingSize(floatingSize.width, floatingSize.height)
+        : null;
+      if (nextSize) {
+        setFloatingSize(nextSize);
+      }
+      const w =
+        nextSize?.width ??
+        rect?.width ??
+        Math.min(920, window.innerWidth * 0.94);
+      const h =
+        nextSize?.height ??
+        rect?.height ??
+        Math.min(540, window.innerHeight * 0.72);
+      setFloatingPos((prev) =>
+        prev ? clampFloatingPos(prev.x, prev.y, w, h) : null
+      );
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [clampFloatingPos, clampFloatingSize, floating, floatingPos, floatingSize]);
+
+  useEffect(() => {
+    if (!isMoveableFloating && (isDragging || isResizing)) {
+      dragSessionRef.current = null;
+      resizeSessionRef.current = null;
+      setIsDragging(false);
+      setIsResizing(false);
+    }
+  }, [isMoveableFloating, isDragging, isResizing]);
+
+  const handleHeaderPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isMoveableFloating || e.button !== 0 || isResizing) return;
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        "button, select, input, textarea, a, option, [data-no-drag]"
+      )
+    ) {
+      return;
+    }
+    const el = sectionRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragSessionRef.current = {
+      pointerId: e.pointerId,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    setFloatingPos(
+      (prev) =>
+        prev ?? clampFloatingPos(rect.left, rect.top, rect.width, rect.height)
+    );
+    setIsDragging(true);
+  };
+
+  const handleHeaderPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sess = dragSessionRef.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+    setFloatingPos(
+      clampFloatingPos(
+        e.clientX - sess.offsetX,
+        e.clientY - sess.offsetY,
+        sess.width,
+        sess.height
+      )
+    );
+  };
+
+  const handleHeaderPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sess = dragSessionRef.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    dragSessionRef.current = null;
+    setIsDragging(false);
+  };
+
+  const handleResizePointerDown =
+    (dir: ResizeDirection) => (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isMoveableFloating || e.button !== 0) return;
+      const el = sectionRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      resizeSessionRef.current = {
+        pointerId: e.pointerId,
+        dir,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startLeft: rect.left,
+        startTop: rect.top,
+        startWidth: rect.width,
+        startHeight: rect.height,
+      };
+      setFloatingPos(
+        (prev) => prev ?? { x: Math.round(rect.left), y: Math.round(rect.top) }
+      );
+      setFloatingSize(
+        (prev) => prev ?? clampFloatingSize(rect.width, rect.height)
+      );
+      setIsResizing(true);
+    };
+
+  const handleResizePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sess = resizeSessionRef.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const maxW = Math.max(MIN_FLOATING_WIDTH, vw - FLOATING_VIEWPORT_MARGIN);
+    const maxH = Math.max(MIN_FLOATING_HEIGHT, vh - FLOATING_VIEWPORT_MARGIN);
+
+    const dx = e.clientX - sess.startClientX;
+    const dy = e.clientY - sess.startClientY;
+
+    let nextLeft = sess.startLeft;
+    let nextTop = sess.startTop;
+    let nextWidth = sess.startWidth;
+    let nextHeight = sess.startHeight;
+
+    if (sess.dir.includes("e")) {
+      const maxEastWidth = Math.max(
+        MIN_FLOATING_WIDTH,
+        Math.min(maxW, vw - 8 - sess.startLeft)
+      );
+      nextWidth = Math.min(
+        Math.max(MIN_FLOATING_WIDTH, sess.startWidth + dx),
+        maxEastWidth
+      );
+    } else if (sess.dir.includes("w")) {
+      const rightEdge = sess.startLeft + sess.startWidth;
+      const maxWestWidth = Math.max(
+        MIN_FLOATING_WIDTH,
+        Math.min(maxW, rightEdge - 8)
+      );
+      nextWidth = Math.min(
+        Math.max(MIN_FLOATING_WIDTH, sess.startWidth - dx),
+        maxWestWidth
+      );
+      nextLeft = rightEdge - nextWidth;
+    }
+
+    if (sess.dir.includes("s")) {
+      const maxSouthHeight = Math.max(
+        MIN_FLOATING_HEIGHT,
+        Math.min(maxH, vh - 8 - sess.startTop)
+      );
+      nextHeight = Math.min(
+        Math.max(MIN_FLOATING_HEIGHT, sess.startHeight + dy),
+        maxSouthHeight
+      );
+    } else if (sess.dir.includes("n")) {
+      const bottomEdge = sess.startTop + sess.startHeight;
+      const maxNorthHeight = Math.max(
+        MIN_FLOATING_HEIGHT,
+        Math.min(maxH, bottomEdge - 8)
+      );
+      nextHeight = Math.min(
+        Math.max(MIN_FLOATING_HEIGHT, sess.startHeight - dy),
+        maxNorthHeight
+      );
+      nextTop = bottomEdge - nextHeight;
+    }
+
+    setFloatingSize({
+      width: Math.round(nextWidth),
+      height: Math.round(nextHeight),
+    });
+    setFloatingPos({
+      x: Math.round(nextLeft),
+      y: Math.round(nextTop),
+    });
+  };
+
+  const handleResizePointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sess = resizeSessionRef.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    resizeSessionRef.current = null;
+    setIsResizing(false);
+  };
 
   useEffect(() => {
     if (!isCapturing) return;
@@ -149,17 +423,114 @@ export function BottomDock({
     ? open
       ? expanded
         ? "fixed inset-5 rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white dark:bg-[#111827] shadow-2xl flex flex-col z-40"
-        : "fixed bottom-10 right-4 w-[min(920px,94vw)] h-[min(540px,72vh)] rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white dark:bg-[#111827] shadow-2xl flex flex-col z-40"
+        : `fixed ${floatingPos ? "" : "bottom-10 right-4 "}${
+            floatingSize ? "" : "w-[min(920px,94vw)] h-[min(540px,72vh)] "
+          }rounded-2xl border border-slate-300 dark:border-[rgba(34,211,238,0.25)] bg-white dark:bg-[#111827] shadow-2xl flex flex-col z-40${
+            isDragging || isResizing ? " select-none" : ""
+          }`
       : "hidden"
     : `${
         !open ? "h-9" : expanded ? "h-[72vh]" : "h-72"
       } shrink-0 border-t border-slate-200/90 dark:border-[rgba(34,211,238,0.14)] bg-white dark:bg-[#111827] flex flex-col transition-[height] duration-200 z-10`;
 
+  const floatingStyle =
+    isMoveableFloating && (floatingPos || floatingSize)
+      ? {
+          ...(floatingPos
+            ? { left: `${floatingPos.x}px`, top: `${floatingPos.y}px` }
+            : {}),
+          ...(floatingSize
+            ? {
+                width: `${floatingSize.width}px`,
+                height: `${floatingSize.height}px`,
+              }
+            : {}),
+        }
+      : undefined;
+
+  const resizeHandles: Array<{
+    dir: ResizeDirection;
+    className: string;
+  }> = [
+    { dir: "n", className: "top-0 left-3 right-3 h-1.5 -mt-0.5 cursor-ns-resize" },
+    { dir: "s", className: "bottom-0 left-3 right-3 h-2 -mb-0.5 cursor-ns-resize" },
+    { dir: "w", className: "left-0 top-3 bottom-3 w-2 -ml-0.5 cursor-ew-resize" },
+    { dir: "e", className: "right-0 top-3 bottom-3 w-2 -mr-0.5 cursor-ew-resize" },
+    { dir: "nw", className: "top-0 left-0 w-3.5 h-3.5 -mt-0.5 -ml-0.5 cursor-nwse-resize" },
+    { dir: "ne", className: "top-0 right-0 w-3.5 h-3.5 -mt-0.5 -mr-0.5 cursor-nesw-resize" },
+    { dir: "sw", className: "bottom-0 left-0 w-3.5 h-3.5 -mb-0.5 -ml-0.5 cursor-nesw-resize" },
+    { dir: "se", className: "bottom-0 right-0 w-4 h-4 cursor-nwse-resize flex items-end justify-end p-1" },
+  ];
+
   const workspaceBody = (
-    <section className={containerClass}>
+    <section
+      ref={sectionRef}
+      className={containerClass}
+      style={floatingStyle}
+    >
+      {/* 8-Direction Resize Handles for Popped-Out Floating Console */}
+      {isMoveableFloating &&
+        resizeHandles.map(({ dir, className }) => (
+          <div
+            key={dir}
+            data-no-drag
+            onPointerDown={handleResizePointerDown(dir)}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={handleResizePointerEnd}
+            onPointerCancel={handleResizePointerEnd}
+            title={
+              dir === "se"
+                ? "Drag edges or corners to resize floating console"
+                : undefined
+            }
+            className={`absolute z-50 touch-none ${className}`}
+          >
+            {dir === "se" && (
+              <svg
+                viewBox="0 0 10 10"
+                className="w-2.5 h-2.5 text-slate-400/80 dark:text-cyan-400/60 pointer-events-none"
+              >
+                <path
+                  d="M9 1L1 9M9 5L5 9M9 8.5L8.5 9"
+                  stroke="currentColor"
+                  strokeWidth="1.35"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+          </div>
+        ))}
+
       {/* Multi-Tab Header Bar */}
-      <div className="h-9 px-2.5 border-b border-slate-200/70 dark:border-[rgba(34,211,238,0.12)] flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-1 overflow-x-auto min-w-0 py-0.5">
+      <div
+        onPointerDown={handleHeaderPointerDown}
+        onPointerMove={handleHeaderPointerMove}
+        onPointerUp={handleHeaderPointerEnd}
+        onPointerCancel={handleHeaderPointerEnd}
+        className={`h-9 px-2.5 border-b border-slate-200/70 dark:border-[rgba(34,211,238,0.12)] flex items-center justify-between gap-1.5 shrink-0 ${
+          isMoveableFloating
+            ? isDragging
+              ? "cursor-grabbing select-none"
+              : "cursor-grab"
+            : ""
+        }`}
+      >
+        <div className="flex items-center gap-1 min-w-0 flex-1">
+          {isMoveableFloating && (
+            <div
+              role="presentation"
+              onDoubleClick={() => {
+                setFloatingPos(null);
+                setFloatingSize(null);
+              }}
+              title="Drag to move floating console • Drag edges/corners to resize (double-click to reset)"
+              className="shrink-0 p-1 -ml-1 rounded text-slate-400 hover:text-cyan-600 dark:text-slate-500 dark:hover:text-[#22D3EE] hover:bg-slate-100/80 dark:hover:bg-[#162032] transition-colors"
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
+          )}
+
+          <div className="flex items-center gap-1 overflow-x-auto min-w-0 py-0.5">
           {/* Open Per-VM Dual-Console Tabs */}
           {consoleTabs.map((tab) => {
             const vm = vmMap.get(tab.nodeId);
@@ -226,7 +597,7 @@ export function BottomDock({
                     onOpenVmTab(e.target.value);
                   }
                 }}
-                className="pl-6 pr-2 py-1 rounded-md text-[11px] bg-slate-100/80 hover:bg-slate-200/70 dark:bg-[#162032] dark:hover:bg-[#1E2B42] text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-[rgba(34,211,238,0.16)] cursor-pointer focus:outline-none"
+                className="pl-6 pr-5 py-1 rounded-md text-[11px] bg-slate-100/80 hover:bg-slate-200/70 dark:bg-[#162032] dark:hover:bg-[#1E2B42] text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-[rgba(34,211,238,0.16)] cursor-pointer focus:outline-none"
               >
                 <option value="">Console…</option>
                 {unopenedVms.map((vm) => (
@@ -277,6 +648,7 @@ export function BottomDock({
               </span>
             )}
           </button>
+          </div>
         </div>
 
         {/* Right Controls: Pop-Out Floating / Maximize / Collapse */}
@@ -611,6 +983,7 @@ export function BottomDock({
               onSelectPcap={onSelectPcap}
               onRefreshCaptures={onRefreshCaptures}
               onInstallTcpflowy={onInstallTcpflowy}
+              onRefreshTcpflowyStatus={onRefreshTcpflowyStatus}
               onOpenSettingsTcpflowy={onOpenSettingsTcpflowy}
               onNotify={onNotify}
             />

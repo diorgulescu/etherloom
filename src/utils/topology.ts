@@ -1,17 +1,20 @@
 import type { Edge } from "@xyflow/react";
 import type { EtherloomFlowNode } from "../components/canvas/EtherloomNode";
-import type {
-  DiskBus,
-  FirmwareType,
-  GuestArch,
-  GuestFamily,
-  NicModel,
-  NodeKind,
-  NodePort,
-  TopologyDocument,
-  WireEdgeData,
-  WorkspaceLink,
-  WorkspaceNode,
+import {
+  createDefaultDhcpServerConfig,
+  createDefaultNatGatewayConfig,
+  type BaseTemplateInfo,
+  type DiskBus,
+  type FirmwareType,
+  type GuestArch,
+  type GuestFamily,
+  type NicModel,
+  type NodeKind,
+  type NodePort,
+  type TopologyDocument,
+  type WireEdgeData,
+  type WorkspaceLink,
+  type WorkspaceNode,
 } from "../types/studio";
 
 export type EtherloomWireEdge = Edge<WireEdgeData, "etherloomWire">;
@@ -33,6 +36,42 @@ export function generateQemuMac(seed?: number, portIndex = 0): string {
   return `52:54:00:${randByte()}:${randByte()}:${randByte()}`;
 }
 
+export function isFabricDeviceKind(kind: NodeKind): boolean {
+  return (
+    kind === "l2_switch" ||
+    kind === "l1_hub" ||
+    kind === "dhcp_server" ||
+    kind === "nat_gateway"
+  );
+}
+
+export function ipv4MaskToPrefixLen(mask: string): number {
+  const parts = mask
+    .trim()
+    .split(".")
+    .map((s) => Number.parseInt(s, 10));
+  if (
+    parts.length !== 4 ||
+    parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)
+  ) {
+    return 24;
+  }
+  let bits = 0;
+  let zeroSeen = false;
+  for (const octet of parts) {
+    for (let shift = 7; shift >= 0; shift -= 1) {
+      const bit = (octet >> shift) & 1;
+      if (bit === 1) {
+        if (zeroSeen) return 24;
+        bits += 1;
+      } else {
+        zeroSeen = true;
+      }
+    }
+  }
+  return bits;
+}
+
 /**
  * Resolves the canonical guest NIC prefix for a node kind / guest OS family.
  */
@@ -42,7 +81,7 @@ export function nicPrefixForFamily(
   osProfileId?: string | null,
   nicModel?: NicModel | null
 ): string {
-  if (kind === "l2_switch" || kind === "l1_hub") {
+  if (isFabricDeviceKind(kind)) {
     return "p";
   }
   const prof = (osProfileId ?? "").toLowerCase();
@@ -109,7 +148,7 @@ export function formatInterfaceLabel(
   osProfileId?: string | null,
   nicModel?: NicModel | null
 ): string {
-  if (kind === "l2_switch" || kind === "l1_hub") {
+  if (isFabricDeviceKind(kind)) {
     return `p${index + 1}`;
   }
   const prof = (osProfileId ?? "").toLowerCase();
@@ -146,13 +185,19 @@ export function buildNodePorts(params: {
 }): NodePort[] {
   const { nodeId, kind, guestFamily, osProfileId, nicModel, count, seed } =
     params;
+  const defaultPortZeroIp =
+    kind === "dhcp_server"
+      ? "10.0.10.2/24"
+      : kind === "nat_gateway"
+      ? "10.0.2.1/24"
+      : null;
   return Array.from({ length: count }, (_, idx) => ({
     id: `${nodeId}-p${idx}`,
     index: idx,
     label: formatInterfaceLabel(kind, guestFamily, idx, osProfileId, nicModel),
     mac: generateQemuMac(seed, idx),
     nicModel: kind === "vm" ? nicModel ?? null : null,
-    ipLabel: null,
+    ipLabel: idx === 0 ? defaultPortZeroIp : null,
     notes: null,
   }));
 }
@@ -185,6 +230,14 @@ export function flowNodeToWorkspaceNode(node: EtherloomFlowNode): WorkspaceNode 
       x: Math.round(node.position.x * 10) / 10,
       y: Math.round(node.position.y * 10) / 10,
     },
+    dhcp_config:
+      d.kind === "dhcp_server"
+        ? d.dhcpConfig ?? createDefaultDhcpServerConfig()
+        : null,
+    nat_config:
+      d.kind === "nat_gateway"
+        ? d.natConfig ?? createDefaultNatGatewayConfig()
+        : null,
     ports: d.ports.map((p, idx) => ({
       id: p.id,
       index: idx,
@@ -292,6 +345,14 @@ export function topologyDocumentToFlow(doc: TopologyDocument): {
         vcpus: wn.vcpus ?? (wn.kind === "vm" ? 2 : null),
         memoryMb: wn.memory_mb ?? (wn.kind === "vm" ? 512 : null),
         displayMode: wn.display_mode ?? "vnc",
+        dhcpConfig:
+          wn.kind === "dhcp_server"
+            ? wn.dhcp_config ?? createDefaultDhcpServerConfig()
+            : null,
+        natConfig:
+          wn.kind === "nat_gateway"
+            ? wn.nat_config ?? createDefaultNatGatewayConfig()
+            : null,
         ports,
       },
     };
@@ -356,4 +417,57 @@ export function formatDurationMmSs(durationMs: number): string {
   const mins = Math.floor(totalSecs / 60);
   const secs = totalSecs % 60;
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+const BUILTIN_TEMPLATE_STEM_PROFILES: Record<string, string> = {
+  "alpine-aarch64-base": "alpine-linux",
+  "debian-aarch64-base": "debian-linux",
+  "freebsd-aarch64-base": "freebsd",
+  "openbsd-aarch64-base": "openbsd",
+  "netbsd-aarch64-base": "netbsd",
+  "openwrt-aarch64-base": "openwrt",
+  "mikrotik-chr-aarch64-base": "mikrotik-chr",
+  "vyos-x86_64-base": "vyos",
+  "9front-aarch64-base": "9front",
+  "opnsense-x86_64-base": "opnsense",
+  "pfsense-x86_64-base": "pfsense",
+  "omnios-x86_64-base": "omnios",
+  "dragonflybsd-x86_64-base": "dragonflybsd",
+  "haiku-x86_64-base": "haiku",
+  "freedos-i386-base": "freedos",
+};
+
+/**
+ * Returns `true` when `templateId` clearly belongs to a different OS family profile than `osProfileId`
+ * (e.g. `alpine-aarch64-base` attached to a `debian-linux` node), while ignoring unmanifested custom qcow2s.
+ */
+export function resolveTemplateProfileMismatch(
+  osProfileId: string | null | undefined,
+  templateId: string | null | undefined,
+  baseTemplates: BaseTemplateInfo[]
+): boolean {
+  if (!osProfileId || !templateId) return false;
+  const cleanStem = templateId
+    .trim()
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/\.qcow2$/i, "")
+    .toLowerCase();
+  const builtinProf = BUILTIN_TEMPLATE_STEM_PROFILES[cleanStem];
+  if (builtinProf) {
+    return builtinProf !== osProfileId;
+  }
+  const matched = baseTemplates.find(
+    (t) =>
+      t.id.toLowerCase() === cleanStem ||
+      t.filename.toLowerCase() === `${cleanStem}.qcow2`
+  );
+  if (
+    matched &&
+    matched.description !== "Discovered qcow2 base template" &&
+    matched.osProfileId
+  ) {
+    return matched.osProfileId !== osProfileId;
+  }
+  return false;
 }

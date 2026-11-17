@@ -1,10 +1,12 @@
+use crate::dhcp_appliance::DhcpServerConfig;
 use crate::fabric::{CreateLinkRequest, LinkSnapshot, PacketFabric, UpdateLinkRequest};
 use crate::images::{ImageStore, OverlayTemplateBinding};
+use crate::nat_gateway::NatGatewayConfig;
 use crate::storage::verify_volume_mounted_under;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const TOPOLOGY_SCHEMA_VERSION: u32 = 1;
@@ -32,12 +34,12 @@ pub struct WorkspacePort {
     pub notes: Option<String>,
 }
 
-/// Node definition (VM, L2 Switch, or L1 Hub) serialized in `topology.toml`.
+/// Node definition (VM, L2 Switch, L1 Hub, DHCPv4/v6 Server, or Host NAT Gateway) serialized in `topology.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceNode {
     pub id: String,
     pub name: String,
-    /// `"vm"` | `"l2_switch"` | `"l1_hub"`
+    /// `"vm"` | `"l2_switch"` | `"l1_hub"` | `"dhcp_server"` | `"nat_gateway"`
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_family: Option<String>,
@@ -71,6 +73,10 @@ pub struct WorkspaceNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     pub position: NodePosition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp_config: Option<DhcpServerConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nat_config: Option<NatGatewayConfig>,
     #[serde(default)]
     pub ports: Vec<WorkspacePort>,
 }
@@ -191,16 +197,33 @@ pub fn normalize_bundle_dir(raw_path: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// Returns true if a relative path contains a `..` (ParentDir) component and would escape
+/// the bundle directory when joined onto it.
+fn relative_path_escapes_bundle(rel: &Path) -> bool {
+    rel.components()
+        .any(|c| matches!(c, Component::ParentDir))
+}
+
 /// Resolves a node's `.qcow2` disk path inside `bundle_dir/overlays/{node_id}.qcow2` (or honors relative/abs path).
-pub fn resolve_node_disk_in_bundle(bundle_dir: &Path, node: &WorkspaceNode) -> PathBuf {
+///
+/// Relative `disk_path` values coming from a (possibly shared) `topology.toml` are confined to the
+/// bundle: any `..` component is rejected so an untrusted project can never point QEMU at files
+/// outside the `.etherloom` directory. Absolute paths remain an explicit user override.
+pub fn resolve_node_disk_in_bundle(bundle_dir: &Path, node: &WorkspaceNode) -> Result<PathBuf, String> {
     if let Some(ref raw) = node.disk_path {
         let trimmed = raw.trim();
         if !trimmed.is_empty() {
             let candidate = PathBuf::from(trimmed);
             if candidate.is_absolute() {
-                return candidate;
+                return Ok(candidate);
             }
-            return bundle_dir.join(candidate);
+            if relative_path_escapes_bundle(&candidate) {
+                return Err(format!(
+                    "Node '{}' has an unsafe relative disk_path '{}' that escapes the project bundle; refusing to attach it.",
+                    node.id, trimmed
+                ));
+            }
+            return Ok(bundle_dir.join(candidate));
         }
     }
     let safe_id: String = node
@@ -214,7 +237,7 @@ pub fn resolve_node_disk_in_bundle(bundle_dir: &Path, node: &WorkspaceNode) -> P
             }
         })
         .collect();
-    bundle_dir.join("overlays").join(format!("{safe_id}.qcow2"))
+    Ok(bundle_dir.join("overlays").join(format!("{safe_id}.qcow2")))
 }
 
 /// Converts any absolute path inside `bundle_dir` into a portable relative path (e.g. `overlays/fw1.qcow2`)
@@ -369,7 +392,7 @@ pub async fn open_project_bundle(
 pub fn resolve_effective_node_disk(bundle_path: Option<&str>, node: &WorkspaceNode) -> Result<PathBuf, String> {
     if let Some(bp) = bundle_path.map(str::trim).filter(|s| !s.is_empty()) {
         let bundle_dir = normalize_bundle_dir(bp)?;
-        return Ok(resolve_node_disk_in_bundle(&bundle_dir, node));
+        return resolve_node_disk_in_bundle(&bundle_dir, node);
     }
 
     if let Some(ref raw) = node.disk_path {
@@ -410,13 +433,35 @@ pub async fn sync_topology_to_fabric(
         fabric.reset().await;
     }
 
-    // 1. Ensure virtual switches, virtual hubs, and VM UDP ports exist
+    // 1. Ensure virtual fabric devices (switches, hubs, DHCP appliances, NAT gateways) and VM UDP ports exist
     for node in &doc.nodes {
         match node.kind.as_str() {
             "l2_switch" | "l1_hub" => {
                 let port_count = node.ports.len().max(1);
                 fabric
                     .ensure_virtual_device(&node.id, &node.name, &node.kind, port_count)
+                    .await?;
+            }
+            "dhcp_server" => {
+                let port_count = node.ports.len().max(1);
+                fabric
+                    .ensure_dhcp_server(
+                        &node.id,
+                        &node.name,
+                        port_count,
+                        node.dhcp_config.clone().unwrap_or_default(),
+                    )
+                    .await?;
+            }
+            "nat_gateway" => {
+                let port_count = node.ports.len().max(1);
+                fabric
+                    .ensure_nat_gateway(
+                        &node.id,
+                        &node.name,
+                        port_count,
+                        node.nat_config.clone().unwrap_or_default(),
+                    )
                     .await?;
             }
             "vm" => {
@@ -489,13 +534,13 @@ async fn auto_rebase_bundle_overlays(
         .nodes
         .iter()
         .filter(|n| n.kind == "vm")
-        .map(|n| {
-            let disk = resolve_node_disk_in_bundle(bundle_dir, n);
-            OverlayTemplateBinding {
+        .filter_map(|n| {
+            let disk = resolve_node_disk_in_bundle(bundle_dir, n).ok()?;
+            Some(OverlayTemplateBinding {
                 node_id: Some(n.id.clone()),
                 overlay_path: disk.display().to_string(),
                 template_id: n.template_id.clone(),
-            }
+            })
         })
         .collect();
 
@@ -586,6 +631,8 @@ mod tests {
                     display_mode: Some("vnc".to_string()),
                     notes: Some("Primary pf + bgpd router".to_string()),
                     position: NodePosition { x: 140.0, y: 200.0 },
+                    dhcp_config: None,
+                    nat_config: None,
                     ports: vec![WorkspacePort {
                         id: "fw1-p0".to_string(),
                         index: 0,
@@ -616,6 +663,8 @@ mod tests {
                     display_mode: None,
                     notes: None,
                     position: NodePosition { x: 460.0, y: 200.0 },
+                    dhcp_config: None,
+                    nat_config: None,
                     ports: vec![WorkspacePort {
                         id: "sw1-p0".to_string(),
                         index: 0,
@@ -712,5 +761,145 @@ mac = "52:54:00:aa:bb:01"
         assert_eq!(doc.nodes[0].firmware, None);
         assert_eq!(doc.nodes[0].disk_bus, None);
         assert_eq!(doc.nodes[0].ports[0].nic_model, None);
+    }
+
+    #[test]
+    fn dhcp_server_and_nat_gateway_configs_round_trip_through_topology_toml() {
+        let doc = TopologyDocument {
+            schema_version: 1,
+            name: "Fabric Appliances Lab".to_string(),
+            notes: None,
+            created_at_ms: 100,
+            updated_at_ms: 200,
+            nodes: vec![
+                WorkspaceNode {
+                    id: "node-dhcp1".to_string(),
+                    name: "dhcp1".to_string(),
+                    kind: "dhcp_server".to_string(),
+                    guest_family: None,
+                    os_profile_id: None,
+                    template_id: None,
+                    arch: None,
+                    nic_model: None,
+                    firmware: None,
+                    disk_bus: None,
+                    disk_path: None,
+                    disk_size_gb: None,
+                    boot_media_path: None,
+                    boot_media_bus: None,
+                    vcpus: None,
+                    memory_mb: None,
+                    display_mode: None,
+                    notes: Some("Dual-stack lab DHCP".to_string()),
+                    position: NodePosition { x: 100.0, y: 120.0 },
+                    dhcp_config: Some(DhcpServerConfig {
+                        pool_start_v4: "10.0.50.100".to_string(),
+                        pool_end_v4: "10.0.50.180".to_string(),
+                        ..DhcpServerConfig::default()
+                    }),
+                    nat_config: None,
+                    ports: vec![WorkspacePort {
+                        id: "node-dhcp1-p0".to_string(),
+                        index: 0,
+                        label: "p1".to_string(),
+                        mac: "52:54:00:d4:00:01".to_string(),
+                        nic_model: None,
+                        ip_label: Some("10.0.50.2/24".to_string()),
+                        notes: None,
+                    }],
+                },
+                WorkspaceNode {
+                    id: "node-wan1".to_string(),
+                    name: "wan1".to_string(),
+                    kind: "nat_gateway".to_string(),
+                    guest_family: None,
+                    os_profile_id: None,
+                    template_id: None,
+                    arch: None,
+                    nic_model: None,
+                    firmware: None,
+                    disk_bus: None,
+                    disk_path: None,
+                    disk_size_gb: None,
+                    boot_media_path: None,
+                    boot_media_bus: None,
+                    vcpus: None,
+                    memory_mb: None,
+                    display_mode: None,
+                    notes: Some("Host Internet NAT".to_string()),
+                    position: NodePosition { x: 380.0, y: 120.0 },
+                    dhcp_config: None,
+                    nat_config: Some(NatGatewayConfig {
+                        lan_ip_v4: "172.16.0.1".to_string(),
+                        ..NatGatewayConfig::default()
+                    }),
+                    ports: vec![WorkspacePort {
+                        id: "node-wan1-p0".to_string(),
+                        index: 0,
+                        label: "p1".to_string(),
+                        mac: "52:54:00:e7:00:01".to_string(),
+                        nic_model: None,
+                        ip_label: Some("172.16.0.1/24".to_string()),
+                        notes: None,
+                    }],
+                },
+            ],
+            links: Vec::new(),
+        };
+
+        let toml_text =
+            toml::to_string_pretty(&doc).expect("TOML serialization must succeed cleanly");
+        let parsed: TopologyDocument =
+            toml::from_str(&toml_text).expect("TOML deserialization must succeed cleanly");
+        assert_eq!(parsed, doc);
+    }
+
+    #[test]
+    fn relative_disk_path_with_dotdot_is_rejected_inside_bundle() {
+        let bundle = Path::new("/tmp/lab.etherloom");
+        let mut node = WorkspaceNode {
+            id: "node-h1".to_string(),
+            name: "h1".to_string(),
+            kind: "vm".to_string(),
+            guest_family: Some("linux".to_string()),
+            os_profile_id: Some("alpine-linux".to_string()),
+            template_id: None,
+            arch: None,
+            nic_model: None,
+            firmware: None,
+            disk_bus: None,
+            disk_path: Some("../../etc/evil.qcow2".to_string()),
+            disk_size_gb: None,
+            boot_media_path: None,
+            boot_media_bus: None,
+            vcpus: None,
+            memory_mb: None,
+            display_mode: None,
+            notes: None,
+            position: NodePosition { x: 0.0, y: 0.0 },
+            dhcp_config: None,
+            nat_config: None,
+            ports: Vec::new(),
+        };
+
+        // `..` traversal must be refused
+        assert!(resolve_node_disk_in_bundle(bundle, &node).is_err());
+        assert!(resolve_effective_node_disk(Some("/tmp/lab.etherloom"), &node).is_err());
+
+        // Safe in-bundle relative path resolves inside the bundle
+        node.disk_path = Some("overlays/h1.qcow2".to_string());
+        let resolved = resolve_node_disk_in_bundle(bundle, &node).unwrap();
+        assert_eq!(resolved, bundle.join("overlays/h1.qcow2"));
+
+        // Absolute path remains an explicit (allowed) override
+        node.disk_path = Some("/Volumes/SSD/disks/custom.qcow2".to_string());
+        let resolved = resolve_node_disk_in_bundle(bundle, &node).unwrap();
+        assert!(resolved.is_absolute());
+
+        // Default (no disk_path) lands in overlays/ with a sanitized node id
+        node.disk_path = None;
+        node.id = "node/../evil".to_string();
+        let resolved = resolve_node_disk_in_bundle(bundle, &node).unwrap();
+        assert_eq!(resolved, bundle.join("overlays/node____evil.qcow2"));
     }
 }

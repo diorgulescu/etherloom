@@ -2,9 +2,11 @@ pub mod academy;
 pub mod activity_monitor;
 pub mod catalog;
 pub mod console_bridge;
+pub mod dhcp_appliance;
 pub mod env_doctor;
 pub mod fabric;
 pub mod images;
+pub mod nat_gateway;
 pub mod pcap_tap;
 pub mod storage;
 pub mod tcpflowy_bridge;
@@ -21,6 +23,7 @@ use catalog::{
     DeleteCatalogImageResult, OsCatalogEntryDto,
 };
 use console_bridge::{ConsoleBridge, ConsoleSessionEndpoints};
+use dhcp_appliance::DhcpLeaseDto;
 use env_doctor::EnvDoctorReport;
 use fabric::{
     CreateLinkRequest, LinkSnapshot, MacTableEntryDto, PacketFabric, UdpPortBinding,
@@ -31,6 +34,7 @@ use images::{
     CreateOverlayRequest, DiskInfo, ImageStore, InstallerMediaInfo, OsProfile, OverlayRebaseReport,
     OverlayTemplateBinding, PromoteTemplateRequest, ResetOverlayRequest,
 };
+use nat_gateway::NatSessionDto;
 use pcap_tap::{
     export_pcap_copy_to_path, list_captures_in_dir, open_pcap_file_in_wireshark,
     open_pcap_in_wireshark_with_hint, reveal_pcap_file_in_finder, CaptureFileInfo, CaptureSummary,
@@ -203,6 +207,42 @@ fn get_component_catalog() -> Vec<CatalogComponent> {
         default_disk_bus: None,
         nic_prefix: "p".to_string(),
         default_ports: 6,
+        default_vcpus: None,
+        default_memory_mb: None,
+        console_modes: vec!["inspector".to_string()],
+    });
+
+    items.push(CatalogComponent {
+        id: "fabric-dhcp-server".to_string(),
+        name: "DHCPv4 / DHCPv6 Server".to_string(),
+        subtitle: "10.0.10.0/24 + fd00:10::/64 • Instant dual-stack appliance".to_string(),
+        kind: "dhcp_server".to_string(),
+        guest_family: None,
+        os_profile_id: None,
+        arch: None,
+        default_nic_model: None,
+        default_firmware: None,
+        default_disk_bus: None,
+        nic_prefix: "p".to_string(),
+        default_ports: 1,
+        default_vcpus: None,
+        default_memory_mb: None,
+        console_modes: vec!["inspector".to_string()],
+    });
+
+    items.push(CatalogComponent {
+        id: "fabric-nat-gateway".to_string(),
+        name: "Internet Gateway (Host NAT)".to_string(),
+        subtitle: "10.0.2.1/24 • Zero-root WAN uplink + DNS & DHCP".to_string(),
+        kind: "nat_gateway".to_string(),
+        guest_family: None,
+        os_profile_id: None,
+        arch: None,
+        default_nic_model: None,
+        default_firmware: None,
+        default_disk_bus: None,
+        nic_prefix: "p".to_string(),
+        default_ports: 1,
         default_vcpus: None,
         default_memory_mb: None,
         console_modes: vec!["inspector".to_string()],
@@ -499,6 +539,38 @@ async fn fabric_clear_switch_mac_table(
     state.fabric.clear_switch_mac_table(&switch_id).await
 }
 
+#[tauri::command]
+async fn fabric_get_dhcp_leases(
+    state: tauri::State<'_, StudioState>,
+    device_id: String,
+) -> Result<Vec<DhcpLeaseDto>, String> {
+    state.fabric.get_dhcp_leases(&device_id).await
+}
+
+#[tauri::command]
+async fn fabric_clear_dhcp_leases(
+    state: tauri::State<'_, StudioState>,
+    device_id: String,
+) -> Result<(), String> {
+    state.fabric.clear_dhcp_leases(&device_id).await
+}
+
+#[tauri::command]
+async fn fabric_get_nat_sessions(
+    state: tauri::State<'_, StudioState>,
+    device_id: String,
+) -> Result<Vec<NatSessionDto>, String> {
+    state.fabric.get_nat_sessions(&device_id).await
+}
+
+#[tauri::command]
+async fn fabric_clear_nat_sessions(
+    state: tauri::State<'_, StudioState>,
+    device_id: String,
+) -> Result<(), String> {
+    state.fabric.clear_nat_sessions(&device_id).await
+}
+
 // -----------------------------------------------------------------------------
 // Phase 2: Project Persistence (`*.etherloom` / `topology.toml`) & Node Boot
 // -----------------------------------------------------------------------------
@@ -568,13 +640,16 @@ async fn save_project(
             for node in &mut request.topology.nodes {
                 if node.kind == "vm" {
                     if let Ok(scratch_disk) = workspace::resolve_effective_node_disk(None, node) {
-                        let dest_disk = workspace::resolve_node_disk_in_bundle(&target_bundle, node);
-                        if scratch_disk.is_file() && !dest_disk.is_file() && scratch_disk != dest_disk {
-                            let _ = fs::copy(&scratch_disk, &dest_disk);
-                        }
-                        if dest_disk.is_file() || node.disk_path.is_none() {
-                            if let Ok(rel) = dest_disk.strip_prefix(&target_bundle) {
-                                node.disk_path = Some(rel.to_string_lossy().replace('\\', "/"));
+                        if let Ok(dest_disk) =
+                            workspace::resolve_node_disk_in_bundle(&target_bundle, node)
+                        {
+                            if scratch_disk.is_file() && !dest_disk.is_file() && scratch_disk != dest_disk {
+                                let _ = fs::copy(&scratch_disk, &dest_disk);
+                            }
+                            if dest_disk.is_file() || node.disk_path.is_none() {
+                                if let Ok(rel) = dest_disk.strip_prefix(&target_bundle) {
+                                    node.disk_path = Some(rel.to_string_lossy().replace('\\', "/"));
+                                }
                             }
                         }
                     }
@@ -693,22 +768,60 @@ async fn start_topology_vm_node(
             .filter(|s| !s.is_empty())
             .map(ToOwned::to_owned);
 
-        // If a node was dragged from Guest OS Profiles before downloading its OS image, auto-bind to a matching
-        // Base Template in `templates/` once downloaded so the user can boot immediately without re-wiring storage!
+        let templates = state.image_store.list_templates().await.unwrap_or_default();
+
+        // Guard against nodes previously saved with a cross-profile template mismatch
+        // (e.g. `os_profile_id == "debian-linux"` accidentally stamped with `alpine-aarch64-base`).
+        if boot_media_path.is_none() {
+            if let (Some(ref prof_id), Some(ref tid)) = (&node.os_profile_id, &template_id) {
+                if let Some(tpl_prof) = catalog::template_ref_profile(tid, &templates) {
+                    if tpl_prof != prof_id.as_str() {
+                        template_id = None;
+                    }
+                }
+            }
+        }
+
+        // If a node was dragged from Guest OS Profiles before downloading its OS image (or healed above),
+        // auto-bind to a matching Base Template in `templates/` once downloaded so the user can boot immediately!
         if template_id.is_none() && boot_media_path.is_none() {
             if let Some(ref prof_id) = node.os_profile_id {
-                if let Ok(templates) = state.image_store.list_templates().await {
-                    if let Some(matched) =
-                        templates.into_iter().find(|t| t.os_profile_id == *prof_id)
-                    {
-                        template_id = Some(matched.id);
-                    }
+                if let Some(matched) = templates.iter().find(|t| t.os_profile_id == *prof_id) {
+                    template_id = Some(matched.id.clone());
                 }
             }
         }
 
         if *cancel_rx.borrow() {
             return Ok((disk_path, template_id, boot_media_path));
+        }
+
+        // If an overlay disk already exists on disk from a previous mismatched boot (e.g. `debian7.qcow2`
+        // backed by `alpine-aarch64-base.qcow2` while `os_profile_id` is `"debian-linux"`), heal it!
+        if disk_path.is_file() && boot_media_path.is_none() {
+            if let Some(ref prof_id) = node.os_profile_id {
+                if let Ok(disk_info) = state.image_store.inspect_disk(&disk_path).await {
+                    if let Some(ref backing) = disk_info.backing_file {
+                        if let Some(backing_prof) =
+                            catalog::template_ref_profile(backing, &templates)
+                        {
+                            if backing_prof != prof_id.as_str() {
+                                if let Some(ref valid_tpl_id) = template_id {
+                                    state
+                                        .image_store
+                                        .reset_node_overlay(ResetOverlayRequest {
+                                            overlay_path: disk_path.display().to_string(),
+                                            backing_template_override: Some(valid_tpl_id.clone()),
+                                        })
+                                        .await?;
+                                } else if !disk_info.read_only {
+                                    let _ = fs::remove_file(&disk_path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if !disk_path.is_file() {
@@ -846,6 +959,7 @@ async fn start_topology_vm_node(
                 cpus: node.vcpus.unwrap_or(default_cpus).max(1),
                 ram_mb: node.memory_mb.unwrap_or(default_ram).max(16),
                 disk_path: disk_path.display().to_string(),
+                os_profile_id: node.os_profile_id.clone(),
                 template_id,
                 boot_media_path,
                 boot_media_bus,
@@ -1074,6 +1188,18 @@ async fn pcap_list_captures(
 #[tauri::command]
 async fn pcap_delete_capture(pcap_path: String) -> Result<(), String> {
     let path = PathBuf::from(pcap_path.trim());
+    // Only packet-capture files may be deleted through this command.
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext != "pcap" && ext != "pcapng" {
+        return Err(format!(
+            "Refusing to delete '{}': not a .pcap/.pcapng capture file",
+            path.display()
+        ));
+    }
     if path.is_file() {
         fs::remove_file(&path)
             .map_err(|e| format!("Failed deleting '{}': {e}", path.display()))?;
@@ -1363,6 +1489,10 @@ pub fn run() {
             fabric_list_links,
             fabric_get_switch_mac_table,
             fabric_clear_switch_mac_table,
+            fabric_get_dhcp_leases,
+            fabric_clear_dhcp_leases,
+            fabric_get_nat_sessions,
+            fabric_clear_nat_sessions,
             create_new_project,
             save_project,
             open_project,

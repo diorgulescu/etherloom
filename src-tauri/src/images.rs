@@ -450,6 +450,8 @@ pub struct BaseTemplateInfo {
     pub name: String,
     pub os_profile_id: String,
     #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
     pub arch: GuestArch,
     #[serde(default)]
     pub default_nic_model: NicModel,
@@ -803,6 +805,7 @@ impl ImageStore {
             id: template_id.clone(),
             name: req.template_name.trim().to_string(),
             os_profile_id: req.os_profile_id,
+            version: None,
             arch,
             default_nic_model,
             default_firmware,
@@ -860,6 +863,7 @@ impl ImageStore {
             id: fin.template_id.clone(),
             name: fin.template_name.clone(),
             os_profile_id: fin.os_profile_id.clone(),
+            version: fin.version.clone(),
             arch: fin.arch,
             default_nic_model: fin.default_nic_model,
             default_firmware: fin.default_firmware,
@@ -875,9 +879,21 @@ impl ImageStore {
 
         if let Some(parent) = target_qcow2.parent() {
             let manifest_path = parent.join(format!("{}.template.json", fin.template_id));
-            if let Ok(json_text) = serde_json::to_string_pretty(&template) {
-                let _ = fs::write(&manifest_path, json_text);
-            }
+            let tmp_manifest = parent.join(format!(".{}.template.json.tmp", fin.template_id));
+            let json_text = serde_json::to_string_pretty(&template)
+                .map_err(|e| format!("Failed to serialize template manifest: {e}"))?;
+            fs::write(&tmp_manifest, json_text).map_err(|e| {
+                format!(
+                    "Failed writing temporary template manifest {}: {e}",
+                    tmp_manifest.display()
+                )
+            })?;
+            fs::rename(&tmp_manifest, &manifest_path).map_err(|e| {
+                format!(
+                    "Failed finalizing template manifest {}: {e}",
+                    manifest_path.display()
+                )
+            })?;
         }
 
         Ok(template)
@@ -1152,6 +1168,17 @@ impl ImageStore {
                 if let Ok(raw) = fs::read_to_string(&manifest_path) {
                     if let Ok(mut parsed) = serde_json::from_str::<BaseTemplateInfo>(&raw) {
                         parsed.path = path.display().to_string();
+                        if parsed.os_profile_id == "freebsd"
+                            && parsed.name == "FreeBSD 14 RELEASE"
+                            && parsed.version.is_none()
+                        {
+                            parsed.name = "FreeBSD".to_string();
+                            if let Some(ref desc) = parsed.description {
+                                if let Some(rest) = desc.strip_prefix("FreeBSD 14 RELEASE —") {
+                                    parsed.description = Some(format!("FreeBSD —{rest}"));
+                                }
+                            }
+                        }
                         templates.push(parsed);
                         continue;
                     }
@@ -1182,6 +1209,7 @@ impl ImageStore {
                 id: stem.clone(),
                 name: inferred_name,
                 os_profile_id: inferred_profile_id.to_string(),
+                version: None,
                 arch: inferred_arch,
                 default_nic_model: prof
                     .as_ref()

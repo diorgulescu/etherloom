@@ -3,6 +3,7 @@ import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import {
   Cpu,
   Disc,
+  Globe,
   Loader2,
   Monitor,
   Network,
@@ -18,16 +19,25 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  fabricClearDhcpLeases,
+  fabricClearNatSessions,
   fabricClearSwitchMacTable,
+  fabricGetDhcpLeases,
+  fabricGetNatSessions,
   fabricGetSwitchMacTable,
 } from "../../services/tauriBridge";
-import type {
-  GuestArch,
-  MacTableEntry,
-  NodePort,
-  PortLinkState,
-  TopologyNodeData,
+import {
+  createDefaultDhcpServerConfig,
+  createDefaultNatGatewayConfig,
+  type DhcpLeaseEntry,
+  type GuestArch,
+  type MacTableEntry,
+  type NatSessionEntry,
+  type NodePort,
+  type PortLinkState,
+  type TopologyNodeData,
 } from "../../types/studio";
+import { formatByteSize } from "../../utils/topology";
 
 export type EtherloomFlowNode = Node<TopologyNodeData, "etherloomNode">;
 
@@ -46,6 +56,22 @@ function resolveHeaderBadge(data: TopologyNodeData) {
       tag: "L1 Hub",
       accent:
         "bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE] border-cyan-400/30",
+    };
+  }
+  if (data.kind === "dhcp_server") {
+    return {
+      icon: Server,
+      tag: "DHCPv4 / DHCPv6",
+      accent:
+        "bg-indigo-500/15 text-indigo-700 dark:text-[#818CF8] border-indigo-400/30",
+    };
+  }
+  if (data.kind === "nat_gateway") {
+    return {
+      icon: Globe,
+      tag: "Host NAT WAN",
+      accent:
+        "bg-emerald-500/15 text-emerald-700 dark:text-[#34D399] border-emerald-400/30",
     };
   }
 
@@ -295,12 +321,26 @@ export function EtherloomNode({
   const status = data.status ?? "stopped";
   const isVm = data.kind === "vm";
   const isSwitch = data.kind === "l2_switch";
+  const isDhcpServer = data.kind === "dhcp_server";
+  const isNatGateway = data.kind === "nat_gateway";
   const archBadge = resolveArchAccelBadge(data.arch, data.hostArch);
+  const dhcpCfg = isDhcpServer
+    ? data.dhcpConfig ?? createDefaultDhcpServerConfig()
+    : null;
+  const natCfg = isNatGateway
+    ? data.natConfig ?? createDefaultNatGatewayConfig()
+    : null;
 
   const [macPopoverOpen, setMacPopoverOpen] = useState(false);
   const [macPinned, setMacPinned] = useState(false);
   const [macEntries, setMacEntries] = useState<MacTableEntry[]>([]);
   const [macLoading, setMacLoading] = useState(false);
+
+  const [appliancePopoverOpen, setAppliancePopoverOpen] = useState(false);
+  const [appliancePinned, setAppliancePinned] = useState(false);
+  const [dhcpLeases, setDhcpLeases] = useState<DhcpLeaseEntry[]>([]);
+  const [natSessions, setNatSessions] = useState<NatSessionEntry[]>([]);
+  const [applianceLoading, setApplianceLoading] = useState(false);
 
   const loadMacTable = useCallback(async () => {
     if (!isSwitch) return;
@@ -315,6 +355,26 @@ export function EtherloomNode({
     }
   }, [id, isSwitch]);
 
+  const loadApplianceState = useCallback(async () => {
+    if (!isDhcpServer && !isNatGateway) return;
+    setApplianceLoading(true);
+    try {
+      const leases = await fabricGetDhcpLeases(id);
+      setDhcpLeases(leases);
+      if (isNatGateway) {
+        const sessions = await fabricGetNatSessions(id);
+        setNatSessions(sessions);
+      } else {
+        setNatSessions([]);
+      }
+    } catch {
+      setDhcpLeases([]);
+      setNatSessions([]);
+    } finally {
+      setApplianceLoading(false);
+    }
+  }, [id, isDhcpServer, isNatGateway]);
+
   useEffect(() => {
     if (!isSwitch || (!macPopoverOpen && !macPinned)) return;
     void loadMacTable();
@@ -323,6 +383,26 @@ export function EtherloomNode({
     }, 1250);
     return () => window.clearInterval(timer);
   }, [isSwitch, macPopoverOpen, macPinned, loadMacTable]);
+
+  useEffect(() => {
+    if (
+      (!isDhcpServer && !isNatGateway) ||
+      (!appliancePopoverOpen && !appliancePinned)
+    ) {
+      return;
+    }
+    void loadApplianceState();
+    const timer = window.setInterval(() => {
+      void loadApplianceState();
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [
+    isDhcpServer,
+    isNatGateway,
+    appliancePopoverOpen,
+    appliancePinned,
+    loadApplianceState,
+  ]);
 
   // Split ports evenly into Left and Right columns so ring-jacks sit cleanly along both node edges
   const midpoint = Math.ceil(data.ports.length / 2);
@@ -334,14 +414,32 @@ export function EtherloomNode({
     data.ports.map((p) => [p.id, p.label])
   );
 
-  // 3px top accent strip colored by runtime class (#10B981 ARM64 HVF, #6366F1 x86/TCG, #22D3EE Switch/Hub)
-  const topStripClass = !isVm
+  // 3px top accent strip colored by runtime class (#10B981 ARM64 HVF / WAN, #6366F1 x86/TCG / DHCP, #22D3EE Switch/Hub)
+  const topStripClass = isNatGateway
+    ? "bg-gradient-to-r from-[#10B981] via-[#22D3EE] to-[#10B981]"
+    : isDhcpServer
+    ? "bg-gradient-to-r from-[#6366F1] via-[#22D3EE] to-[#6366F1]"
+    : !isVm
     ? "bg-gradient-to-r from-[#22D3EE] via-[#06B6D4] to-[#22D3EE]"
     : archBadge.isNativeHvf
     ? "bg-gradient-to-r from-[#10B981] via-[#34D399] to-[#10B981]"
     : "bg-gradient-to-r from-[#6366F1] via-[#818CF8] to-[#6366F1]";
 
   const renderStatusBadge = () => {
+    if (isNatGateway) {
+      const wanUp = natCfg?.enabled !== false;
+      return wanUp ? (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/15 text-emerald-700 dark:text-[#34D399] border border-emerald-500/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
+          WAN Up
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-medium bg-slate-100 dark:bg-[#090E18]/85 text-slate-500 dark:text-slate-400 border border-slate-200/80 dark:border-slate-700/60">
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
+          WAN Off
+        </span>
+      );
+    }
     if (!isVm) {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-medium bg-cyan-500/12 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/25">
@@ -468,6 +566,176 @@ export function EtherloomNode({
         </div>
       )}
 
+      {/* Live DHCP Leases / NAT Sessions Popover for Fabric Appliances */}
+      {(isDhcpServer || isNatGateway) &&
+        (appliancePopoverOpen || appliancePinned) && (
+          <div
+            className="nodrag nopan absolute left-1/2 -translate-x-1/2 bottom-full mb-2.5 w-80 rounded-xl bg-white/98 dark:bg-[#111827]/96 backdrop-blur-xl border border-slate-200 dark:border-[rgba(34,211,238,0.28)] shadow-2xl p-3 z-50 space-y-2.5"
+            onMouseEnter={() => setAppliancePopoverOpen(true)}
+            onMouseLeave={() => setAppliancePopoverOpen(false)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {isNatGateway ? (
+                  <Globe className="w-3.5 h-3.5 text-[#34D399] shrink-0" />
+                ) : (
+                  <Server className="w-3.5 h-3.5 text-[#818CF8] shrink-0" />
+                )}
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                  {data.label} — {isNatGateway ? "NAT & Leases" : "DHCP Leases"}
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE]">
+                  {isNatGateway
+                    ? natSessions.length + dhcpLeases.length
+                    : dhcpLeases.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  title="Refresh live table"
+                  onClick={() => void loadApplianceState()}
+                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                >
+                  <RefreshCw
+                    className={`w-3 h-3 ${
+                      applianceLoading ? "animate-spin" : ""
+                    }`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  title={
+                    isNatGateway
+                      ? "Clear active NAT flows & DHCP leases"
+                      : "Clear all DHCPv4 / DHCPv6 leases"
+                  }
+                  onClick={() => {
+                    const ops: Promise<unknown>[] = [fabricClearDhcpLeases(id)];
+                    if (isNatGateway) {
+                      ops.push(fabricClearNatSessions(id));
+                    }
+                    void Promise.all(ops).then(() => loadApplianceState());
+                  }}
+                  className="p-1 rounded hover:bg-rose-500/15 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {isNatGateway && (
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-[#34D399] mb-1">
+                  Active Outbound NAT Flows ({natSessions.length})
+                </div>
+                {natSessions.length === 0 ? (
+                  <p className="py-1.5 text-[10.5px] text-slate-500 dark:text-slate-400">
+                    No active TCP/UDP Internet flows right now. Ping or curl an
+                    external host from a connected VM!
+                  </p>
+                ) : (
+                  <div className="max-h-32 overflow-y-auto">
+                    <table className="w-full text-left text-[9.5px] font-mono">
+                      <thead>
+                        <tr className="text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                          <th className="pb-1 font-medium">Proto</th>
+                          <th className="pb-1 font-medium">Flow</th>
+                          <th className="pb-1 font-medium text-right">RX/TX</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                        {natSessions.map((s, idx) => (
+                          <tr
+                            key={`${s.protocol}-${s.clientAddr}-${s.remoteAddr}-${idx}`}
+                            className="text-slate-700 dark:text-slate-200"
+                          >
+                            <td className="py-1 pr-1">
+                              <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-[#34D399]">
+                                {s.protocol}
+                              </span>
+                            </td>
+                            <td
+                              className="py-1 pr-1 truncate max-w-[165px]"
+                              title={`${s.clientAddr} → ${s.remoteAddr} (${s.state})`}
+                            >
+                              {s.clientAddr} → {s.remoteAddr}
+                            </td>
+                            <td className="py-1 text-right text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                              {formatByteSize(s.rxBytes + s.txBytes)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div>
+              {isNatGateway && (
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700 dark:text-[#818CF8] mb-1">
+                  DHCPv4 / DHCPv6 Leases ({dhcpLeases.length})
+                </div>
+              )}
+              {dhcpLeases.length === 0 ? (
+                <p className="py-1.5 text-[10.5px] text-slate-500 dark:text-slate-400">
+                  No DHCP leases issued yet. Run{" "}
+                  <code className="font-mono">udhcpc</code>,{" "}
+                  <code className="font-mono">dhclient</code>, or{" "}
+                  <code className="font-mono">dhcpcd</code> on a connected VM.
+                </p>
+              ) : (
+                <div className="max-h-36 overflow-y-auto">
+                  <table className="w-full text-left text-[9.5px] font-mono">
+                    <thead>
+                      <tr className="text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                        <th className="pb-1 font-medium">IP Address</th>
+                        <th className="pb-1 font-medium">MAC / Host</th>
+                        <th className="pb-1 font-medium text-right">TTL</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                      {dhcpLeases.map((lease) => (
+                        <tr
+                          key={`${lease.family}-${lease.ip}-${lease.clientId}`}
+                          className="text-slate-700 dark:text-slate-200"
+                        >
+                          <td className="py-1 pr-1 whitespace-nowrap">
+                            <span
+                              className={`mr-1 px-1 py-0.5 rounded text-[8.5px] ${
+                                lease.family === "ipv6"
+                                  ? "bg-indigo-500/15 text-indigo-700 dark:text-[#818CF8]"
+                                  : "bg-cyan-500/15 text-cyan-700 dark:text-[#22D3EE]"
+                              }`}
+                            >
+                              {lease.family === "ipv6" ? "v6" : "v4"}
+                            </span>
+                            {lease.ip}
+                          </td>
+                          <td
+                            className="py-1 pr-1 truncate max-w-[115px]"
+                            title={`${lease.mac}${
+                              lease.hostname ? ` (${lease.hostname})` : ""
+                            }`}
+                          >
+                            {lease.hostname || lease.mac}
+                          </td>
+                          <td className="py-1 text-right text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                            {lease.expiresInSecs}s
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       {/* Card Header: OS/Device Badge, Hostname, Running State */}
       <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -523,6 +791,57 @@ export function EtherloomNode({
         })}
       </div>
 
+      {/* Compact Dual-Stack / Host NAT Summary Strip */}
+      {isDhcpServer && dhcpCfg && (
+        <div className="px-2.5 py-1 border-t border-slate-100/80 dark:border-slate-800/70 bg-indigo-500/[0.04] dark:bg-indigo-500/[0.06] flex flex-wrap items-center gap-1 text-[9.5px] font-mono">
+          {dhcpCfg.v4_enabled && (
+            <span
+              className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/20 truncate max-w-[145px]"
+              title={`DHCPv4 Pool: ${dhcpCfg.pool_start_v4} – ${dhcpCfg.pool_end_v4}`}
+            >
+              v4: {dhcpCfg.pool_start_v4}–{dhcpCfg.pool_end_v4.split(".").pop()}
+            </span>
+          )}
+          {dhcpCfg.v6_enabled && (
+            <span
+              className="px-1.5 py-0.5 rounded bg-indigo-500/12 text-indigo-700 dark:text-[#818CF8] border border-indigo-400/25 truncate max-w-[145px]"
+              title={`DHCPv6 Pool: ${dhcpCfg.pool_start_v6} – ${dhcpCfg.pool_end_v6}${
+                dhcpCfg.slaac_enabled ? " + SLAAC RA" : ""
+              }`}
+            >
+              v6: {dhcpCfg.server_ip_v6}/{dhcpCfg.prefix_len_v6}
+              {dhcpCfg.slaac_enabled ? "+RA" : ""}
+            </span>
+          )}
+        </div>
+      )}
+
+      {isNatGateway && natCfg && (
+        <div className="px-2.5 py-1 border-t border-slate-100/80 dark:border-slate-800/70 bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06] flex flex-wrap items-center gap-1 text-[9.5px] font-mono">
+          <span
+            className="px-1.5 py-0.5 rounded bg-emerald-500/12 text-emerald-800 dark:text-[#34D399] border border-emerald-400/25"
+            title={`Gateway IPv4: ${natCfg.lan_ip_v4}/${natCfg.prefix_len_v4}`}
+          >
+            GW {natCfg.lan_ip_v4}/{natCfg.prefix_len_v4}
+          </span>
+          {natCfg.dhcp_enabled && (
+            <span className="px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/20">
+              DHCP
+            </span>
+          )}
+          {natCfg.dns_proxy_enabled && (
+            <span className="px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-800 dark:text-[#22D3EE] border border-cyan-400/20">
+              DNS
+            </span>
+          )}
+          {natCfg.v6_enabled && (
+            <span className="px-1 py-0.5 rounded bg-indigo-500/12 text-indigo-700 dark:text-[#818CF8] border border-indigo-400/25">
+              NAT66
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Patchbay Footer: Runtime Badge + Quick Actions */}
       <div className="px-2.5 py-1.5 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/70 dark:bg-[#090E18]/55 rounded-b-xl flex items-center justify-between gap-1.5">
         {isVm ? (
@@ -570,6 +889,31 @@ export function EtherloomNode({
           >
             <TableProperties className="w-3 h-3" />
             <span>MAC Table</span>
+          </button>
+        ) : isDhcpServer || isNatGateway ? (
+          <button
+            type="button"
+            onMouseEnter={() => setAppliancePopoverOpen(true)}
+            onMouseLeave={() => setAppliancePopoverOpen(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setAppliancePinned((v) => !v);
+            }}
+            className={`nodrag inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium transition-colors border ${
+              appliancePinned
+                ? "bg-[#06B6D4] border-[#22D3EE] text-slate-950 font-semibold"
+                : isNatGateway
+                ? "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-400/25 text-emerald-700 dark:text-[#34D399]"
+                : "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-400/25 text-indigo-700 dark:text-[#818CF8]"
+            }`}
+            title={
+              isNatGateway
+                ? "Hover or click to inspect live NAT flows & DHCP leases"
+                : "Hover or click to inspect live DHCPv4 & DHCPv6 leases"
+            }
+          >
+            <TableProperties className="w-3 h-3" />
+            <span>{isNatGateway ? "NAT & Leases" : "Leases"}</span>
           </button>
         ) : (
           <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">

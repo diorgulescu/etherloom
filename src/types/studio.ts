@@ -143,7 +143,12 @@ export interface OverlayRebaseReport {
 // -----------------------------------------------------------------------------
 
 export type GuestFamily = "linux" | "freebsd" | "openbsd" | "netbsd" | "other";
-export type NodeKind = "vm" | "l2_switch" | "l1_hub";
+export type NodeKind =
+  | "vm"
+  | "l2_switch"
+  | "l1_hub"
+  | "dhcp_server"
+  | "nat_gateway";
 
 export type GuestArch = "aarch64" | "x86_64" | "i386" | "riscv64";
 export type NicModel =
@@ -194,6 +199,7 @@ export interface BaseTemplateInfo {
   id: string;
   name: string;
   osProfileId: string;
+  version?: string | null;
   arch?: GuestArch;
   defaultNicModel?: NicModel;
   defaultFirmware?: FirmwareType;
@@ -255,6 +261,7 @@ export interface SpawnVmRequest {
   cpus: number;
   ramMb: number;
   diskPath: string;
+  osProfileId?: string | null;
   templateId?: string | null;
   bootMediaPath?: string | null;
   bootMediaBus?: BootMediaBus;
@@ -309,8 +316,108 @@ export interface UdpPortBinding {
 export interface VirtualDeviceInfo {
   id: string;
   name: string;
-  kind: "l2_switch" | "l1_hub";
+  kind: "l2_switch" | "l1_hub" | "dhcp_server" | "nat_gateway";
   ports: string[];
+}
+
+export interface DhcpServerConfig {
+  v4_enabled: boolean;
+  server_ip_v4: string;
+  subnet_mask_v4: string;
+  pool_start_v4: string;
+  pool_end_v4: string;
+  gateway_v4: string | null;
+  dns_v4: string;
+  domain_name: string;
+  lease_time_secs: number;
+  v6_enabled: boolean;
+  server_ip_v6: string;
+  prefix_len_v6: number;
+  pool_start_v6: string;
+  pool_end_v6: string;
+  gateway_v6: string | null;
+  dns_v6: string;
+  slaac_enabled: boolean;
+  advertise_default_route_v6: boolean;
+}
+
+export function createDefaultDhcpServerConfig(): DhcpServerConfig {
+  return {
+    v4_enabled: true,
+    server_ip_v4: "10.0.10.2",
+    subnet_mask_v4: "255.255.255.0",
+    pool_start_v4: "10.0.10.100",
+    pool_end_v4: "10.0.10.200",
+    gateway_v4: "10.0.10.1",
+    dns_v4: "1.1.1.1, 9.9.9.9",
+    domain_name: "lab.local",
+    lease_time_secs: 3600,
+    v6_enabled: true,
+    server_ip_v6: "fd00:10::2",
+    prefix_len_v6: 64,
+    pool_start_v6: "fd00:10::100",
+    pool_end_v6: "fd00:10::200",
+    gateway_v6: null,
+    dns_v6: "2606:4700:4700::1111, 2001:4860:4860::8888",
+    slaac_enabled: true,
+    advertise_default_route_v6: false,
+  };
+}
+
+export interface NatGatewayConfig {
+  enabled: boolean;
+  lan_ip_v4: string;
+  prefix_len_v4: number;
+  dhcp_enabled: boolean;
+  dhcp_pool_start_v4: string;
+  dhcp_pool_end_v4: string;
+  dns_proxy_enabled: boolean;
+  upstream_dns: string;
+  domain_name: string;
+  v6_enabled: boolean;
+  lan_ip_v6: string;
+  prefix_len_v6: number;
+  dhcp_pool_start_v6: string;
+  dhcp_pool_end_v6: string;
+}
+
+export function createDefaultNatGatewayConfig(): NatGatewayConfig {
+  return {
+    enabled: true,
+    lan_ip_v4: "10.0.2.1",
+    prefix_len_v4: 24,
+    dhcp_enabled: true,
+    dhcp_pool_start_v4: "10.0.2.15",
+    dhcp_pool_end_v4: "10.0.2.200",
+    dns_proxy_enabled: true,
+    upstream_dns: "",
+    domain_name: "wan.lab",
+    v6_enabled: true,
+    lan_ip_v6: "fd00:2::1",
+    prefix_len_v6: 64,
+    dhcp_pool_start_v6: "fd00:2::15",
+    dhcp_pool_end_v6: "fd00:2::200",
+  };
+}
+
+export interface DhcpLeaseEntry {
+  family: string;
+  ip: string;
+  clientId: string;
+  mac: string;
+  hostname: string | null;
+  expiresInSecs: number;
+  state: string;
+}
+
+export interface NatSessionEntry {
+  protocol: string;
+  clientAddr: string;
+  remoteAddr: string;
+  state: string;
+  txBytes: number;
+  rxBytes: number;
+  idleSecs: number;
 }
 
 export interface LinkSnapshot {
@@ -382,6 +489,8 @@ export interface TopologyNodeData extends Record<string, unknown> {
   vcpus: number | null;
   memoryMb: number | null;
   displayMode: VmDisplayMode;
+  dhcpConfig?: DhcpServerConfig | null;
+  natConfig?: NatGatewayConfig | null;
   ports: NodePort[];
   portStates?: Record<string, PortLinkState>;
   onToggleRun?: (nodeId: string) => void;
@@ -476,6 +585,8 @@ export interface WorkspaceNode {
   display_mode?: VmDisplayMode | null;
   notes?: string | null;
   position: { x: number; y: number };
+  dhcp_config?: DhcpServerConfig | null;
+  nat_config?: NatGatewayConfig | null;
   ports: WorkspacePort[];
 }
 
@@ -876,6 +987,7 @@ export interface CatalogDownloadProgressEvent {
   percent: number;
   message: string;
   error: string | null;
+  resolvedVersion?: string | null;
 }
 
 export interface DeleteCatalogImageResult {

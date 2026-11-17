@@ -97,14 +97,24 @@ export function CustomVmWizardModal({
       })
       .catch(() => setDiscoveredIsos([]));
     if (baseTemplates.length > 0 && !templateId) {
-      setTemplateId(baseTemplates[0].id);
+      const byProfile = baseTemplates.find(
+        (t) => t.osProfileId === osProfileId
+      );
+      if (byProfile) {
+        setTemplateId(byProfile.id);
+      }
     }
-  }, [open, baseTemplates, bootMediaPath, templateId]);
+  }, [open, baseTemplates, bootMediaPath, osProfileId, templateId]);
 
   if (!open) return null;
 
-  const handleSelectProfile = (id: string) => {
+  const handleSelectProfile = (id: string, overrideTemplateId?: string) => {
     setOsProfileId(id);
+    setTemplateId(
+      overrideTemplateId ??
+        baseTemplates.find((t) => t.osProfileId === id)?.id ??
+        ""
+    );
     const prof = osProfiles.find((p) => p.id === id);
     if (prof) {
       setGuestFamily(prof.guestFamily);
@@ -118,6 +128,19 @@ export function CustomVmWizardModal({
       if (hostname.endsWith("-install1") || hostname.startsWith("vm")) {
         setHostname(`${prof.id}-1`);
       }
+    }
+  };
+
+  const handleSelectTemplate = (nextTplId: string) => {
+    setTemplateId(nextTplId);
+    const chosen = baseTemplates.find((t) => t.id === nextTplId);
+    if (
+      chosen &&
+      chosen.osProfileId &&
+      chosen.description !== "Discovered qcow2 base template" &&
+      chosen.osProfileId !== osProfileId
+    ) {
+      handleSelectProfile(chosen.osProfileId, chosen.id);
     }
   };
 
@@ -468,9 +491,10 @@ export function CustomVmWizardModal({
                   </span>
                   <select
                     value={templateId}
-                    onChange={(e) => setTemplateId(e.target.value)}
+                    onChange={(e) => handleSelectTemplate(e.target.value)}
                     className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800"
                   >
+                    <option value="">-- Choose a Base Template --</option>
                     {baseTemplates.map((tpl) => (
                       <option key={tpl.id} value={tpl.id}>
                         {tpl.name} ({tpl.filename})

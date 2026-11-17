@@ -306,6 +306,7 @@ struct StorageInner {
     volumes_root: PathBuf,
     config: RwLock<StorageConfig>,
     last_status: RwLock<StorageStatus>,
+    last_emitted: RwLock<Option<(StorageConfig, StorageStatus)>>,
     app_handle: RwLock<Option<AppHandle>>,
 }
 
@@ -335,6 +336,7 @@ impl StorageManager {
                 volumes_root,
                 config: RwLock::new(loaded_cfg),
                 last_status: RwLock::new(StorageStatus::Ready),
+                last_emitted: RwLock::new(None),
                 app_handle: RwLock::new(None),
             }),
         };
@@ -430,6 +432,10 @@ impl StorageManager {
     /// Checks volume mount status and (if and only if mounted!) ensures `templates_dir`, `isos_dir`,
     /// and `workspaces_dir` exist. Never panics; gracefully reports `StorageStatus::VolumeDisconnected`.
     pub async fn refresh_and_snapshot(&self) -> StorageStateSnapshot {
+        self.refresh_snapshot_inner(false).await
+    }
+
+    async fn refresh_snapshot_inner(&self, force_emit: bool) -> StorageStateSnapshot {
         let cfg = self.inner.config.read().await.clone();
         let resolved = self.resolve_for_config(&cfg);
 
@@ -482,6 +488,18 @@ impl StorageManager {
             *guard = status.clone();
         }
 
+        let should_emit = {
+            let next_pair = (cfg.clone(), status.clone());
+            let mut guard = self.inner.last_emitted.write().await;
+            let changed = guard.as_ref() != Some(&next_pair);
+            if force_emit || changed {
+                *guard = Some(next_pair);
+                true
+            } else {
+                false
+            }
+        };
+
         let snapshot = StorageStateSnapshot {
             config: cfg,
             default_storage_root: self.default_storage_root().display().to_string(),
@@ -495,13 +513,15 @@ impl StorageManager {
             disk_telemetry,
         };
 
-        self.emit_status_snapshot(&snapshot).await;
+        if should_emit {
+            self.emit_status_snapshot(&snapshot).await;
+        }
         snapshot
     }
 
     /// Guard helper called by `ImageStore` before reading/writing heavy directories.
     pub async fn require_ready_paths(&self) -> Result<ResolvedStoragePaths, String> {
-        let snapshot = self.refresh_and_snapshot().await;
+        let snapshot = self.refresh_snapshot_inner(false).await;
         match snapshot.status {
             StorageStatus::Ready => Ok(self.resolved_paths().await),
             StorageStatus::VolumeDisconnected {
@@ -528,7 +548,7 @@ impl StorageManager {
             let mut guard = self.inner.config.write().await;
             *guard = default_cfg;
         }
-        Ok(self.refresh_and_snapshot().await)
+        Ok(self.refresh_snapshot_inner(true).await)
     }
 
     /// Updates `StorageConfig` using either `SwitchOnly` or `MoveExistingData` (with live progress events,
@@ -736,7 +756,7 @@ impl StorageManager {
 
         let templates_discovered = count_files_with_exts(&target_resolved.templates_dir, &["qcow2"]);
         let isos_discovered = count_files_with_exts(&target_resolved.isos_dir, &["iso", "img", "raw"]);
-        let snapshot = self.refresh_and_snapshot().await;
+        let snapshot = self.refresh_snapshot_inner(true).await;
 
         Ok(StorageMigrationResult {
             snapshot,
@@ -1043,6 +1063,50 @@ mod tests {
         assert_eq!(fs::metadata(&migrated_qcow2).unwrap().len(), 4096);
         assert!(fs::metadata(&migrated_qcow2).unwrap().permissions().readonly());
         assert!(!sample_qcow2.exists());
+
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    #[tokio::test]
+    async fn status_snapshot_tracks_last_emitted_pair_without_redundant_churn() {
+        let sandbox =
+            std::env::temp_dir().join(format!("etherloom-storage-dedup-test-{}", Uuid::new_v4()));
+        let app_support = sandbox.join("AppSupport/Etherloom");
+        let fake_volumes = sandbox.join("FakeVolumes");
+        fs::create_dir_all(&fake_volumes).unwrap();
+
+        let mgr = StorageManager::new(app_support, fake_volumes);
+        assert!(mgr.inner.last_emitted.read().await.is_none());
+
+        let snap1 = mgr.refresh_and_snapshot().await;
+        assert_eq!(snap1.status, StorageStatus::Ready);
+        let pair1 = mgr.inner.last_emitted.read().await.clone();
+        assert_eq!(pair1, Some((snap1.config.clone(), StorageStatus::Ready)));
+
+        // Repeated read-only path checks keep `last_emitted` stable without churning
+        let _ = mgr.require_ready_paths().await.unwrap();
+        let pair2 = mgr.inner.last_emitted.read().await.clone();
+        assert_eq!(pair1, pair2);
+
+        // Switching to a new path updates `last_emitted` to the new StorageConfig
+        let next_root = sandbox.join("CustomLib");
+        let res = mgr
+            .update_storage_location(UpdateStorageRequest {
+                storage_root: next_root.display().to_string(),
+                templates_dir_override: None,
+                isos_dir_override: None,
+                workspaces_dir_override: None,
+                mode: StorageMigrationMode::SwitchOnly,
+                delete_source_after_verify: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(res.snapshot.config.storage_root, next_root.display().to_string());
+        let pair3 = mgr.inner.last_emitted.read().await.clone();
+        assert_eq!(
+            pair3,
+            Some((res.snapshot.config.clone(), StorageStatus::Ready))
+        );
 
         let _ = fs::remove_dir_all(&sandbox);
     }

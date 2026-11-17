@@ -87,34 +87,37 @@ import {
   updateStorageLocation,
   writeSerialCommand,
 } from "./services/tauriBridge";
-import type {
-  AcademyLabDetail,
-  AcademyLabSummary,
-  BaseTemplateInfo,
-  CaptureFileInfo,
-  CatalogComponent,
-  ConsoleTabSession,
-  EnvDoctorReport,
-  GuestFamily,
-  NodeRunStatus,
-  OsCatalogEntryDto,
-  OsProfile,
-  PortLinkState,
-  StorageMigrationProgress,
-  StorageStateSnapshot,
-  TcpflowyEnvStatus,
-  TcpflowyInstallProgress,
-  TopologyNodeData,
-  UpdateStorageRequest,
-  VmConsoleSubMode,
-  VmDisplayMode,
-  VmInstanceInfo,
-  WireEdgeData,
+import {
+  createDefaultDhcpServerConfig,
+  createDefaultNatGatewayConfig,
+  type AcademyLabDetail,
+  type AcademyLabSummary,
+  type BaseTemplateInfo,
+  type CaptureFileInfo,
+  type CatalogComponent,
+  type ConsoleTabSession,
+  type EnvDoctorReport,
+  type GuestFamily,
+  type NodeRunStatus,
+  type OsCatalogEntryDto,
+  type OsProfile,
+  type PortLinkState,
+  type StorageMigrationProgress,
+  type StorageStateSnapshot,
+  type TcpflowyEnvStatus,
+  type TcpflowyInstallProgress,
+  type TopologyNodeData,
+  type UpdateStorageRequest,
+  type VmConsoleSubMode,
+  type VmDisplayMode,
+  type VmInstanceInfo,
+  type WireEdgeData,
 } from "./types/studio";
 import {
   buildNodePorts,
   flowNodeToWorkspaceNode,
   flowToTopologyDocument,
+  resolveTemplateProfileMismatch,
   topologyDocumentToFlow,
 } from "./utils/topology";
 
@@ -522,11 +525,50 @@ export function App() {
     try {
       const tpls = await listBaseTemplates();
       setBaseTemplates(tpls);
+      setNodes((curr) => {
+        let changed = false;
+        const next = curr.map((n) => {
+          if (
+            n.data.kind !== "vm" ||
+            !n.data.osProfileId ||
+            n.data.bootMediaPath ||
+            n.data.status === "running" ||
+            n.data.status === "booting"
+          ) {
+            return n;
+          }
+          const mismatched = resolveTemplateProfileMismatch(
+            n.data.osProfileId,
+            n.data.templateId,
+            tpls
+          );
+          if (!n.data.templateId || mismatched) {
+            const matchedTpl =
+              tpls.find((t) => t.osProfileId === n.data.osProfileId)?.id ??
+              null;
+            const nextTplId = mismatched
+              ? matchedTpl
+              : matchedTpl ?? n.data.templateId;
+            if ((nextTplId ?? null) !== (n.data.templateId ?? null)) {
+              changed = true;
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  templateId: nextTplId,
+                },
+              };
+            }
+          }
+          return n;
+        });
+        return changed ? next : curr;
+      });
     } catch {
       setBaseTemplates([]);
     }
     void refreshAcademyLabs();
-  }, [refreshAcademyLabs]);
+  }, [refreshAcademyLabs, setNodes]);
 
   const handleChangeShowWelcomeOnStartup = useCallback((show: boolean) => {
     setShowWelcomeOnStartup(show);
@@ -537,10 +579,27 @@ export function App() {
     }
   }, []);
 
+  const lastStorageSignatureRef = useRef<string>("");
+
+  const computeStorageSignature = useCallback(
+    (snap: StorageStateSnapshot | null) => {
+      if (!snap) return "";
+      const st =
+        snap.status.state === "volumeDisconnected"
+          ? `disconnected:${snap.status.volumeName}:${snap.status.expectedPath}`
+          : snap.status.state === "error"
+          ? `error:${snap.status.message}`
+          : "ready";
+      return `${snap.config.storageRoot}|${snap.config.templatesDirOverride ?? ""}|${snap.config.isosDirOverride ?? ""}|${snap.config.workspacesDirOverride ?? ""}|${st}`;
+    },
+    []
+  );
+
   const loadStorage = useCallback(async () => {
     const snap = await getStorageState();
+    lastStorageSignatureRef.current = computeStorageSignature(snap);
     setStorageState(snap);
-  }, []);
+  }, [computeStorageSignature]);
 
   // Reconciles React VM node status badges against ground-truth `VmManager::list_vms()`
   // so missed IPC events, Vite HMR reloads, or dev backend restarts never leave nodes stuck in "booting".
@@ -633,6 +692,12 @@ export function App() {
     void refreshCaptures(bundlePath);
   }, [bundlePath, refreshCaptures]);
 
+  const refreshTcpflowyStatus = useCallback(() => {
+    void getTcpflowyStatus()
+      .then(setTcpflowyStatus)
+      .catch(() => {});
+  }, []);
+
   const handleInstallTcpflowy = useCallback(async () => {
     setInstallingTcpflowy(true);
     setTcpflowyProgress({
@@ -652,12 +717,13 @@ export function App() {
         showToast("error", st.message);
       }
     } catch (err: unknown) {
+      refreshTcpflowyStatus();
       showToast("error", err instanceof Error ? err.message : String(err));
     } finally {
       setInstallingTcpflowy(false);
       setTcpflowyProgress(null);
     }
-  }, [showToast]);
+  }, [refreshTcpflowyStatus, showToast]);
 
   // Initial bootstrap + Tauri event subscriptions
   useEffect(() => {
@@ -680,8 +746,13 @@ export function App() {
 
     void onStorageStatusChanged((snap) => {
       if (disposed) return;
+      const nextSig = computeStorageSignature(snap);
+      const changed = nextSig !== lastStorageSignatureRef.current;
+      lastStorageSignatureRef.current = nextSig;
       setStorageState(snap);
-      void refreshTemplates();
+      if (changed) {
+        void refreshTemplates();
+      }
     }).then((fn) => {
       if (disposed) fn();
       else unlistenStorage = fn;
@@ -847,6 +918,7 @@ export function App() {
       unlistenMetrics?.();
     };
   }, [
+    computeStorageSignature,
     loadDiagnostics,
     loadStorage,
     reconcileVmStates,
@@ -889,10 +961,17 @@ export function App() {
     };
   }, [anyVmActiveOrBooting, reconcileVmStates]);
 
-  // Keep PacketFabric switches, hubs, UDP endpoints, and wires synchronized when topology structure changes
+  // Keep PacketFabric switches, hubs, DHCP/NAT appliances, UDP endpoints, and wires synchronized when topology or appliance config changes
   const structuralKey = useMemo(() => {
     const nk = nodes
-      .map((n) => `${n.id}:${n.data.kind}:${n.data.ports.map((p) => p.id).join(",")}`)
+      .map(
+        (n) =>
+          `${n.id}:${n.data.kind}:${n.data.ports
+            .map((p) => p.id)
+            .join(",")}:${JSON.stringify(
+            n.data.dhcpConfig ?? null
+          )}:${JSON.stringify(n.data.natConfig ?? null)}`
+      )
       .join("|");
     const ek = edges
       .map(
@@ -923,31 +1002,34 @@ export function App() {
     setStorageBusy(true);
     try {
       const snap = await retryStorageDetection();
+      lastStorageSignatureRef.current = computeStorageSignature(snap);
       setStorageState(snap);
       void refreshTemplates();
       void loadDiagnostics(true);
     } finally {
       setStorageBusy(false);
     }
-  }, [loadDiagnostics, refreshTemplates]);
+  }, [computeStorageSignature, loadDiagnostics, refreshTemplates]);
 
   const handleFallbackInternalStorage = useCallback(async () => {
     setStorageBusy(true);
     try {
       const snap = await fallbackToDefaultStorage();
+      lastStorageSignatureRef.current = computeStorageSignature(snap);
       setStorageState(snap);
       void refreshTemplates();
       void loadDiagnostics(true);
     } finally {
       setStorageBusy(false);
     }
-  }, [loadDiagnostics, refreshTemplates]);
+  }, [computeStorageSignature, loadDiagnostics, refreshTemplates]);
 
   const handleApplyStorageUpdate = useCallback(
     async (request: UpdateStorageRequest) => {
       setMigrationProgress(null);
       try {
         const res = await updateStorageLocation(request);
+        lastStorageSignatureRef.current = computeStorageSignature(res.snapshot);
         setStorageState(res.snapshot);
         void refreshTemplates();
         void loadDiagnostics(true);
@@ -956,7 +1038,7 @@ export function App() {
         setMigrationProgress(null);
       }
     },
-    [loadDiagnostics, refreshTemplates]
+    [computeStorageSignature, loadDiagnostics, refreshTemplates]
   );
 
   const handleCloseVmConsoleTab = useCallback((nodeId: string) => {
@@ -1597,6 +1679,10 @@ export function App() {
             ? "sw"
             : component.kind === "l1_hub"
             ? "hub"
+            : component.kind === "dhcp_server"
+            ? "dhcp"
+            : component.kind === "nat_gateway"
+            ? "wan"
             : component.osProfileId?.split("-")[0] ??
               component.guestFamily ??
               "vm";
@@ -1641,6 +1727,14 @@ export function App() {
             vcpus: component.defaultVcpus,
             memoryMb: component.defaultMemoryMb,
             displayMode: "vnc",
+            dhcpConfig:
+              component.kind === "dhcp_server"
+                ? createDefaultDhcpServerConfig()
+                : null,
+            natConfig:
+              component.kind === "nat_gateway"
+                ? createDefaultNatGatewayConfig()
+                : null,
             ports: buildNodePorts({
               nodeId,
               kind: component.kind,
@@ -2567,6 +2661,7 @@ export function App() {
             onSelectPcap={setSelectedPcapPath}
             onRefreshCaptures={() => refreshCaptures()}
             onInstallTcpflowy={handleInstallTcpflowy}
+            onRefreshTcpflowyStatus={refreshTcpflowyStatus}
             onOpenSettingsTcpflowy={() => {
               setSettingsInitialSection("tcpflowy");
               setSettingsModalOpen(true);

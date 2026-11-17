@@ -12,6 +12,7 @@ import type {
   CatalogDownloadProgressEvent,
   ConsoleSessionEndpoints,
   DeleteCatalogImageResult,
+  DhcpLeaseEntry,
   DiskInfo,
   DiskTelemetry,
   DissectPcapRequest,
@@ -22,6 +23,7 @@ import type {
   LinkSnapshot,
   LiveWiresharkSessionInfo,
   MacTableEntry,
+  NatSessionEntry,
   NodeDiskStatusDto,
   OsCatalogEntryDto,
   OsProfile,
@@ -145,6 +147,32 @@ const FALLBACK_CATALOG: CatalogComponent[] = [
     osProfileId: null,
     nicPrefix: "p",
     defaultPorts: 6,
+    defaultVcpus: null,
+    defaultMemoryMb: null,
+    consoleModes: ["inspector"],
+  },
+  {
+    id: "fabric-dhcp-server",
+    name: "DHCPv4 / DHCPv6 Server",
+    subtitle: "10.0.10.0/24 + fd00:10::/64 • Instant dual-stack appliance",
+    kind: "dhcp_server",
+    guestFamily: null,
+    osProfileId: null,
+    nicPrefix: "p",
+    defaultPorts: 1,
+    defaultVcpus: null,
+    defaultMemoryMb: null,
+    consoleModes: ["inspector"],
+  },
+  {
+    id: "fabric-nat-gateway",
+    name: "Internet Gateway (Host NAT)",
+    subtitle: "10.0.2.1/24 • Zero-root WAN uplink + DNS & DHCP",
+    kind: "nat_gateway",
+    guestFamily: null,
+    osProfileId: null,
+    nicPrefix: "p",
+    defaultPorts: 1,
     defaultVcpus: null,
     defaultMemoryMb: null,
     consoleModes: ["inspector"],
@@ -900,6 +928,38 @@ export async function fabricClearSwitchMacTable(
     return;
   }
   return invoke<void>("fabric_clear_switch_mac_table", { switchId });
+}
+
+export async function fabricGetDhcpLeases(
+  deviceId: string
+): Promise<DhcpLeaseEntry[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invoke<DhcpLeaseEntry[]>("fabric_get_dhcp_leases", { deviceId });
+}
+
+export async function fabricClearDhcpLeases(deviceId: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke<void>("fabric_clear_dhcp_leases", { deviceId });
+}
+
+export async function fabricGetNatSessions(
+  deviceId: string
+): Promise<NatSessionEntry[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invoke<NatSessionEntry[]>("fabric_get_nat_sessions", { deviceId });
+}
+
+export async function fabricClearNatSessions(deviceId: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  return invoke<void>("fabric_clear_nat_sessions", { deviceId });
 }
 
 // -----------------------------------------------------------------------------
@@ -2100,7 +2160,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
   {
     id: "freebsd",
     name: "FreeBSD",
-    version: "14.2-RELEASE ARM64",
+    version: "Latest RELEASE (ARM64)",
     category: "BSD Family",
     guestFamily: "freebsd",
     osProfileId: "freebsd",
@@ -2114,13 +2174,12 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
     recommendedDiskGb: 12,
     estimatedDownloadMb: 620,
     deliveryKind: "direct_template",
-    downloadUrl:
-      "https://download.freebsd.org/releases/VM-IMAGES/14.2-RELEASE/aarch64/Latest/FreeBSD-14.2-RELEASE-arm64-aarch64.qcow2.xz",
+    downloadUrl: "https://download.freebsd.org/releases/VM-IMAGES/",
     checksumUrl: null,
     officialSiteUrl: "https://www.freebsd.org/where/",
     defaultCredentials: "root (no password)",
     summary:
-      "Official FreeBSD 14.2 ARM64 VM image featuring VNET jails, pf/ipfw, dummynet, CARP, and ZFS.",
+      "Official FreeBSD ARM64 VM image featuring VNET jails, pf/ipfw, dummynet, CARP, and ZFS.",
     quirksAndTips: [
       "VirtIO NICs appear as `vtnet0`, `vtnet1`; Intel e1000 NICs appear as `em0`, `em1`.",
     ],
@@ -2135,7 +2194,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
   {
     id: "openbsd",
     name: "OpenBSD",
-    version: "7.6 ARM64",
+    version: "Latest RELEASE (ARM64)",
     category: "BSD Family",
     guestFamily: "openbsd",
     osProfileId: "openbsd",
@@ -2149,14 +2208,14 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
     recommendedDiskGb: 8,
     estimatedDownloadMb: 495,
     deliveryKind: "guided_installer",
-    downloadUrl: "https://cdn.openbsd.org/pub/OpenBSD/7.6/arm64/install76.img",
-    checksumUrl: "https://cdn.openbsd.org/pub/OpenBSD/7.6/arm64/SHA256",
+    downloadUrl: "https://cdn.openbsd.org/pub/OpenBSD/",
+    checksumUrl: null,
     officialSiteUrl: "https://www.openbsd.org/arm64.html",
     defaultCredentials: "root (set during 2-minute installer)",
     summary:
       "Reference platform for pf stateful firewalling, CARP + pfsync HA, OpenBGPD, ospfd, and relayd.",
     quirksAndTips: [
-      "OpenBSD ships verified installer images (`install76.img` + `SHA256`) rather than pre-baked cloud disks.",
+      "OpenBSD ships verified installer images (`installXX.img` + `SHA256`) rather than pre-baked cloud disks.",
       "Click 'Launch Guided Template Setup' — at `boot>` type `set tty com0`, install to `sd0`, and run `halt -p` to auto-promote!",
     ],
     availability: "not_downloaded",
@@ -2170,7 +2229,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
   {
     id: "netbsd",
     name: "NetBSD",
-    version: "10.1 evbarm-aarch64",
+    version: "Latest RELEASE (ARM64)",
     category: "BSD Family",
     guestFamily: "netbsd",
     osProfileId: "netbsd",
@@ -2184,8 +2243,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
     recommendedDiskGb: 6,
     estimatedDownloadMb: 330,
     deliveryKind: "direct_template",
-    downloadUrl:
-      "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/evbarm-aarch64/binary/gzimg/arm64.img.gz",
+    downloadUrl: "https://cdn.netbsd.org/pub/NetBSD/",
     checksumUrl: null,
     officialSiteUrl: "https://wiki.netbsd.org/ports/evbarm/",
     defaultCredentials: "root (no password)",
@@ -2205,7 +2263,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
   {
     id: "openwrt",
     name: "OpenWrt",
-    version: "23.05.5 armsr/armv8",
+    version: "24.10 EFI (ARM64)",
     category: "Routers & Firewalls",
     guestFamily: "linux",
     osProfileId: "openwrt",
@@ -2427,7 +2485,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
     estimatedDownloadMb: 460,
     deliveryKind: "direct_template",
     downloadUrl:
-      "https://downloads.omnios.org/media/stable/omnios-r151052.cloud.qcow2.xz",
+      "https://downloads.omnios.org/media/lts/omnios-r151054.cloud.qcow2",
     checksumUrl: null,
     officialSiteUrl: "https://omnios.org/",
     defaultCredentials: "root (no password on console)",
@@ -2497,7 +2555,7 @@ const BROWSER_FALLBACK_OS_CATALOG: OsCatalogEntryDto[] = [
     estimatedDownloadMb: 820,
     deliveryKind: "guided_installer",
     downloadUrl:
-      "https://eu.hpkg.haiku-os.org/haiku/release/r1beta5/haiku-r1beta5-x86_64-anyboot.iso",
+      "https://ftp.osuosl.org/pub/haiku/r1beta5/haiku-r1beta5-x86_64-anyboot.iso",
     checksumUrl: null,
     officialSiteUrl: "https://www.haiku-os.org/",
     defaultCredentials: "user (graphical BeOS-style desktop via Embedded VNC)",
@@ -2687,7 +2745,8 @@ export async function listCatalogEntries(): Promise<OsCatalogEntryDto[]> {
 
 export async function startCatalogDownload(
   catalogId: string,
-  customUrl?: string | null
+  customUrl?: string | null,
+  customSha256?: string | null
 ): Promise<void> {
   if (!isTauriRuntime()) {
     const hit = BROWSER_FALLBACK_OS_CATALOG.find((e) => e.id === catalogId);
@@ -2709,6 +2768,7 @@ export async function startCatalogDownload(
     request: {
       catalogId,
       customUrl: customUrl?.trim() ? customUrl.trim() : null,
+      customSha256: customSha256?.trim() ? customSha256.trim() : null,
     },
   });
 }
@@ -2808,8 +2868,10 @@ export async function onCatalogDownloadProgress(
     const rawStage = String(p.stage ?? "downloading");
     const stageLower = rawStage.toLowerCase();
     const normalizedStage =
-      stageLower === "ready" || stageLower === "installerready"
+      stageLower === "ready"
         ? "ready"
+        : stageLower === "installerready" || stageLower === "installer_ready"
+        ? "installer_ready"
         : stageLower === "cancelled"
         ? "cancelled"
         : stageLower === "error"
@@ -2823,6 +2885,8 @@ export async function onCatalogDownloadProgress(
       percent: typeof p.percent === "number" ? p.percent : 0,
       message: String(p.message ?? ""),
       error: typeof p.error === "string" ? p.error : null,
+      resolvedVersion:
+        typeof p.resolvedVersion === "string" ? p.resolvedVersion : null,
     });
   });
 }

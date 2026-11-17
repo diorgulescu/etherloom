@@ -60,6 +60,7 @@ pub enum CatalogAvailability {
 pub struct OsCatalogEntryDto {
     pub id: String,
     pub name: String,
+    pub version: String,
     pub tagline: String,
     pub category: CatalogCategory,
     pub os_profile_id: String,
@@ -101,6 +102,8 @@ pub struct CatalogDownloadProgressEvent {
     pub percent: Option<f64>,
     pub message: String,
     pub error: Option<String>,
+    #[serde(default)]
+    pub resolved_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,8 +111,14 @@ pub struct CatalogDownloadProgressEvent {
 pub struct CatalogDownloadRequest {
     pub catalog_id: String,
     /// Optional custom mirror URL (`https://...`) overriding automatic upstream mirror discovery.
+    /// Plain `http://` is only accepted for loopback hosts (local mirrors); every other scheme
+    /// (`file://`, `ftp://`, …) is rejected.
     #[serde(default)]
     pub custom_url: Option<String>,
+    /// Optional expected SHA-256 (64 hex chars) of the artifact at `custom_url`; when supplied,
+    /// the downloaded file is verified against it before extraction/conversion.
+    #[serde(default)]
+    pub custom_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +141,7 @@ pub struct DeleteCatalogImageResult {
 struct StaticCatalogSpec {
     id: &'static str,
     name: &'static str,
+    default_version: &'static str,
     tagline: &'static str,
     category: CatalogCategory,
     os_profile_id: &'static str,
@@ -152,6 +162,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     StaticCatalogSpec {
         id: "alpine-linux",
         name: "Alpine Linux",
+        default_version: "Latest Stable (ARM64)",
         tagline: "Ultra-fast musl/BusyBox ARM64 cloud router & packet generator",
         category: CatalogCategory::Linux,
         os_profile_id: "alpine-linux",
@@ -161,11 +172,11 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
         delivery_kind: CatalogDeliveryKind::ReadyToBoot,
         template_stem: "alpine-aarch64-base",
         installer_match_prefixes: &["alpine-"],
-        default_credentials: "root (no password on serial console)",
+        default_credentials: "root (no password) • or alpine / alpine",
         official_url: "https://alpinelinux.org/cloud/",
         upstream_source_label: "dl-cdn.alpinelinux.org (aarch64 UEFI nocloud qcow2)",
         quirks_and_tips: &[
-            "Boots to root login in ~2 seconds under Apple Hypervisor.framework (-accel hvf).",
+            "Boots to root login in ~2 seconds under Apple Hypervisor.framework (-accel hvf); Etherloom auto-attaches a NoCloud `cidata` seed to unlock passwordless `root` (and `alpine` / `alpine`).",
             "Uses `ip addr`, `ip route`, `tcpdump`, `iperf3`, and `apk` for lightweight routing & host labs.",
             "Interfaces enumerate deterministically as `eth0`, `eth1`, … matching canvas port handles.",
         ],
@@ -173,7 +184,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 2. Debian Cloud (Generic Linux)
     StaticCatalogSpec {
         id: "debian-linux",
-        name: "Debian 12 Cloud (Generic Linux)",
+        name: "Debian Cloud (Generic Linux)",
+        default_version: "12 Bookworm (ARM64)",
         tagline: "Full systemd/glibc ARM64 Linux stack for FRRouting, nftables & namespaces",
         category: CatalogCategory::Linux,
         os_profile_id: "debian-linux",
@@ -195,7 +207,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 3. FreeBSD
     StaticCatalogSpec {
         id: "freebsd",
-        name: "FreeBSD 14 RELEASE",
+        name: "FreeBSD",
+        default_version: "Latest RELEASE (ARM64)",
         tagline: "Production ARM64 BSD UNIX with PF/IPFW, VNET jails, CARP & dummynet",
         category: CatalogCategory::BsdFamily,
         os_profile_id: "freebsd",
@@ -218,6 +231,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     StaticCatalogSpec {
         id: "openbsd",
         name: "OpenBSD",
+        default_version: "Latest RELEASE (ARM64)",
         tagline: "Gold-standard security & routing OS: PF, CARP, pfsync, OpenBGPD & ospfd",
         category: CatalogCategory::BsdFamily,
         os_profile_id: "openbsd",
@@ -232,7 +246,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
         estimated_download_mb: 480,
         delivery_kind: CatalogDeliveryKind::GuidedInstaller,
         template_stem: "openbsd-aarch64-base",
-        installer_match_prefixes: &["openbsd-", "install7"],
+        installer_match_prefixes: &["openbsd-", "install7", "install8"],
         default_credentials: "Set during 2-minute Guided Setup (`root`)",
         official_url: "https://www.openbsd.org/",
         upstream_source_label: "cdn.openbsd.org (official arm64 installXX.img + SHA256)",
@@ -245,7 +259,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 5. NetBSD
     StaticCatalogSpec {
         id: "netbsd",
-        name: "NetBSD 10",
+        name: "NetBSD",
+        default_version: "Latest RELEASE (ARM64)",
         tagline: "Clean, ultra-portable BSD UNIX with NPF firewall & rumpkernel heritage",
         category: CatalogCategory::BsdFamily,
         os_profile_id: "netbsd",
@@ -262,7 +277,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
         installer_match_prefixes: &["netbsd-", "arm64.img"],
         default_credentials: "root (no password)",
         official_url: "https://www.netbsd.org/",
-        upstream_source_label: "cdn.netbsd.org (NetBSD 10.1 evbarm-aarch64 arm64.img.gz)",
+        upstream_source_label: "cdn.netbsd.org (evbarm-aarch64 arm64.img.gz)",
         quirks_and_tips: &[
             "Official `arm64.img.gz` boots directly via UEFI and automatically resizes its root partition on first boot.",
             "VirtIO NICs appear as `vioif0`, `vioif1`; Intel PRO/1000 (`e1000`) NICs appear as `wm0`, `wm1`.",
@@ -272,7 +287,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 6. OpenWrt
     StaticCatalogSpec {
         id: "openwrt",
-        name: "OpenWrt (ARM64 EFI)",
+        name: "OpenWrt",
+        default_version: "24.10 EFI (ARM64)",
         tagline: "Embedded wireless/SOHO Linux router with UCI config, nftables fw4 & LuCI",
         category: CatalogCategory::RoutersAndFirewalls,
         os_profile_id: "openwrt",
@@ -294,7 +310,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 7. MikroTik RouterOS CHR
     StaticCatalogSpec {
         id: "mikrotik-chr",
-        name: "MikroTik RouterOS CHR (v7 ARM64)",
+        name: "MikroTik RouterOS CHR",
+        default_version: "v7 Stable (ARM64)",
         tagline: "ISP-grade ARM64 Cloud Hosted Router: OSPF, BGP, MPLS, VRF & VXLAN",
         category: CatalogCategory::RoutersAndFirewalls,
         os_profile_id: "mikrotik-chr",
@@ -316,7 +333,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 8. VyOS
     StaticCatalogSpec {
         id: "vyos",
-        name: "VyOS (Rolling / Stream)",
+        name: "VyOS",
+        default_version: "Stream Rolling (x86_64)",
         tagline: "Enterprise Junos-style commit/rollback CLI router built on Debian + FRR",
         category: CatalogCategory::RoutersAndFirewalls,
         os_profile_id: "vyos",
@@ -338,7 +356,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 9. 9front (Plan 9)
     StaticCatalogSpec {
         id: "9front",
-        name: "9front (Plan 9 from Bell Labs)",
+        name: "9front (Plan 9)",
+        default_version: "Latest Release (ARM64)",
         tagline: "Native ARM64 HVF research OS where the network stack is a synthetic `/net` filesystem!",
         category: CatalogCategory::ResearchUnixAndRetro,
         os_profile_id: "9front",
@@ -360,7 +379,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 10. OPNsense
     StaticCatalogSpec {
         id: "opnsense",
-        name: "OPNsense (`nano` Serial Appliance)",
+        name: "OPNsense",
+        default_version: "Nano Serial (x86_64)",
         tagline: "Pre-installed x86_64 FreeBSD firewall appliance with serial console & WebGUI",
         category: CatalogCategory::RoutersAndFirewalls,
         os_profile_id: "opnsense",
@@ -383,6 +403,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     StaticCatalogSpec {
         id: "pfsense",
         name: "pfSense Community Edition",
+        default_version: "CE Manual Import (x86_64)",
         tagline: "Classic enterprise FreeBSD x86_64 stateful firewall, HAProxy & VPN gateway",
         category: CatalogCategory::RoutersAndFirewalls,
         os_profile_id: "pfsense",
@@ -404,7 +425,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 12. OmniOS (Illumos / OpenSolaris)
     StaticCatalogSpec {
         id: "omnios",
-        name: "OmniOS LTS (Illumos / OpenSolaris)",
+        name: "OmniOS (Illumos)",
+        default_version: "LTS Cloud (x86_64)",
         tagline: "Solaris-heritage x86_64 UNIX with Crossbow VNICs (`dladm`/`ipadm`), ZFS & DTrace",
         category: CatalogCategory::ResearchUnixAndRetro,
         os_profile_id: "omnios",
@@ -416,7 +438,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
         installer_match_prefixes: &["omnios-"],
         default_credentials: "root (empty password on console)",
         official_url: "https://omnios.org/",
-        upstream_source_label: "mirror.omnios.org (OmniOS LTS cloud qcow2.xz)",
+        upstream_source_label: "downloads.omnios.org (OmniOS LTS / Stable cloud qcow2)",
         quirks_and_tips: &[
             "Brings Solaris Crossbow network virtualization to your Mac: create virtual switches (`etherstub`) and bandwidth-capped VNICs via `dladm create-vnic` and `ipadm create-addr`!",
             "Trace kernel TCP state transitions live in real time using `dtrace -n 'tcp:::state-change { ... }'`.",
@@ -427,6 +449,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     StaticCatalogSpec {
         id: "dragonflybsd",
         name: "DragonFly BSD",
+        default_version: "6.4 REL (x86_64)",
         tagline: "x86_64 BSD pioneer featuring lockless per-CPU LWKT network routing & HAMMER2",
         category: CatalogCategory::BsdFamily,
         os_profile_id: "dragonflybsd",
@@ -448,7 +471,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 14. Haiku OS
     StaticCatalogSpec {
         id: "haiku",
-        name: "Haiku OS (R1/beta5)",
+        name: "Haiku OS",
+        default_version: "R1/beta5 (x86_64)",
         tagline: "Lightning-responsive BeOS-inspired desktop OS with clean POSIX networking",
         category: CatalogCategory::ResearchUnixAndRetro,
         os_profile_id: "haiku",
@@ -460,7 +484,7 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
         installer_match_prefixes: &["haiku-"],
         default_credentials: "Auto-logs into Haiku graphical desktop (`user`)",
         official_url: "https://www.haiku-os.org/",
-        upstream_source_label: "cdn.haiku-os.org (Haiku R1/beta5 x86_64 anyboot image)",
+        upstream_source_label: "ftp.osuosl.org / mirror.rit.edu (Haiku R1/beta5 x86_64 anyboot)",
         quirks_and_tips: &[
             "Haiku's `anyboot` image converts directly into a bootable `qcow2` Golden Template — open the Embedded VNC tab to use the full yellow-tabbed BeOS desktop!",
             "Intel `e1000` NICs enumerate under `/dev/net/ipro1000/0`; configure via `ifconfig /dev/net/ipro1000/0 10.0.1.50 netmask 255.255.255.0 up` or the GUI Network Preferences.",
@@ -470,7 +494,8 @@ const STATIC_CATALOG: &[StaticCatalogSpec] = &[
     // 15. FreeDOS + mTCP
     StaticCatalogSpec {
         id: "freedos",
-        name: "FreeDOS 1.3 + mTCP",
+        name: "FreeDOS + mTCP",
+        default_version: "1.3 LiveCD (i386)",
         tagline: "32 MB RAM i386 retro DOS lab host — zero background ARP/IPv6/mDNS noise on Wireshark!",
         category: CatalogCategory::ResearchUnixAndRetro,
         os_profile_id: "freedos",
@@ -531,12 +556,15 @@ impl CatalogManager {
         host_arch: &str,
         hvf_supported: bool,
     ) -> Result<Vec<OsCatalogEntryDto>, String> {
-        let templates = image_store.list_templates().await.unwrap_or_default();
-        let isos = image_store.list_isos().await.unwrap_or_default();
+        // Snapshot `active_cancellers` BEFORE scanning `templates/` and `isos/` so happens-before
+        // ordering guarantees that whenever `is_downloading` is `false`, both `.qcow2` and `.template.json`
+        // have already been completely finalized on disk.
         let active_downloads: HashMap<String, bool> = {
             let guard = self.inner.active_cancellers.read().await;
             guard.keys().map(|k| (k.clone(), true)).collect()
         };
+        let templates = image_store.list_templates().await.unwrap_or_default();
+        let isos = image_store.list_isos().await.unwrap_or_default();
 
         let mut out = Vec::with_capacity(STATIC_CATALOG.len());
         for spec in STATIC_CATALOG {
@@ -568,6 +596,7 @@ impl CatalogManager {
                 percent: None,
                 message: "Download cancelled by user.".to_string(),
                 error: None,
+                resolved_version: None,
             })
             .await;
             Ok(true)
@@ -606,6 +635,17 @@ impl CatalogManager {
             ));
         }
 
+        // Validate the custom mirror URL scheme (https only; http only on loopback) and an
+        // optional user-supplied SHA-256 BEFORE spawning the pipeline task.
+        let custom_url = match req.custom_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(raw) => Some(validate_custom_mirror_url(raw)?),
+            None => None,
+        };
+        let custom_sha256 = match req.custom_sha256.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(raw) => Some(validate_sha256_hex(raw)?),
+            None => None,
+        };
+
         let (cancel_tx, cancel_rx) = watch::channel(false);
         {
             let mut guard = self.inner.active_cancellers.write().await;
@@ -613,10 +653,6 @@ impl CatalogManager {
         }
 
         let mgr = self.clone();
-        let custom_url = req
-            .custom_url
-            .map(|u| u.trim().to_string())
-            .filter(|u| !u.is_empty());
 
         tokio::spawn(async move {
             let staging_dir = ready_paths
@@ -628,6 +664,7 @@ impl CatalogManager {
                 .execute_download_pipeline(
                     spec,
                     custom_url,
+                    custom_sha256,
                     &staging_dir,
                     &ready_paths.templates_dir,
                     &ready_paths.isos_dir,
@@ -636,28 +673,40 @@ impl CatalogManager {
                 )
                 .await;
 
-            // Always remove temporary staging directory on completion, error, or cancellation
-            let _ = fs::remove_dir_all(&staging_dir);
-
+            // Remove `spec.id` from `active_cancellers` BEFORE emitting terminal "Ready" / "InstallerReady" /
+            // "Error" events and BEFORE unlinking multi-GB `.staging/` artifacts so any immediate `list_catalog()`
+            // call from the UI sees `is_downloading == false` and `CatalogAvailability::Ready` right away.
             {
                 let mut guard = mgr.inner.active_cancellers.write().await;
                 guard.remove(spec.id);
             }
 
-            if let Err(err_msg) = result {
-                if err_msg != "__CANCELLED__" {
-                    mgr.emit_progress(CatalogDownloadProgressEvent {
-                        catalog_id: spec.id.to_string(),
-                        stage: "Error".to_string(),
-                        bytes_downloaded: 0,
-                        total_bytes: None,
-                        percent: None,
-                        message: err_msg.clone(),
-                        error: Some(err_msg),
-                    })
-                    .await;
+            match result {
+                Ok(done_event) => {
+                    mgr.emit_progress(done_event).await;
+                }
+                Err(err_msg) => {
+                    if err_msg != "__CANCELLED__" {
+                        mgr.emit_progress(CatalogDownloadProgressEvent {
+                            catalog_id: spec.id.to_string(),
+                            stage: "Error".to_string(),
+                            bytes_downloaded: 0,
+                            total_bytes: None,
+                            percent: None,
+                            message: err_msg.clone(),
+                            error: Some(err_msg),
+                            resolved_version: None,
+                        })
+                        .await;
+                    }
                 }
             }
+
+            // Always remove temporary staging directory on completion, error, or cancellation
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = fs::remove_dir_all(&staging_dir);
+            })
+            .await;
         });
 
         Ok(())
@@ -694,6 +743,7 @@ impl CatalogManager {
                 spec,
                 &source,
                 true,
+                None,
                 &staging_dir,
                 &ready_paths.templates_dir,
                 &ready_paths.isos_dir,
@@ -703,7 +753,8 @@ impl CatalogManager {
             .await;
 
         let _ = fs::remove_dir_all(&staging_dir);
-        res?;
+        let done_event = res?;
+        self.emit_progress(done_event).await;
 
         let list = self
             .list_catalog(
@@ -865,6 +916,7 @@ impl CatalogManager {
             cpus: prof.default_cpus.max(1),
             ram_mb: prof.default_ram_mb.max(32),
             disk_path: target_qcow2.display().to_string(),
+            os_profile_id: Some(spec.os_profile_id.to_string()),
             template_id: None,
             boot_media_path: Some(installer.path.clone()),
             boot_media_bus: BootMediaBus::Auto,
@@ -882,35 +934,44 @@ impl CatalogManager {
                 vm_port: None,
             }],
             bios_path_override: None,
-            finalize_template_on_exit: Some(FinalizeTemplateOnExit {
-                catalog_id: spec.id.to_string(),
-                template_id: spec.template_stem.to_string(),
-                template_name: spec.name.to_string(),
-                os_profile_id: spec.os_profile_id.to_string(),
-                arch: prof.arch,
-                default_nic_model: prof.default_nic_model,
-                default_firmware: prof.default_firmware,
-                default_disk_bus: prof.default_disk_bus,
-                description: Some(format!(
-                    "{} Golden Base Template installed via Etherloom Guided Setup",
-                    spec.name
-                )),
-            }),
+            finalize_template_on_exit: {
+                let detected_version =
+                    extract_upstream_version(spec.id, &installer.filename, prof.arch);
+                let display_name =
+                    format_template_display_name(spec.name, detected_version.as_deref());
+                Some(FinalizeTemplateOnExit {
+                    catalog_id: spec.id.to_string(),
+                    template_id: spec.template_stem.to_string(),
+                    template_name: display_name.clone(),
+                    os_profile_id: spec.os_profile_id.to_string(),
+                    version: detected_version,
+                    arch: prof.arch,
+                    default_nic_model: prof.default_nic_model,
+                    default_firmware: prof.default_firmware,
+                    default_disk_bus: prof.default_disk_bus,
+                    description: Some(format!(
+                        "{} Golden Base Template installed via Etherloom Guided Setup",
+                        display_name
+                    )),
+                })
+            },
         };
 
         vm_manager.spawn_vm(req, fabric, image_store).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_download_pipeline(
         &self,
         spec: &'static StaticCatalogSpec,
         custom_url: Option<String>,
+        custom_sha256: Option<String>,
         staging_dir: &Path,
         templates_dir: &Path,
         isos_dir: &Path,
         image_store: &ImageStore,
         mut cancel_rx: watch::Receiver<bool>,
-    ) -> Result<(), String> {
+    ) -> Result<CatalogDownloadProgressEvent, String> {
         fs::create_dir_all(staging_dir)
             .map_err(|e| format!("Failed creating staging dir {}: {e}", staging_dir.display()))?;
 
@@ -922,33 +983,88 @@ impl CatalogManager {
             percent: Some(2.0),
             message: format!("Resolving upstream mirror for {}…", spec.name),
             error: None,
+            resolved_version: None,
         })
         .await;
 
         let resolved = match custom_url {
-            Some(url) => ResolvedUpstreamAsset {
-                url: url.clone(),
-                filename: filename_from_url(&url, spec.id),
-                sha256_manifest_url: None,
-            },
+            Some(url) => {
+                // Defense-in-depth: the URL was already validated in `start_download`, but
+                // re-validate here so this pipeline can never fetch non-https remote URLs.
+                let url = validate_custom_mirror_url(&url)?;
+                ResolvedUpstreamAsset {
+                    url: url.clone(),
+                    filename: filename_from_url(&url, spec.id),
+                    sha256_manifest_url: None,
+                }
+            }
             None => resolve_upstream_asset(spec.id).await?,
         };
+
+        // Warn loudly when an upstream resolver produced a plaintext HTTP URL (e.g. 9front's
+        // iso.only9fans.com mirror): the artifact is downloaded without TLS integrity guarantees.
+        if resolved.url.starts_with("http://")
+            && !is_loopback_host(&url_host(&resolved.url).unwrap_or_default())
+        {
+            self.emit_progress(CatalogDownloadProgressEvent {
+                catalog_id: spec.id.to_string(),
+                stage: "Resolving".to_string(),
+                bytes_downloaded: 0,
+                total_bytes: None,
+                percent: Some(2.5),
+                message: format!(
+                    "WARNING: {} mirror '{}' uses unencrypted HTTP and no checksum — only proceed on a trusted network.",
+                    spec.name, resolved.url
+                ),
+                error: None,
+                resolved_version: None,
+            })
+            .await;
+        }
 
         if *cancel_rx.borrow() {
             return Err("__CANCELLED__".to_string());
         }
 
+        let prof = find_os_profile(spec.os_profile_id);
+        let arch = prof.as_ref().map(|p| p.arch).unwrap_or(GuestArch::Aarch64);
+        let resolved_version = extract_upstream_version(spec.id, &resolved.filename, arch);
+
         let total_bytes = probe_content_length(&resolved.url).await;
         let dest_archive = staging_dir.join(&resolved.filename);
 
         self.stream_curl_with_progress(
-            spec.id,
+            spec,
             &resolved.url,
             &dest_archive,
             total_bytes,
+            resolved_version.as_deref(),
             &mut cancel_rx,
         )
         .await?;
+
+        // User-supplied SHA-256 for a custom mirror: verify fail-closed before any extraction.
+        if let Some(ref expected) = custom_sha256 {
+            self.emit_progress(CatalogDownloadProgressEvent {
+                catalog_id: spec.id.to_string(),
+                stage: "Verifying".to_string(),
+                bytes_downloaded: fs::metadata(&dest_archive).map(|m| m.len()).unwrap_or(0),
+                total_bytes,
+                percent: Some(82.0),
+                message: format!("Verifying custom SHA-256 checksum for {}…", resolved.filename),
+                error: None,
+                resolved_version: resolved_version.clone(),
+            })
+            .await;
+
+            let actual = sha256_of_file(&dest_archive).await?;
+            if actual != *expected {
+                return Err(format!(
+                    "SHA-256 checksum mismatch for {}: expected {expected}, got {actual}. The download was rejected and will not be installed.",
+                    resolved.filename
+                ));
+            }
+        }
 
         // Optional SHA-256 verification when upstream provides a `SHA256` manifest (e.g. OpenBSD!)
         if let Some(ref sha_url) = resolved.sha256_manifest_url {
@@ -960,6 +1076,7 @@ impl CatalogManager {
                 percent: Some(82.0),
                 message: format!("Verifying official SHA-256 checksum for {}…", resolved.filename),
                 error: None,
+                resolved_version: resolved_version.clone(),
             })
             .await;
 
@@ -973,6 +1090,7 @@ impl CatalogManager {
             spec,
             &dest_archive,
             false,
+            resolved_version,
             staging_dir,
             templates_dir,
             isos_dir,
@@ -988,31 +1106,38 @@ impl CatalogManager {
         spec: &'static StaticCatalogSpec,
         input_path: &Path,
         preserve_input: bool,
+        known_version: Option<String>,
         staging_dir: &Path,
         templates_dir: &Path,
         isos_dir: &Path,
         image_store: &ImageStore,
         mut cancel_rx: watch::Receiver<bool>,
-    ) -> Result<(), String> {
+    ) -> Result<CatalogDownloadProgressEvent, String> {
         if *cancel_rx.borrow() {
             return Err("__CANCELLED__".to_string());
         }
 
+        let prof = find_os_profile(spec.os_profile_id);
+        let arch = prof.as_ref().map(|p| p.arch).unwrap_or(GuestArch::Aarch64);
+        let input_fname = input_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("imported.img");
+        let effective_version =
+            known_version.or_else(|| extract_upstream_version(spec.id, input_fname, arch));
+
         // Copy into staging if preserving user's local file so gunzip/bunzip2/xz never mutate user's source!
         let working_file = if preserve_input {
-            let fname = input_path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("imported.img");
-            let staged = staging_dir.join(fname);
+            let staged = staging_dir.join(input_fname);
             self.emit_progress(CatalogDownloadProgressEvent {
                 catalog_id: spec.id.to_string(),
                 stage: "Downloading".to_string(),
                 bytes_downloaded: 0,
                 total_bytes: None,
                 percent: Some(25.0),
-                message: format!("Staging {} into library workspace…", fname),
+                message: format!("Staging {} into library workspace…", input_fname),
                 error: None,
+                resolved_version: effective_version.clone(),
             })
             .await;
             fs::copy(input_path, &staged)
@@ -1024,7 +1149,13 @@ impl CatalogManager {
 
         // 1. Decompress `.xz`, `.gz`, `.bz2`, or `.zip` if compressed
         let extracted = self
-            .extract_if_compressed(spec.id, &working_file, staging_dir, &mut cancel_rx)
+            .extract_if_compressed(
+                spec.id,
+                &working_file,
+                staging_dir,
+                effective_version.as_deref(),
+                &mut cancel_rx,
+            )
             .await?;
 
         if *cancel_rx.borrow() {
@@ -1069,7 +1200,10 @@ impl CatalogManager {
             move_or_copy_file(&extracted, &dest_iso)?;
             let sz = fs::metadata(&dest_iso).map(|m| m.len()).unwrap_or(0);
 
-            self.emit_progress(CatalogDownloadProgressEvent {
+            let final_ver = effective_version
+                .or_else(|| extract_upstream_version(spec.id, &dest_name, arch));
+
+            return Ok(CatalogDownloadProgressEvent {
                 catalog_id: spec.id.to_string(),
                 stage: "InstallerReady".to_string(),
                 bytes_downloaded: sz,
@@ -1080,10 +1214,11 @@ impl CatalogManager {
                     dest_name
                 ),
                 error: None,
-            })
-            .await;
-            return Ok(());
+                resolved_version: final_ver,
+            });
         }
+
+        let display_name = format_template_display_name(spec.name, effective_version.as_deref());
 
         // 2. Convert disk image (`.qcow2`, `.img`, `.raw`, `.vmdk`, `.vdi`, or Haiku `anyboot`) into `qcow2`
         self.emit_progress(CatalogDownloadProgressEvent {
@@ -1092,8 +1227,9 @@ impl CatalogManager {
             bytes_downloaded: 0,
             total_bytes: None,
             percent: Some(90.0),
-            message: format!("Preparing {} Golden Base Template qcow2…", spec.name),
+            message: format!("Preparing {} Golden Base Template qcow2…", display_name),
             error: None,
+            resolved_version: effective_version.clone(),
         })
         .await;
 
@@ -1101,7 +1237,6 @@ impl CatalogManager {
             .map_err(|e| format!("Failed creating {}: {e}", templates_dir.display()))?;
         let staged_qcow2 = staging_dir.join(format!("{}.qcow2", spec.template_stem));
 
-        let prof = find_os_profile(spec.os_profile_id);
         if image_store.resolve_qemu_img_bin().is_some() {
             let convert_args = vec![
                 "convert".to_string(),
@@ -1150,9 +1285,10 @@ impl CatalogManager {
         let fin = FinalizeTemplateOnExit {
             catalog_id: spec.id.to_string(),
             template_id: spec.template_stem.to_string(),
-            template_name: spec.name.to_string(),
+            template_name: display_name.clone(),
             os_profile_id: spec.os_profile_id.to_string(),
-            arch: prof.as_ref().map(|p| p.arch).unwrap_or_default(),
+            version: effective_version.clone(),
+            arch,
             default_nic_model: prof
                 .as_ref()
                 .map(|p| p.default_nic_model)
@@ -1165,47 +1301,48 @@ impl CatalogManager {
                 .as_ref()
                 .map(|p| p.default_disk_bus)
                 .unwrap_or_default(),
-            description: Some(format!("{} — {}", spec.name, spec.tagline)),
+            description: Some(format!("{} — {}", display_name, spec.tagline)),
         };
 
         let tpl = image_store
             .finalize_in_place_template(&final_qcow2, &fin)
             .await?;
 
-        self.emit_progress(CatalogDownloadProgressEvent {
+        Ok(CatalogDownloadProgressEvent {
             catalog_id: spec.id.to_string(),
             stage: "Ready".to_string(),
             bytes_downloaded: tpl.actual_size_bytes,
             total_bytes: Some(tpl.actual_size_bytes),
             percent: Some(100.0),
-            message: format!("{} is Ready ({})", spec.name, tpl.filename),
+            message: format!("{} is Ready ({})", display_name, tpl.filename),
             error: None,
+            resolved_version: effective_version,
         })
-        .await;
-
-        Ok(())
     }
 
     async fn stream_curl_with_progress(
         &self,
-        catalog_id: &str,
+        spec: &'static StaticCatalogSpec,
         url: &str,
         dest: &Path,
         total_bytes: Option<u64>,
+        resolved_version: Option<&str>,
         cancel_rx: &mut watch::Receiver<bool>,
     ) -> Result<(), String> {
         let fname = dest
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("image");
+        let display_label = format_template_display_name(spec.name, resolved_version);
         self.emit_progress(CatalogDownloadProgressEvent {
-            catalog_id: catalog_id.to_string(),
+            catalog_id: spec.id.to_string(),
             stage: "Downloading".to_string(),
             bytes_downloaded: 0,
             total_bytes,
             percent: Some(3.0),
-            message: format!("Connected — downloading {fname}…"),
+            message: format!("Connected — downloading {display_label} ({fname})…"),
             error: None,
+            resolved_version: resolved_version.map(ToOwned::to_owned),
         })
         .await;
 
@@ -1263,13 +1400,14 @@ impl CatalogManager {
                     }
                     let final_len = fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
                     self.emit_progress(CatalogDownloadProgressEvent {
-                        catalog_id: catalog_id.to_string(),
+                        catalog_id: spec.id.to_string(),
                         stage: "Downloading".to_string(),
                         bytes_downloaded: final_len,
                         total_bytes: total_bytes.or(Some(final_len)),
                         percent: Some(80.0),
-                        message: "Download complete.".to_string(),
+                        message: format!("Downloaded {display_label}."),
                         error: None,
+                        resolved_version: resolved_version.map(ToOwned::to_owned),
                     }).await;
                     return Ok(());
                 }
@@ -1279,13 +1417,14 @@ impl CatalogManager {
                         .filter(|&t| t > 0)
                         .map(|t| ((cur_len as f64 / t as f64) * 77.0 + 3.0).clamp(3.0, 80.0));
                     self.emit_progress(CatalogDownloadProgressEvent {
-                        catalog_id: catalog_id.to_string(),
+                        catalog_id: spec.id.to_string(),
                         stage: "Downloading".to_string(),
                         bytes_downloaded: cur_len,
                         total_bytes,
                         percent: pct,
                         message: format!("Streaming {fname} onto active storage…"),
                         error: None,
+                        resolved_version: resolved_version.map(ToOwned::to_owned),
                     }).await;
                 }
             }
@@ -1297,6 +1436,7 @@ impl CatalogManager {
         catalog_id: &str,
         file_path: &Path,
         staging_dir: &Path,
+        resolved_version: Option<&str>,
         cancel_rx: &mut watch::Receiver<bool>,
     ) -> Result<PathBuf, String> {
         let ext = file_path
@@ -1305,7 +1445,7 @@ impl CatalogManager {
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        if !matches!(ext.as_str(), "xz" | "gz" | "bz2" | "zip") {
+        if !matches!(ext.as_str(), "xz" | "gz" | "bz2" | "zst" | "zip") {
             return Ok(file_path.to_path_buf());
         }
 
@@ -1317,6 +1457,7 @@ impl CatalogManager {
             percent: Some(85.0),
             message: format!("Extracting .{ext} archive inside staging directory…"),
             error: None,
+            resolved_version: resolved_version.map(ToOwned::to_owned),
         })
         .await;
 
@@ -1326,6 +1467,18 @@ impl CatalogManager {
                     "The `xz` utility was not found. Install it via `brew install xz` (included automatically with `brew install qemu`).".to_string()
                 })?;
                 run_cancellable_command(&xz_bin, &["-d", "-f", &file_path.display().to_string()], cancel_rx).await?;
+                Ok(strip_last_extension(file_path))
+            }
+            "zst" => {
+                let zstd_bin = resolve_macos_binary("zstd").ok_or_else(|| {
+                    "The `zstd` utility was not found. Install it via `brew install zstd` (included automatically with `brew install qemu`).".to_string()
+                })?;
+                run_cancellable_command(
+                    &zstd_bin,
+                    &["-d", "-f", "--rm", &file_path.display().to_string()],
+                    cancel_rx,
+                )
+                .await?;
                 Ok(strip_last_extension(file_path))
             }
             "gz" => {
@@ -1353,6 +1506,33 @@ impl CatalogManager {
             "zip" => {
                 let unzip_dir = staging_dir.join("unzipped");
                 fs::create_dir_all(&unzip_dir).map_err(|e| e.to_string())?;
+
+                // Zip-slip pre-check: list all archive entries and refuse any absolute path
+                // or `..` traversal component BEFORE extracting anything to disk.
+                let zipinfo_bin = resolve_macos_binary("zipinfo")
+                    .unwrap_or_else(|| PathBuf::from("/usr/bin/zipinfo"));
+                let listing_out = Command::new(&zipinfo_bin)
+                    .args(["-1", &file_path.display().to_string()])
+                    .output()
+                    .await
+                    .map_err(|e| format!("Failed listing zip archive entries: {e}"))?;
+                if !listing_out.status.success() {
+                    return Err(format!(
+                        "Failed listing zip archive entries: {}",
+                        String::from_utf8_lossy(&listing_out.stderr).trim()
+                    ));
+                }
+                let listing = String::from_utf8_lossy(&listing_out.stdout);
+                for entry in listing.lines() {
+                    let entry = entry.trim_end_matches('/');
+                    if !entry.is_empty() && zip_entry_has_path_traversal(entry) {
+                        let _ = fs::remove_dir_all(&unzip_dir);
+                        return Err(format!(
+                            "Refusing to extract zip archive: entry '{entry}' escapes the staging directory (path traversal)"
+                        ));
+                    }
+                }
+
                 let unzip_bin = resolve_macos_binary("unzip")
                     .unwrap_or_else(|| PathBuf::from("/usr/bin/unzip"));
                 run_cancellable_command(
@@ -1367,6 +1547,16 @@ impl CatalogManager {
                     cancel_rx,
                 )
                 .await?;
+
+                // Defense-in-depth: verify every extracted path still canonicalizes inside staging.
+                if !extracted_tree_stays_inside(&unzip_dir) {
+                    let _ = fs::remove_dir_all(&unzip_dir);
+                    return Err(
+                        "Refusing to use zip archive: extracted files escaped the staging directory"
+                            .to_string(),
+                    );
+                }
+
                 find_largest_disk_in_dir(&unzip_dir).ok_or_else(|| {
                     "No bootable disk or ISO image (.qcow2, .img, .raw, .iso) found inside .zip archive".to_string()
                 })
@@ -1398,6 +1588,46 @@ pub fn reveal_path_in_finder(raw_path: &str) -> Result<(), String> {
     cmd.status()
         .map_err(|e| format!("Failed opening Finder for {}: {e}", p.display()))?;
     Ok(())
+}
+
+/// If `stem_or_filename` matches one of the built-in OS catalog `template_stem`s
+/// (accepting a stem, `.qcow2` filename, or full path), returns its canonical `os_profile_id`.
+pub fn builtin_template_stem_profile(stem_or_filename: &str) -> Option<&'static str> {
+    let fname = Path::new(stem_or_filename.trim())
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(stem_or_filename.trim());
+    let stem = fname.strip_suffix(".qcow2").unwrap_or(fname);
+    STATIC_CATALOG
+        .iter()
+        .find(|spec| spec.template_stem.eq_ignore_ascii_case(stem))
+        .map(|spec| spec.os_profile_id)
+}
+
+/// Resolves the authoritative `os_profile_id` for a template ID, filename, or backing file path.
+/// Returns `None` for unmanifested user `.qcow2` files whose OS family is unknown, avoiding false positives.
+pub fn template_ref_profile<'a>(
+    template_ref: &str,
+    templates: &'a [BaseTemplateInfo],
+) -> Option<&'a str> {
+    if let Some(builtin_prof) = builtin_template_stem_profile(template_ref) {
+        return Some(builtin_prof);
+    }
+    let trimmed = template_ref.trim();
+    let fname = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed);
+    let stem = fname.strip_suffix(".qcow2").unwrap_or(fname);
+    templates
+        .iter()
+        .find(|t| {
+            t.id.eq_ignore_ascii_case(stem)
+                || t.filename.eq_ignore_ascii_case(fname)
+                || t.path == trimmed
+        })
+        .filter(|t| t.description.as_deref() != Some("Discovered qcow2 base template"))
+        .map(|t| t.os_profile_id.as_str())
 }
 
 fn find_static_spec(id: &str) -> Option<&'static StaticCatalogSpec> {
@@ -1454,9 +1684,19 @@ fn build_entry_dto(
         CatalogAvailability::NotDownloaded
     };
 
+    let version = matched_template
+        .and_then(|t| t.version.as_deref())
+        .filter(|v| !v.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            matched_installer.and_then(|i| extract_upstream_version(spec.id, &i.filename, arch))
+        })
+        .unwrap_or_else(|| spec.default_version.to_string());
+
     OsCatalogEntryDto {
         id: spec.id.to_string(),
         name: spec.name.to_string(),
+        version,
         tagline: spec.tagline.to_string(),
         category: spec.category,
         os_profile_id: spec.os_profile_id.to_string(),
@@ -1534,12 +1774,28 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                 "Unable to resolve Alpine ARM64 UEFI cloud image (.qcow2.xz / .qcow2) from dl-cdn.alpinelinux.org{suffix}. Check your internet connection or provide a Custom Mirror URL."
             ))
         }
-        "debian-linux" => Ok(ResolvedUpstreamAsset {
-            url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-arm64.qcow2"
-                .to_string(),
-            filename: "debian-12-nocloud-arm64.qcow2".to_string(),
-            sha256_manifest_url: None,
-        }),
+        "debian-linux" => {
+            for (suite, fname) in [
+                ("bookworm", "debian-12-nocloud-arm64.qcow2"),
+                ("trixie", "debian-13-nocloud-arm64.qcow2"),
+            ] {
+                let url =
+                    format!("https://cloud.debian.org/images/cloud/{suite}/latest/{fname}");
+                if probe_url_reachable(&url).await {
+                    return Ok(ResolvedUpstreamAsset {
+                        url,
+                        filename: fname.to_string(),
+                        sha256_manifest_url: None,
+                    });
+                }
+            }
+            Ok(ResolvedUpstreamAsset {
+                url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-arm64.qcow2"
+                    .to_string(),
+                filename: "debian-12-nocloud-arm64.qcow2".to_string(),
+                sha256_manifest_url: None,
+            })
+        }
         "freebsd" => {
             let vm_root = "https://download.freebsd.org/releases/VM-IMAGES";
             let mut candidates: Vec<String> = Vec::new();
@@ -1556,7 +1812,7 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                 }
                 candidates.sort_by(|a, b| compare_version_desc(a, b));
             }
-            for fallback in ["15.0-RELEASE", "14.3-RELEASE", "14.2-RELEASE", "14.1-RELEASE"] {
+            for fallback in ["15.1-RELEASE", "15.0-RELEASE", "14.3-RELEASE", "14.2-RELEASE"] {
                 if !candidates.iter().any(|c| c == fallback) {
                     candidates.push(fallback.to_string());
                 }
@@ -1672,7 +1928,28 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
             })
         }
         "openwrt" => {
-            for ver in ["24.10.0", "23.05.5"] {
+            let mut versions: Vec<String> = Vec::new();
+            if let Ok(html) = curl_text("https://downloads.openwrt.org/releases/").await {
+                for tok in html.split(|c: char| {
+                    c == '"' || c == '\'' || c == '>' || c == '<' || c == '/' || c.is_whitespace()
+                }) {
+                    if tok.contains('.')
+                        && !tok.contains('-')
+                        && tok.chars().all(|c| c.is_ascii_digit() || c == '.')
+                        && (tok.starts_with("24.") || tok.starts_with("25.") || tok.starts_with("26."))
+                        && !versions.iter().any(|v| v == tok)
+                    {
+                        versions.push(tok.to_string());
+                    }
+                }
+                versions.sort_by(|a, b| compare_version_desc(a, b));
+            }
+            for fallback in ["24.10.4", "24.10.3", "24.10.2", "24.10.1", "24.10.0", "23.05.5"] {
+                if !versions.iter().any(|v| v == fallback) {
+                    versions.push(fallback.to_string());
+                }
+            }
+            for ver in versions.into_iter().take(6) {
                 let fname = format!(
                     "openwrt-{ver}-armsr-armv8-generic-ext4-combined-efi.img.gz"
                 );
@@ -1687,10 +1964,29 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                     });
                 }
             }
-            Err("Unable to reach OpenWrt armsr/armv8 release mirror".to_string())
+            Err("Unable to reach OpenWrt armsr/armv8 release mirror at downloads.openwrt.org.".to_string())
         }
         "mikrotik-chr" => {
-            for ver in ["7.17.2", "7.16.2", "7.15.3"] {
+            let mut versions: Vec<String> = Vec::new();
+            if let Ok(latest_txt) =
+                curl_text("https://upgrade.mikrotik.com/routeros/NEWESTa7.stable").await
+            {
+                if let Some(first_tok) = latest_txt.split_whitespace().next() {
+                    if first_tok
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c == '.')
+                        && first_tok.starts_with("7.")
+                    {
+                        versions.push(first_tok.to_string());
+                    }
+                }
+            }
+            for fallback in ["7.18.2", "7.17.2", "7.16.2", "7.15.3"] {
+                if !versions.iter().any(|v| v == fallback) {
+                    versions.push(fallback.to_string());
+                }
+            }
+            for ver in versions {
                 let fname = format!("chr-{ver}.arm64.img.zip");
                 let url = format!("https://download.mikrotik.com/routeros/{ver}/{fname}");
                 if probe_url_reachable(&url).await {
@@ -1701,7 +1997,7 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                     });
                 }
             }
-            Err("Unable to resolve MikroTik RouterOS CHR ARM64 image".to_string())
+            Err("Unable to resolve MikroTik RouterOS CHR ARM64 image from download.mikrotik.com.".to_string())
         }
         "vyos" => {
             let api = "https://api.github.com/repos/vyos/vyos-nightly-build/releases/latest";
@@ -1739,7 +2035,8 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                     let full_url = if fname.starts_with("http") {
                         fname.clone()
                     } else {
-                        // Many 9front iso links point to `http://iso.only9fans.com/release/...`
+                        // Many 9front iso links point to `http://iso.only9fans.com/release/...`;
+                        // prefer the https variant when the mirror serves it.
                         if let Some(full) =
                             find_last_matching_token(&html, "https://", ".arm64.qcow2.gz", None)
                                 .or_else(|| {
@@ -1756,6 +2053,7 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
                             format!("{dir_url}{fname}")
                         }
                     };
+                    let full_url = prefer_https_if_reachable(&full_url).await;
                     let clean_name = filename_from_url(&full_url, "9front");
                     return Ok(ResolvedUpstreamAsset {
                         url: full_url,
@@ -1767,53 +2065,210 @@ async fn resolve_upstream_asset(catalog_id: &str) -> Result<ResolvedUpstreamAsse
             Err("Unable to resolve 9front ARM64 qcow2.gz mirror from 9front.org/iso/.".to_string())
         }
         "opnsense" => {
-            for ver in ["25.1", "24.7"] {
+            let mut versions: Vec<String> = Vec::new();
+            for index_url in [
+                "https://pkg.opnsense.org/releases/",
+                "https://mirrors.dotsrc.org/opnsense/releases/",
+            ] {
+                if let Ok(html) = curl_text(index_url).await {
+                    for tok in html.split(|c: char| {
+                        c == '"' || c == '\'' || c == '>' || c == '<' || c == '/' || c.is_whitespace()
+                    }) {
+                        if tok.len() >= 4
+                            && tok.len() <= 5
+                            && tok.contains('.')
+                            && tok.chars().all(|c| c.is_ascii_digit() || c == '.')
+                            && !versions.iter().any(|v| v == tok)
+                        {
+                            versions.push(tok.to_string());
+                        }
+                    }
+                    if !versions.is_empty() {
+                        versions.sort_by(|a, b| compare_version_desc(a, b));
+                        break;
+                    }
+                }
+            }
+            for fallback in ["26.7", "26.1", "25.7", "25.1", "24.7"] {
+                if !versions.iter().any(|v| v == fallback) {
+                    versions.push(fallback.to_string());
+                }
+            }
+            for ver in versions.into_iter().take(6) {
                 let fname = format!("OPNsense-{ver}-nano-amd64.img.bz2");
-                let url = format!("https://pkg.opnsense.org/releases/{ver}/{fname}");
-                if probe_url_reachable(&url).await {
-                    return Ok(ResolvedUpstreamAsset {
-                        url,
-                        filename: fname,
-                        sha256_manifest_url: None,
-                    });
+                for mirror_root in [
+                    "https://pkg.opnsense.org/releases",
+                    "https://mirrors.dotsrc.org/opnsense/releases",
+                ] {
+                    let url = format!("{mirror_root}/{ver}/{fname}");
+                    if probe_url_reachable(&url).await {
+                        return Ok(ResolvedUpstreamAsset {
+                            url,
+                            filename: fname,
+                            sha256_manifest_url: None,
+                        });
+                    }
                 }
             }
             Err("Unable to resolve OPNsense nano-amd64 image from pkg.opnsense.org.".to_string())
         }
         "omnios" => {
-            for ver in ["r151052", "r151050", "r151046"] {
-                let fname = format!("omnios-{ver}.cloud.qcow2.xz");
-                let url = format!("https://us-west.mirror.omnios.org/media/stable/{fname}");
-                if probe_url_reachable(&url).await {
-                    return Ok(ResolvedUpstreamAsset {
-                        url,
-                        filename: fname,
-                        sha256_manifest_url: None,
-                    });
+            // 1. Dynamically inspect official OmniOS LTS & Stable media directories (`downloads.omnios.org`)
+            //    OmniOS publishes `.cloud.qcow2` (and `.cloud.raw.zst` / `.cloud.qcow2.xz` depending on release).
+            for dir_url in [
+                "https://downloads.omnios.org/media/lts/",
+                "https://downloads.omnios.org/media/stable/",
+            ] {
+                if let Ok(html) = curl_text(dir_url).await {
+                    if let Some(asset_ref) = select_omnios_cloud_asset(&html) {
+                        let full_url = if asset_ref.starts_with("http://")
+                            || asset_ref.starts_with("https://")
+                        {
+                            prefer_https_if_reachable(&asset_ref).await
+                        } else {
+                            format!("{dir_url}{}", asset_ref.trim_start_matches('/'))
+                        };
+                        if probe_url_reachable(&full_url).await {
+                            let fname = filename_from_url(&full_url, "omnios");
+                            return Ok(ResolvedUpstreamAsset {
+                                url: full_url,
+                                filename: fname,
+                                sha256_manifest_url: None,
+                            });
+                        }
+                    }
                 }
             }
-            Err("Unable to resolve OmniOS cloud qcow2.xz from mirror.omnios.org.".to_string())
+
+            // 2. Also inspect https://omnios.org/download.html in case direct mirror URLs are linked there
+            if let Ok(dl_html) = curl_text("https://omnios.org/download.html").await {
+                if let Some(asset_ref) = select_omnios_cloud_asset(&dl_html) {
+                    let full_url = if asset_ref.starts_with("http://")
+                        || asset_ref.starts_with("https://")
+                    {
+                        prefer_https_if_reachable(&asset_ref).await
+                    } else {
+                        format!(
+                            "https://downloads.omnios.org/media/lts/{}",
+                            asset_ref.trim_start_matches('/')
+                        )
+                    };
+                    if probe_url_reachable(&full_url).await {
+                        let fname = filename_from_url(&full_url, "omnios");
+                        return Ok(ResolvedUpstreamAsset {
+                            url: full_url,
+                            filename: fname,
+                            sha256_manifest_url: None,
+                        });
+                    }
+                }
+            }
+
+            // 3. Deterministic release & mirror fallback matrix (`r151060`..`r151052`, `.cloud.qcow2` / `.xz` / `.raw.zst`)
+            for ver in ["r151060", "r151058", "r151056", "r151054", "r151052"] {
+                for suffix in [".cloud.qcow2", ".cloud.qcow2.xz", ".cloud.raw.zst"] {
+                    let fname = format!("omnios-{ver}{suffix}");
+                    for base in [
+                        "https://downloads.omnios.org/media/lts",
+                        "https://downloads.omnios.org/media/stable",
+                        "https://us-west.mirror.omnios.org/media/lts",
+                        "https://us-west.mirror.omnios.org/media/stable",
+                    ] {
+                        let url = format!("{base}/{fname}");
+                        if probe_url_reachable(&url).await {
+                            return Ok(ResolvedUpstreamAsset {
+                                url,
+                                filename: fname,
+                                sha256_manifest_url: None,
+                            });
+                        }
+                    }
+                }
+            }
+            Err("Unable to resolve OmniOS cloud image (.cloud.qcow2 / .xz / .zst) from downloads.omnios.org. Check your internet connection or supply a Custom Mirror URL.".to_string())
         }
         "dragonflybsd" => {
+            for dir_url in [
+                "https://mirror-master.dragonflybsd.org/iso-images/",
+                "https://avalon.dragonflybsd.org/iso-images/",
+            ] {
+                if let Ok(html) = curl_text(dir_url).await {
+                    if let Some(fname) =
+                        find_last_matching_token(&html, "dfly-x86_64-", "_REL.iso.bz2", None)
+                    {
+                        let url = format!("{dir_url}{fname}");
+                        if probe_url_reachable(&url).await {
+                            return Ok(ResolvedUpstreamAsset {
+                                url,
+                                filename: fname,
+                                sha256_manifest_url: None,
+                            });
+                        }
+                    }
+                }
+            }
             for ver in ["6.4.2", "6.4.0"] {
                 let fname = format!("dfly-x86_64-{ver}_REL.iso.bz2");
-                let url = format!("https://mirror-master.dragonflybsd.org/iso-images/{fname}");
-                if probe_url_reachable(&url).await {
-                    return Ok(ResolvedUpstreamAsset {
-                        url,
-                        filename: fname,
-                        sha256_manifest_url: None,
-                    });
+                for base in [
+                    "https://mirror-master.dragonflybsd.org/iso-images",
+                    "https://avalon.dragonflybsd.org/iso-images",
+                ] {
+                    let url = format!("{base}/{fname}");
+                    if probe_url_reachable(&url).await {
+                        return Ok(ResolvedUpstreamAsset {
+                            url,
+                            filename: fname,
+                            sha256_manifest_url: None,
+                        });
+                    }
                 }
             }
             Err("Unable to resolve DragonFly BSD release ISO from mirror-master.dragonflybsd.org.".to_string())
         }
-        "haiku" => Ok(ResolvedUpstreamAsset {
-            url: "https://cdn.haiku-os.org/haiku-release/r1beta5/haiku-r1beta5-x86_64-anyboot.iso.zip"
-                .to_string(),
-            filename: "haiku-r1beta5-x86_64-anyboot.iso.zip".to_string(),
-            sha256_manifest_url: None,
-        }),
+        "haiku" => {
+            // `cdn.haiku-os.org` was retired upstream; probe official Haiku HTTPS release mirrors
+            // (`ftp.osuosl.org`, `mirror.rit.edu`, `mirror.aarnet.edu.au`) for anyboot `.iso.zip` or `.iso`.
+            let mut releases: Vec<String> = Vec::new();
+            if let Ok(html) = curl_text("https://ftp.osuosl.org/pub/haiku/").await {
+                for tok in html.split(|c: char| {
+                    c == '"' || c == '\'' || c == '>' || c == '<' || c == '/' || c.is_whitespace()
+                }) {
+                    if tok.starts_with("r1beta")
+                        && tok["r1beta".len()..].chars().all(|c| c.is_ascii_digit())
+                        && !releases.iter().any(|r| r == tok)
+                    {
+                        releases.push(tok.to_string());
+                    }
+                }
+                releases.sort_by(|a, b| compare_version_desc(a, b));
+            }
+            if !releases.iter().any(|r| r == "r1beta5") {
+                releases.push("r1beta5".to_string());
+            }
+
+            for rel in releases.into_iter().take(3) {
+                for fname in [
+                    format!("haiku-{rel}-x86_64-anyboot.iso.zip"),
+                    format!("haiku-{rel}-x86_64-anyboot.iso"),
+                ] {
+                    for mirror_base in [
+                        "https://ftp.osuosl.org/pub/haiku",
+                        "https://mirror.rit.edu/haiku",
+                        "https://mirror.aarnet.edu.au/pub/haiku",
+                    ] {
+                        let url = format!("{mirror_base}/{rel}/{fname}");
+                        if probe_url_reachable(&url).await {
+                            return Ok(ResolvedUpstreamAsset {
+                                url,
+                                filename: fname,
+                                sha256_manifest_url: None,
+                            });
+                        }
+                    }
+                }
+            }
+            Err("Unable to reach Haiku OS official release mirrors (ftp.osuosl.org / mirror.rit.edu / mirror.aarnet.edu.au). Check your internet connection or provide a Custom Mirror URL.".to_string())
+        }
         "freedos" => Ok(ResolvedUpstreamAsset {
             url: "https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/distributions/1.3/official/FD13-LiveCD.zip"
                 .to_string(),
@@ -1909,23 +2364,15 @@ async fn verify_sha256_from_manifest(
         }
     });
 
+    // Fail closed: if the upstream manifest does not contain an entry for this artifact,
+    // the download is UNVERIFIED and must be rejected rather than silently accepted.
     let Some(expected_hex) = expected else {
-        return Ok(());
+        return Err(format!(
+            "Refusing unverified download: the upstream SHA256 manifest does not list '{clean_target}'. The artifact was not installed."
+        ));
     };
 
-    let shasum_bin =
-        resolve_macos_binary("shasum").unwrap_or_else(|| PathBuf::from("/usr/bin/shasum"));
-    let out = Command::new(&shasum_bin)
-        .args(["-a", "256", &downloaded_file.display().to_string()])
-        .output()
-        .await
-        .map_err(|e| format!("Failed running shasum: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let actual_hex = stdout
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let actual_hex = sha256_of_file(downloaded_file).await?;
 
     if actual_hex != expected_hex {
         return Err(format!(
@@ -2015,6 +2462,35 @@ fn select_alpine_cloud_filename(html: &str) -> Option<String> {
     None
 }
 
+/// Selects the best OmniOS cloud disk image URL or filename from an HTML index / downloads page.
+/// Prefers `.cloud.qcow2` (current upstream format) followed by `.cloud.qcow2.xz`, `.cloud.qcow2.zst`,
+/// and `.cloud.raw.zst`, picking the highest `r151XX` version when multiple releases appear.
+fn select_omnios_cloud_asset(html: &str) -> Option<String> {
+    for suffix in [
+        ".cloud.qcow2",
+        ".cloud.qcow2.xz",
+        ".cloud.qcow2.zst",
+        ".cloud.raw.zst",
+    ] {
+        let mut candidates: Vec<String> = Vec::new();
+        for tok in html.split(|c: char| c == '"' || c == '\'' || c == '>' || c == '<' || c.is_whitespace())
+        {
+            let fname = tok.rsplit('/').next().unwrap_or(tok);
+            if fname.starts_with("omnios-r151")
+                && fname.ends_with(suffix)
+                && !candidates.iter().any(|c| c == tok)
+            {
+                candidates.push(tok.to_string());
+            }
+        }
+        if !candidates.is_empty() {
+            candidates.sort_by(|a, b| compare_version_desc(a, b));
+            return candidates.into_iter().next();
+        }
+    }
+    None
+}
+
 fn compare_version_desc(a: &str, b: &str) -> std::cmp::Ordering {
     let parse_nums = |s: &str| -> Vec<u32> {
         s.split(|c: char| !c.is_ascii_digit())
@@ -2045,13 +2521,192 @@ fn find_last_matching_token(
     matches.pop()
 }
 
+/// Sanitizes a URL-derived download filename into a safe single path component:
+/// keeps `[A-Za-z0-9._-]`, collapses everything else to `-`, rejects `.` / `..` traversal
+/// results, and caps the length so it can never escape the `.staging/` directory.
+fn sanitize_download_filename(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(96)
+        .collect();
+    let trimmed = cleaned.trim_matches(['-', '.']);
+    if trimmed.is_empty() || trimmed.chars().all(|c| c == '.') {
+        return "download.bin".to_string();
+    }
+    trimmed.to_string()
+}
+
 fn filename_from_url(url: &str, fallback_prefix: &str) -> String {
-    url.split('?')
+    let fallback = format!("{fallback_prefix}.img");
+    let raw = url
+        .split('?')
         .next()
         .and_then(|clean| clean.rsplit('/').next())
         .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("{fallback_prefix}.img"))
+        .unwrap_or(&fallback);
+    let sanitized = sanitize_download_filename(raw);
+    if sanitized == "download.bin" && raw != "download.bin" {
+        fallback
+    } else {
+        sanitized
+    }
+}
+
+/// Extracts the lowercase scheme (`https`, `http`, `file`, …) of a URL, if any.
+fn url_scheme(url: &str) -> Option<String> {
+    let (scheme, _rest) = url.split_once("://")?;
+    if scheme.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') {
+        return None;
+    }
+    Some(scheme.to_ascii_lowercase())
+}
+
+/// Extracts the host portion of a URL (strips userinfo and port, keeps IPv6 brackets).
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim();
+    if authority.is_empty() {
+        return None;
+    }
+    let without_userinfo = authority.rsplit('@').next().unwrap_or(authority);
+    let host = if let Some(stripped) = without_userinfo.strip_prefix('[') {
+        // IPv6 literal: [::1]:8080
+        let end = stripped.find(']')?;
+        format!("[{}]", &stripped[..end])
+    } else {
+        without_userinfo.split(':').next().unwrap_or("").to_string()
+    };
+    Some(host.to_ascii_lowercase())
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    if matches!(host, "localhost" | "[::1]" | "::1" | "0.0.0.0") {
+        return true;
+    }
+    // Only a literal IPv4 address in 127.0.0.0/8 counts as loopback — a DNS name that merely
+    // starts with "127." (e.g. 127.0.0.1.evil.example) must NOT be treated as loopback.
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return ip.octets()[0] == 127;
+    }
+    false
+}
+
+/// Validates a user-supplied custom mirror URL: only `https://` is accepted, except plain
+/// `http://` for loopback hosts (local LAN-less mirrors). `file://`, `ftp://`, etc. are rejected.
+fn validate_custom_mirror_url(raw: &str) -> Result<String, String> {
+    let url = raw.trim();
+    if url.is_empty() {
+        return Err("Custom mirror URL cannot be empty".to_string());
+    }
+    match url_scheme(url).as_deref() {
+        Some("https") => Ok(url.to_string()),
+        Some("http") => match url_host(url) {
+            Some(host) if is_loopback_host(&host) => Ok(url.to_string()),
+            _ => Err(format!(
+                "Plain-HTTP custom mirror '{url}' is only allowed for loopback hosts (127.0.0.1, localhost, [::1]). Use an https:// URL for remote mirrors."
+            )),
+        },
+        Some(other) => Err(format!(
+            "Custom mirror URL scheme '{other}://' is not allowed. Use an https:// URL (or http:// on loopback only)."
+        )),
+        None => Err(format!(
+            "Custom mirror URL '{url}' is missing a scheme. Use an https:// URL."
+        )),
+    }
+}
+
+/// Validates an optional user-supplied SHA-256 hex digest (64 lowercase/uppercase hex chars).
+fn validate_sha256_hex(raw: &str) -> Result<String, String> {
+    let hex = raw.trim().to_ascii_lowercase();
+    if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(hex)
+    } else {
+        Err("SHA-256 must be exactly 64 hexadecimal characters".to_string())
+    }
+}
+
+/// Computes the lowercase hex SHA-256 of a file via macOS `shasum -a 256`.
+async fn sha256_of_file(path: &Path) -> Result<String, String> {
+    let shasum_bin = resolve_macos_binary("shasum").unwrap_or_else(|| PathBuf::from("/usr/bin/shasum"));
+    let out = Command::new(&shasum_bin)
+        .args(["-a", "256", &path.display().to_string()])
+        .output()
+        .await
+        .map_err(|e| format!("Failed running shasum: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "shasum failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    Ok(stdout
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase())
+}
+
+/// If `url` is plain `http://` on a non-loopback host, probes the `https://` variant first and
+/// returns it when reachable; otherwise returns the original URL (caller should warn).
+async fn prefer_https_if_reachable(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("http://") {
+        if !is_loopback_host(&url_host(url).unwrap_or_default()) {
+            let https_url = format!("https://{rest}");
+            if probe_url_reachable(&https_url).await {
+                return https_url;
+            }
+        }
+    }
+    url.to_string()
+}
+
+/// True if a zip entry path is absolute or contains a `..` component (zip-slip attempt).
+fn zip_entry_has_path_traversal(entry: &str) -> bool {
+    let normalized = entry.replace('\\', "/");
+    if normalized.starts_with('/') {
+        return true;
+    }
+    normalized
+        .split('/')
+        .any(|seg| seg == "..")
+}
+
+/// Returns true if every file under `root` canonicalizes to a path still inside `root`
+/// (defense-in-depth against archive extraction escaping the staging directory).
+fn extracted_tree_stays_inside(root: &Path) -> bool {
+    let Ok(canon_root) = fs::canonicalize(root) else {
+        return false;
+    };
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(cur) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&cur) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            match fs::canonicalize(&p) {
+                Ok(canon) if canon.starts_with(&canon_root) => {
+                    if p.is_dir() {
+                        stack.push(p);
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+    true
 }
 
 fn strip_last_extension(path: &Path) -> PathBuf {
@@ -2105,6 +2760,228 @@ fn move_or_copy_file(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn arch_badge_label(arch: GuestArch) -> &'static str {
+    match arch {
+        GuestArch::Aarch64 => "ARM64",
+        GuestArch::X86_64 => "x86_64",
+        GuestArch::I386 => "i386",
+        GuestArch::Riscv64 => "riscv64",
+    }
+}
+
+fn strip_arch_suffix(ver: &str) -> &str {
+    for suffix in [" (ARM64)", " (x86_64)", " (i386)", " (riscv64)"] {
+        if let Some(stripped) = ver.strip_suffix(suffix) {
+            return stripped.trim();
+        }
+    }
+    ver.trim()
+}
+
+fn format_template_display_name(base_name: &str, version_with_arch: Option<&str>) -> String {
+    match version_with_arch.map(strip_arch_suffix).filter(|s| !s.is_empty()) {
+        Some(ver) => format!("{base_name} {ver}"),
+        None => base_name.to_string(),
+    }
+}
+
+fn take_numeric_dot_prefix(s: &str) -> Option<&str> {
+    let end = s
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(s.len());
+    let candidate = s[..end].trim_end_matches('.');
+    if !candidate.is_empty() && candidate.chars().any(|c| c.is_ascii_digit()) {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Extracts a human-readable upstream OS release version from a resolved mirror or local archive filename.
+fn extract_upstream_version(catalog_id: &str, filename: &str, arch: GuestArch) -> Option<String> {
+    let arch_lbl = arch_badge_label(arch);
+    let lower = filename.to_ascii_lowercase();
+
+    match catalog_id {
+        "freebsd" => {
+            // e.g. `FreeBSD-15.1-RELEASE-arm64-aarch64-ufs.qcow2.xz`
+            let idx = lower.find("freebsd-")?;
+            let after = &filename[idx + "freebsd-".len()..];
+            let mut parts = after.split('-');
+            let num = parts.next()?;
+            if !num.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                return None;
+            }
+            let tag = parts.next().unwrap_or("");
+            let tag_upper = tag.to_ascii_uppercase();
+            if tag_upper.starts_with("RELEASE")
+                || tag_upper.starts_with("STABLE")
+                || tag_upper.starts_with("CURRENT")
+                || tag_upper.starts_with("RC")
+                || tag_upper.starts_with("BETA")
+            {
+                Some(format!("{num}-{tag_upper} ({arch_lbl})"))
+            } else {
+                Some(format!("{num} ({arch_lbl})"))
+            }
+        }
+        "alpine-linux" => {
+            // e.g. `nocloud_alpine-3.23.0-aarch64-uefi-tiny-r0.qcow2.xz`
+            let idx = lower.find("alpine-")?;
+            let after = &filename[idx + "alpine-".len()..];
+            let ver = take_numeric_dot_prefix(after)?;
+            Some(format!("{ver} ({arch_lbl})"))
+        }
+        "debian-linux" => {
+            // e.g. `debian-12-nocloud-arm64.qcow2` or `debian-13-nocloud-arm64.qcow2`
+            let idx = lower.find("debian-")?;
+            let after = &filename[idx + "debian-".len()..];
+            let ver = take_numeric_dot_prefix(after)?;
+            let codename = match ver {
+                "12" => " Bookworm",
+                "13" => " Trixie",
+                _ => "",
+            };
+            Some(format!("{ver}{codename} ({arch_lbl})"))
+        }
+        "openbsd" => {
+            // e.g. `openbsd-install78.img` or `install78.img`
+            let idx = lower.find("install")?;
+            let after = &lower[idx + "install".len()..];
+            let digits_end = after
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after.len());
+            let digits = &after[..digits_end];
+            if digits.len() == 2 {
+                Some(format!("{}.{} ({arch_lbl})", &digits[0..1], &digits[1..2]))
+            } else if digits.len() == 3 {
+                Some(format!("{}.{} ({arch_lbl})", &digits[0..1], &digits[1..3]))
+            } else {
+                None
+            }
+        }
+        "netbsd" => {
+            // e.g. `netbsd-10.1-arm64.img.gz`
+            let idx = lower.find("netbsd-")?;
+            let after = &filename[idx + "netbsd-".len()..];
+            let ver = take_numeric_dot_prefix(after)?;
+            Some(format!("{ver} ({arch_lbl})"))
+        }
+        "openwrt" => {
+            // e.g. `openwrt-24.10.0-armsr-armv8-generic-ext4-combined-efi.img.gz`
+            let idx = lower.find("openwrt-")?;
+            let after = &filename[idx + "openwrt-".len()..];
+            let ver = take_numeric_dot_prefix(after)?;
+            Some(format!("{ver} ({arch_lbl})"))
+        }
+        "mikrotik-chr" => {
+            // e.g. `chr-7.17.2.arm64.img.zip`
+            let idx = lower.find("chr-")?;
+            let after = &filename[idx + "chr-".len()..];
+            let ver_raw = take_numeric_dot_prefix(after)?;
+            let ver = ver_raw.strip_suffix(".arm64").unwrap_or(ver_raw);
+            Some(format!("v{ver} ({arch_lbl})"))
+        }
+        "vyos" => {
+            // e.g. `vyos-1.5-rolling-202502100007-generic-amd64.iso` or `vyos-2026.11.14-0020-rolling-generic-amd64.iso`
+            let idx = lower.find("vyos-")?;
+            let after = &filename[idx + "vyos-".len()..];
+            let ver = take_numeric_dot_prefix(after)?;
+            if lower.contains("rolling") {
+                Some(format!("{ver} Rolling ({arch_lbl})"))
+            } else {
+                Some(format!("{ver} ({arch_lbl})"))
+            }
+        }
+        "9front" => {
+            // e.g. `9front-10931.38d2aa224395.arm64.qcow2.gz`
+            let idx = lower.find("9front-")?;
+            let after = &filename[idx + "9front-".len()..];
+            let end = after
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after.len());
+            let rel = &after[..end];
+            if !rel.is_empty() {
+                Some(format!("r{rel} ({arch_lbl})"))
+            } else {
+                None
+            }
+        }
+        "opnsense" => {
+            // e.g. `OPNsense-25.1-nano-amd64.img.bz2`
+            let idx = lower.find("opnsense-")?;
+            let after = &filename[idx + "opnsense-".len()..];
+            let ver = take_numeric_dot_prefix(after)?;
+            Some(format!("{ver} Nano ({arch_lbl})"))
+        }
+        "pfsense" => {
+            // e.g. `pfSense-CE-2.7.2-RELEASE-amd64.iso.gz`
+            for tok in filename.split(|c: char| c == '-' || c == '_') {
+                if tok.contains('.') && tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                {
+                    if let Some(ver) = take_numeric_dot_prefix(tok) {
+                        return Some(format!("{ver} CE ({arch_lbl})"));
+                    }
+                }
+            }
+            None
+        }
+        "omnios" => {
+            // e.g. `omnios-r151052.cloud.qcow2.xz`
+            let idx = lower.find("r151")?;
+            let after = &lower[idx..];
+            let end = after
+                .find(|c: char| !c.is_ascii_alphanumeric())
+                .unwrap_or(after.len());
+            let rel = &after[..end];
+            Some(format!("{rel} LTS ({arch_lbl})"))
+        }
+        "dragonflybsd" => {
+            // e.g. `dfly-x86_64-6.4.2_REL.iso.bz2`
+            for tok in filename.split(|c: char| c == '-' || c == '_') {
+                if tok.contains('.') && tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                {
+                    if let Some(ver) = take_numeric_dot_prefix(tok) {
+                        return Some(format!("{ver}-REL ({arch_lbl})"));
+                    }
+                }
+            }
+            None
+        }
+        "haiku" => {
+            if let Some(idx) = lower.find("r1beta") {
+                let after = &lower[idx + "r1beta".len()..];
+                let end = after
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(after.len());
+                let beta_num = &after[..end];
+                if !beta_num.is_empty() {
+                    return Some(format!("R1/beta{beta_num} ({arch_lbl})"));
+                }
+            }
+            None
+        }
+        "freedos" => {
+            if let Some(idx) = lower.find("fd") {
+                let after = &lower[idx + 2..];
+                let end = after
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(after.len());
+                let digits = &after[..end];
+                if digits.len() == 2 {
+                    return Some(format!(
+                        "{}.{} LiveCD ({arch_lbl})",
+                        &digits[0..1],
+                        &digits[1..2]
+                    ));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2123,6 +3000,11 @@ mod tests {
             .unwrap();
         assert_eq!(entries.len(), 15, "must expose all 15 curated OSes");
 
+        // FreeBSD card must never advertise a stale hardcoded major version before download
+        let fbsd = entries.iter().find(|e| e.id == "freebsd").unwrap();
+        assert_eq!(fbsd.name, "FreeBSD");
+        assert_eq!(fbsd.version, "Latest RELEASE (ARM64)");
+
         let arm_count = entries
             .iter()
             .filter(|e| e.arch == GuestArch::Aarch64)
@@ -2136,7 +3018,7 @@ mod tests {
         assert_eq!(x86_count, 6);
         assert_eq!(i386_count, 1);
 
-        // Verify local file import + safe delete + project reference check using a mock qemu-img
+        // Verify local file import + detected version persistence + safe delete
         let mock_qemu_img = tmp.join("mock-qemu-img");
         let script = r#"#!/usr/bin/env python3
 import json, os, shutil, sys
@@ -2158,7 +3040,7 @@ elif cmd == "info":
 
         let store_with_mock =
             ImageStore::with_qemu_img_binary(image_store.storage().clone(), mock_qemu_img);
-        let dummy_raw = tmp.join("chr-test.img");
+        let dummy_raw = tmp.join("chr-7.17.2.arm64.img");
         fs::write(&dummy_raw, vec![0u8; 4096]).unwrap();
 
         let imported = mgr
@@ -2173,10 +3055,37 @@ elif cmd == "info":
             .await
             .unwrap();
         assert_eq!(imported.availability, CatalogAvailability::Ready);
+        assert_eq!(imported.version, "v7.17.2 (ARM64)");
         assert_eq!(
             imported.installed_template_id.as_deref(),
             Some("mikrotik-chr-aarch64-base")
         );
+
+        // Also import a FreeBSD 15.1 qcow2 artifact and verify exact version persistence in `.template.json`
+        let dummy_fbsd = tmp.join("FreeBSD-15.1-RELEASE-arm64-aarch64-ufs.qcow2");
+        fs::write(&dummy_fbsd, vec![0u8; 4096]).unwrap();
+        let imported_fbsd = mgr
+            .import_local_file(
+                CatalogImportLocalRequest {
+                    catalog_id: "freebsd".to_string(),
+                    source_path: dummy_fbsd.display().to_string(),
+                },
+                store_with_mock.storage(),
+                &store_with_mock,
+            )
+            .await
+            .unwrap();
+        assert_eq!(imported_fbsd.availability, CatalogAvailability::Ready);
+        assert_eq!(imported_fbsd.name, "FreeBSD");
+        assert_eq!(imported_fbsd.version, "15.1-RELEASE (ARM64)");
+
+        let templates = store_with_mock.list_templates().await.unwrap();
+        let fbsd_tpl = templates
+            .iter()
+            .find(|t| t.id == "freebsd-aarch64-base")
+            .unwrap();
+        assert_eq!(fbsd_tpl.name, "FreeBSD 15.1-RELEASE");
+        assert_eq!(fbsd_tpl.version.as_deref(), Some("15.1-RELEASE (ARM64)"));
 
         let vm_mgr = VmManager::new();
         let del = mgr
@@ -2186,6 +3095,67 @@ elif cmd == "info":
         assert!(del.deleted);
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn upstream_version_extractor_parses_curated_mirror_filenames() {
+        assert_eq!(
+            extract_upstream_version(
+                "freebsd",
+                "FreeBSD-15.1-RELEASE-arm64-aarch64-ufs.qcow2.xz",
+                GuestArch::Aarch64
+            )
+            .as_deref(),
+            Some("15.1-RELEASE (ARM64)")
+        );
+        assert_eq!(
+            extract_upstream_version(
+                "alpine-linux",
+                "nocloud_alpine-3.23.0-aarch64-uefi-tiny-r0.qcow2.xz",
+                GuestArch::Aarch64
+            )
+            .as_deref(),
+            Some("3.23.0 (ARM64)")
+        );
+        assert_eq!(
+            extract_upstream_version("openbsd", "openbsd-install78.img", GuestArch::Aarch64)
+                .as_deref(),
+            Some("7.8 (ARM64)")
+        );
+        assert_eq!(
+            extract_upstream_version("netbsd", "netbsd-10.1-arm64.img.gz", GuestArch::Aarch64)
+                .as_deref(),
+            Some("10.1 (ARM64)")
+        );
+        assert_eq!(
+            extract_upstream_version(
+                "openwrt",
+                "openwrt-24.10.0-armsr-armv8-generic-ext4-combined-efi.img.gz",
+                GuestArch::Aarch64
+            )
+            .as_deref(),
+            Some("24.10.0 (ARM64)")
+        );
+        assert_eq!(
+            extract_upstream_version("mikrotik-chr", "chr-7.17.2.arm64.img.zip", GuestArch::Aarch64)
+                .as_deref(),
+            Some("v7.17.2 (ARM64)")
+        );
+        assert_eq!(
+            extract_upstream_version("opnsense", "OPNsense-25.1-nano-amd64.img.bz2", GuestArch::X86_64)
+                .as_deref(),
+            Some("25.1 Nano (x86_64)")
+        );
+        assert_eq!(
+            extract_upstream_version("omnios", "omnios-r151052.cloud.qcow2.xz", GuestArch::X86_64)
+                .as_deref(),
+            Some("r151052 LTS (x86_64)")
+        );
+        assert_eq!(
+            extract_upstream_version("dragonflybsd", "dfly-x86_64-6.4.2_REL.iso.bz2", GuestArch::X86_64)
+                .as_deref(),
+            Some("6.4.2-REL (x86_64)")
+        );
     }
 
     #[test]
@@ -2208,5 +3178,235 @@ elif cmd == "info":
             select_alpine_cloud_filename(html_cloudinit_only).as_deref(),
             Some("nocloud_alpine-3.22.0-aarch64-uefi-cloudinit-r0.qcow2.xz")
         );
+
+        let omnios_html = r#"
+            <a href="omnios-r151054.iso">iso</a>
+            <a href="omnios-r151054.cloud.raw.zst">raw</a>
+            <a href="omnios-r151054.cloud.qcow2">lts qcow2</a>
+            <a href="omnios-r151060.cloud.qcow2">stable qcow2</a>
+            <a href="omnios-r151060.cloud.qcow2.sha256">sha</a>
+        "#;
+        assert_eq!(
+            select_omnios_cloud_asset(omnios_html).as_deref(),
+            Some("omnios-r151060.cloud.qcow2")
+        );
+    }
+
+    #[tokio::test]
+    async fn start_download_clears_active_canceller_and_transitions_cleanly_to_ready() {
+        let tmp = std::env::temp_dir().join(format!("etherloom-dl-test-{}", Uuid::new_v4()));
+        let storage = StorageManager::new(tmp.join("AppSupport"), tmp.join("FakeVolumes"));
+        let _ = storage.refresh_and_snapshot().await;
+
+        let mock_qemu_img = tmp.join("mock-qemu-img");
+        let script = r#"#!/usr/bin/env python3
+import json, os, shutil, sys
+args = sys.argv[1:]
+cmd = args[0]
+if cmd == "convert":
+    src, dst = args[-2], args[-1]
+    shutil.copyfile(src, dst)
+elif cmd == "resize":
+    pass
+elif cmd == "info":
+    target = args[-1]
+    print(json.dumps({"format": "qcow2", "virtual-size": 12884901888, "actual-size": os.path.getsize(target)}))
+"#;
+        fs::write(&mock_qemu_img, script).unwrap();
+        let mut perms = fs::metadata(&mock_qemu_img).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&mock_qemu_img, perms).unwrap();
+
+        let store = ImageStore::with_qemu_img_binary(storage.clone(), mock_qemu_img);
+        let mgr = CatalogManager::new();
+
+        let local_mirror_file = tmp.join("FreeBSD-15.1-RELEASE-arm64-aarch64-ufs.qcow2");
+        fs::write(&local_mirror_file, vec![0x42u8; 8192]).unwrap();
+        let payload = fs::read(&local_mirror_file).unwrap();
+
+        // Serve the artifact over loopback HTTP (plain http is allowed only for loopback hosts)
+        let mirror_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mirror_port = mirror_listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = mirror_listener.accept().await {
+                let payload = payload.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = vec![0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        payload.len()
+                    );
+                    let _ = sock.write_all(head.as_bytes()).await;
+                    let _ = sock.write_all(&payload).await;
+                });
+            }
+        });
+        let mirror_url = format!(
+            "http://127.0.0.1:{mirror_port}/FreeBSD-15.1-RELEASE-arm64-aarch64-ufs.qcow2"
+        );
+
+        mgr.start_download(
+            CatalogDownloadRequest {
+                catalog_id: "freebsd".to_string(),
+                custom_url: Some(mirror_url),
+                custom_sha256: None,
+            },
+            storage.clone(),
+            store.clone(),
+        )
+        .await
+        .unwrap();
+
+        // Wait for background pipeline to finish and verify `list_catalog` transitions to `Ready` with `15.1-RELEASE (ARM64)`
+        let mut ready_entry = None;
+        for _ in 0..50 {
+            let entries = mgr.list_catalog(&store, "aarch64", true).await.unwrap();
+            let fbsd = entries.into_iter().find(|e| e.id == "freebsd").unwrap();
+            if fbsd.availability == CatalogAvailability::Ready {
+                ready_entry = Some(fbsd);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+
+        let fbsd = ready_entry.expect("FreeBSD download must transition cleanly to Ready");
+        assert_eq!(fbsd.name, "FreeBSD");
+        assert_eq!(fbsd.version, "15.1-RELEASE (ARM64)");
+        assert!(
+            !mgr.inner.active_cancellers.read().await.contains_key("freebsd"),
+            "active_cancellers must be empty once Ready"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn template_ref_profile_detects_builtin_and_manifest_cross_profile_mismatches() {
+        assert_eq!(
+            builtin_template_stem_profile("alpine-aarch64-base"),
+            Some("alpine-linux")
+        );
+        assert_eq!(
+            builtin_template_stem_profile("/Volumes/T7/templates/alpine-aarch64-base.qcow2"),
+            Some("alpine-linux")
+        );
+        assert_eq!(
+            builtin_template_stem_profile("debian-aarch64-base.qcow2"),
+            Some("debian-linux")
+        );
+        assert_eq!(builtin_template_stem_profile("custom-router"), None);
+
+        let discovered_unmanifested = BaseTemplateInfo {
+            id: "custom-router".to_string(),
+            name: "Debian / Generic Linux (custom-router)".to_string(),
+            os_profile_id: "debian-linux".to_string(),
+            version: None,
+            arch: GuestArch::Aarch64,
+            default_nic_model: NicModel::VirtioNetPci,
+            default_firmware: FirmwareType::Uefi,
+            default_disk_bus: DiskBus::VirtioBlk,
+            path: "/tmp/custom-router.qcow2".to_string(),
+            filename: "custom-router.qcow2".to_string(),
+            virtual_size_bytes: 1024,
+            actual_size_bytes: 512,
+            read_only: true,
+            created_at_ms: 0,
+            description: Some("Discovered qcow2 base template".to_string()),
+        };
+        assert_eq!(
+            template_ref_profile("custom-router", &[discovered_unmanifested]),
+            None
+        );
+    }
+
+    #[test]
+    fn custom_mirror_url_validation_allows_https_and_loopback_http_only() {
+        // https is always allowed
+        assert!(validate_custom_mirror_url("https://mirror.example.com/os.img.xz").is_ok());
+        assert!(validate_custom_mirror_url("https://user:pw@mirror.example.com:8443/os.img").is_ok());
+        // plain http only on loopback
+        assert!(validate_custom_mirror_url("http://127.0.0.1:8080/os.img").is_ok());
+        assert!(validate_custom_mirror_url("http://localhost:8080/os.img").is_ok());
+        assert!(validate_custom_mirror_url("http://[::1]:8080/os.img").is_ok());
+        assert!(validate_custom_mirror_url("http://127.0.0.1.evil.example/os.img").is_err());
+        assert!(validate_custom_mirror_url("http://example.com/os.img").is_err());
+        // dangerous schemes rejected
+        assert!(validate_custom_mirror_url("file:///etc/passwd").is_err());
+        assert!(validate_custom_mirror_url("ftp://example.com/os.img").is_err());
+        assert!(validate_custom_mirror_url("gopher://example.com/").is_err());
+        assert!(validate_custom_mirror_url("/etc/passwd").is_err());
+        assert!(validate_custom_mirror_url("").is_err());
+    }
+
+    #[test]
+    fn url_host_and_scheme_parsing_handles_userinfo_ports_and_ipv6() {
+        assert_eq!(url_scheme("https://a.com/x"), Some("https".to_string()));
+        assert_eq!(url_scheme("no-scheme"), None);
+        assert_eq!(url_host("https://user:pw@mirror.example.com:8443/os.img"), Some("mirror.example.com".to_string()));
+        assert_eq!(url_host("http://[::1]:8080/x"), Some("[::1]".to_string()));
+        assert_eq!(url_host("http://127.0.0.1:9000/x"), Some("127.0.0.1".to_string()));
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("127.5.6.7"));
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("[::1]"));
+        assert!(!is_loopback_host("example.com"));
+        assert!(!is_loopback_host("127.0.0.1.evil.example"));
+    }
+
+    #[test]
+    fn filename_from_url_sanitizes_traversal_and_unsafe_chars() {
+        assert_eq!(
+            filename_from_url("https://mirror.example.com/images/FreeBSD-15.1-arm64.qcow2.xz?dl=1", "x"),
+            "FreeBSD-15.1-arm64.qcow2.xz"
+        );
+        // `..` must never survive as a filename component
+        assert_eq!(filename_from_url("http://h/..", "x"), "x.img");
+        let encoded = filename_from_url("http://h/..%2F..%2Fetc%2Fpasswd", "x");
+        assert!(!encoded.contains('/'), "no path separators may survive: {encoded}");
+        assert!(!encoded.chars().all(|c| c == '.'), "must not be a dot-only name");
+        assert_eq!(filename_from_url("http://h/../../evil", "x"), "evil");
+        assert_eq!(filename_from_url("http://h/", "fallback"), "fallback.img");
+        let long = format!("http://h/{}", "a".repeat(500));
+        assert!(filename_from_url(&long, "x").len() <= 96);
+    }
+
+    #[test]
+    fn sha256_hex_validation_requires_64_hex_chars() {
+        assert!(validate_sha256_hex(&"a".repeat(64)).is_ok());
+        assert!(validate_sha256_hex(&"A1b2".repeat(16)).is_ok());
+        assert!(validate_sha256_hex("abc123").is_err());
+        assert!(validate_sha256_hex(&"z".repeat(64)).is_err());
+        assert!(validate_sha256_hex(&"a".repeat(63)).is_err());
+    }
+
+    #[test]
+    fn zip_entry_path_traversal_detection_catches_dotdot_and_absolute() {
+        assert!(zip_entry_has_path_traversal("../evil.img"));
+        assert!(zip_entry_has_path_traversal("a/../../evil.img"));
+        assert!(zip_entry_has_path_traversal("/etc/passwd"));
+        assert!(zip_entry_has_path_traversal("a\\..\\..\\evil.img"));
+        assert!(!zip_entry_has_path_traversal("chr-7.15.0.img"));
+        assert!(!zip_entry_has_path_traversal("dir/chr.img"));
+        assert!(!zip_entry_has_path_traversal("..hidden.img"));
+    }
+
+    #[test]
+    fn extracted_tree_containment_check_flags_escapes() {
+        let tmp = std::env::temp_dir().join(format!("el-zipcheck-{}", Uuid::new_v4()));
+        fs::create_dir_all(tmp.join("unzipped/inner")).unwrap();
+        fs::write(tmp.join("unzipped/inner/disk.img"), b"x").unwrap();
+        assert!(extracted_tree_stays_inside(&tmp.join("unzipped")));
+        // A symlink pointing outside the tree must fail the containment check
+        #[cfg(unix)]
+        {
+            let outside = tmp.join("outside.img");
+            fs::write(&outside, b"y").unwrap();
+            let link = tmp.join("unzipped/escape.img");
+            let _ = std::os::unix::fs::symlink(&outside, &link);
+            assert!(!extracted_tree_stays_inside(&tmp.join("unzipped")));
+        }
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

@@ -507,12 +507,16 @@ export function SerialTerminalPane({
         </div>
       </div>
 
-      {/* Live xterm.js Canvas */}
+      {/* Live xterm.js Canvas (absolute inset inside overflow-hidden wrapper so shrinking & expanding fit smoothly) */}
       <div
-        ref={containerRef}
-        className="flex-1 min-h-0 w-full p-1.5 overflow-hidden"
+        className="relative flex-1 min-h-0 min-w-0 w-full overflow-hidden"
         onClick={() => termRef.current?.focus()}
-      />
+      >
+        <div
+          ref={containerRef}
+          className="absolute inset-1.5 overflow-hidden"
+        />
+      </div>
     </div>
   );
 }

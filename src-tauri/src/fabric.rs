@@ -1,3 +1,5 @@
+use crate::dhcp_appliance::{DhcpLeaseDto, DhcpServerConfig, DhcpServerCore};
+use crate::nat_gateway::{FrameInjector, NatGatewayConfig, NatGatewayCore, NatSessionDto};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -279,10 +281,11 @@ impl L1HubCore {
     }
 }
 
-#[derive(Debug)]
 enum VirtualDevice {
     Switch(L2SwitchCore),
     Hub(L1HubCore),
+    DhcpServer(DhcpServerCore),
+    NatGateway(NatGatewayCore),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,7 +293,7 @@ enum VirtualDevice {
 pub struct VirtualDeviceInfo {
     pub id: DeviceId,
     pub name: String,
-    pub kind: String, // "l2_switch" | "l1_hub"
+    pub kind: String, // "l2_switch" | "l1_hub" | "dhcp_server" | "nat_gateway"
     pub ports: Vec<PortId>,
 }
 
@@ -585,8 +588,15 @@ impl PacketFabric {
     fn allocate_free_vm_udp_port(&self, requested: Option<u16>) -> Result<u16, String> {
         if let Some(explicit) = requested {
             if explicit > 0 {
-                if let Ok(mut set) = self.inner.reserved_vm_ports.lock() {
-                    set.insert(explicit);
+                let mut guard = self
+                    .inner
+                    .reserved_vm_ports
+                    .lock()
+                    .map_err(|_| "UDP port registry poisoned".to_string())?;
+                if !guard.insert(explicit) {
+                    return Err(format!(
+                        "UDP port {explicit} is already reserved by another fabric port"
+                    ));
                 }
                 return Ok(explicit);
             }
@@ -944,7 +954,215 @@ impl PacketFabric {
         })
     }
 
-    /// Removes a virtual L2 Switch or L1 Hub and detaches all its ports & links.
+    /// Instantiates a Pure-Rust Dual-Stack DHCPv4 + DHCPv6 + SLAAC RA Appliance.
+    pub async fn create_dhcp_server(
+        &self,
+        device_id: Option<String>,
+        name: String,
+        port_count: usize,
+        config: DhcpServerConfig,
+    ) -> Result<VirtualDeviceInfo, String> {
+        if port_count == 0 || port_count > 128 {
+            return Err("DHCP server port_count must be between 1 and 128".to_string());
+        }
+        let id = device_id.unwrap_or_else(|| format!("dhcp-{}", Uuid::new_v4()));
+
+        {
+            let guard = self.inner.devices.read().await;
+            if guard.contains_key(&id) {
+                return Err(format!("Virtual device '{id}' already exists"));
+            }
+        }
+
+        let ports: Vec<PortId> = (0..port_count).map(|i| format!("{id}-p{i}")).collect();
+        let srv = DhcpServerCore::new(id.clone(), name.clone(), ports.clone(), config);
+
+        {
+            let mut ports_guard = self.inner.ports.write().await;
+            for pid in &ports {
+                ports_guard.insert(
+                    pid.clone(),
+                    PortKind::Virtual {
+                        device_id: id.clone(),
+                    },
+                );
+            }
+        }
+        {
+            let mut dev_guard = self.inner.devices.write().await;
+            dev_guard.insert(
+                id.clone(),
+                tokio::sync::Mutex::new(VirtualDevice::DhcpServer(srv)),
+            );
+        }
+
+        Ok(VirtualDeviceInfo {
+            id,
+            name,
+            kind: "dhcp_server".to_string(),
+            ports,
+        })
+    }
+
+    /// Idempotently ensures a Dual-Stack DHCPv4 + DHCPv6 Server exists and updates its config in place.
+    pub async fn ensure_dhcp_server(
+        &self,
+        device_id: &str,
+        name: &str,
+        port_count: usize,
+        config: DhcpServerConfig,
+    ) -> Result<VirtualDeviceInfo, String> {
+        let existing_check = {
+            let guard = self.inner.devices.read().await;
+            if let Some(dev_mutex) = guard.get(device_id) {
+                let mut dev = dev_mutex.lock().await;
+                if let VirtualDevice::DhcpServer(srv) = &mut *dev {
+                    if srv.ports.len() == port_count {
+                        srv.name = name.to_string();
+                        srv.update_config(config.clone());
+                        Some(VirtualDeviceInfo {
+                            id: srv.id.clone(),
+                            name: srv.name.clone(),
+                            kind: "dhcp_server".to_string(),
+                            ports: srv.ports.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(info) = existing_check {
+            return Ok(info);
+        }
+
+        if self.inner.devices.read().await.contains_key(device_id) {
+            let _ = self.remove_device(device_id).await;
+        }
+        self.create_dhcp_server(
+            Some(device_id.to_string()),
+            name.to_string(),
+            port_count,
+            config,
+        )
+        .await
+    }
+
+    /// Instantiates a Pure-Rust Zero-Root Host Internet Access Gateway (`NatGatewayCore`).
+    pub async fn create_nat_gateway(
+        &self,
+        device_id: Option<String>,
+        name: String,
+        port_count: usize,
+        config: NatGatewayConfig,
+    ) -> Result<VirtualDeviceInfo, String> {
+        if port_count == 0 || port_count > 128 {
+            return Err("NAT gateway port_count must be between 1 and 128".to_string());
+        }
+        let id = device_id.unwrap_or_else(|| format!("nat-{}", Uuid::new_v4()));
+
+        {
+            let guard = self.inner.devices.read().await;
+            if guard.contains_key(&id) {
+                return Err(format!("Virtual device '{id}' already exists"));
+            }
+        }
+
+        let ports: Vec<PortId> = (0..port_count).map(|i| format!("{id}-p{i}")).collect();
+        let weak_inner = Arc::downgrade(&self.inner);
+        let injector: FrameInjector = Arc::new(move |port_id: String, frame_bytes: Bytes| {
+            if let Some(inner) = weak_inner.upgrade() {
+                let fab = PacketFabric { inner };
+                tokio::spawn(async move {
+                    fab.handle_port_ingress(&port_id, frame_bytes, 0).await;
+                });
+            }
+        });
+
+        let gw = NatGatewayCore::new(id.clone(), name.clone(), ports.clone(), config, injector);
+
+        {
+            let mut ports_guard = self.inner.ports.write().await;
+            for pid in &ports {
+                ports_guard.insert(
+                    pid.clone(),
+                    PortKind::Virtual {
+                        device_id: id.clone(),
+                    },
+                );
+            }
+        }
+        {
+            let mut dev_guard = self.inner.devices.write().await;
+            dev_guard.insert(
+                id.clone(),
+                tokio::sync::Mutex::new(VirtualDevice::NatGateway(gw)),
+            );
+        }
+
+        Ok(VirtualDeviceInfo {
+            id,
+            name,
+            kind: "nat_gateway".to_string(),
+            ports,
+        })
+    }
+
+    /// Idempotently ensures a Host Internet Gateway (`nat_gateway`) exists and updates its config in place.
+    pub async fn ensure_nat_gateway(
+        &self,
+        device_id: &str,
+        name: &str,
+        port_count: usize,
+        config: NatGatewayConfig,
+    ) -> Result<VirtualDeviceInfo, String> {
+        let existing_check = {
+            let guard = self.inner.devices.read().await;
+            if let Some(dev_mutex) = guard.get(device_id) {
+                let mut dev = dev_mutex.lock().await;
+                if let VirtualDevice::NatGateway(gw) = &mut *dev {
+                    if gw.ports.len() == port_count {
+                        gw.name = name.to_string();
+                        gw.update_config(config.clone());
+                        Some(VirtualDeviceInfo {
+                            id: gw.id.clone(),
+                            name: gw.name.clone(),
+                            kind: "nat_gateway".to_string(),
+                            ports: gw.ports.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(info) = existing_check {
+            return Ok(info);
+        }
+
+        if self.inner.devices.read().await.contains_key(device_id) {
+            let _ = self.remove_device(device_id).await;
+        }
+        self.create_nat_gateway(
+            Some(device_id.to_string()),
+            name.to_string(),
+            port_count,
+            config,
+        )
+        .await
+    }
+
+    /// Removes a virtual fabric device and detaches all its ports & links.
     pub async fn remove_device(&self, device_id: &str) -> Result<(), String> {
         let removed = {
             let mut guard = self.inner.devices.write().await;
@@ -957,6 +1175,8 @@ impl PacketFabric {
         let ports = match dev_mutex.into_inner() {
             VirtualDevice::Switch(sw) => sw.ports,
             VirtualDevice::Hub(hub) => hub.ports,
+            VirtualDevice::DhcpServer(srv) => srv.ports,
+            VirtualDevice::NatGateway(gw) => gw.ports.clone(),
         };
         for pid in ports {
             let _ = self.remove_port(&pid).await;
@@ -1181,8 +1401,8 @@ impl PacketFabric {
         let mut dev = dev_mutex.lock().await;
         match &mut *dev {
             VirtualDevice::Switch(sw) => Ok(sw.snapshot_mac_table(Instant::now())),
-            VirtualDevice::Hub(_) => Err(format!(
-                "Device '{switch_id}' is an L1 Hub and does not maintain a MAC table"
+            _ => Err(format!(
+                "Device '{switch_id}' does not maintain an L2 switch MAC table"
             )),
         }
     }
@@ -1199,9 +1419,72 @@ impl PacketFabric {
                 sw.mac_table.clear();
                 Ok(())
             }
-            VirtualDevice::Hub(_) => Err(format!(
-                "Device '{switch_id}' is an L1 Hub and does not maintain a MAC table"
+            _ => Err(format!(
+                "Device '{switch_id}' does not maintain an L2 switch MAC table"
             )),
+        }
+    }
+
+    /// Returns active DHCPv4 / DHCPv6 leases on a `dhcp_server` or `nat_gateway` appliance.
+    pub async fn get_dhcp_leases(&self, device_id: &str) -> Result<Vec<DhcpLeaseDto>, String> {
+        let dev_guard = self.inner.devices.read().await;
+        let dev_mutex = dev_guard
+            .get(device_id)
+            .ok_or_else(|| format!("Device '{device_id}' not found"))?;
+        let mut dev = dev_mutex.lock().await;
+        match &mut *dev {
+            VirtualDevice::DhcpServer(srv) => Ok(srv.snapshot_leases(Instant::now())),
+            VirtualDevice::NatGateway(gw) => Ok(gw.snapshot_leases(Instant::now())),
+            _ => Err(format!("Device '{device_id}' does not run a DHCP server")),
+        }
+    }
+
+    /// Clears active DHCPv4 / DHCPv6 leases on a `dhcp_server` or `nat_gateway` appliance.
+    pub async fn clear_dhcp_leases(&self, device_id: &str) -> Result<(), String> {
+        let dev_guard = self.inner.devices.read().await;
+        let dev_mutex = dev_guard
+            .get(device_id)
+            .ok_or_else(|| format!("Device '{device_id}' not found"))?;
+        let mut dev = dev_mutex.lock().await;
+        match &mut *dev {
+            VirtualDevice::DhcpServer(srv) => {
+                srv.clear_leases();
+                Ok(())
+            }
+            VirtualDevice::NatGateway(gw) => {
+                gw.clear_leases();
+                Ok(())
+            }
+            _ => Err(format!("Device '{device_id}' does not run a DHCP server")),
+        }
+    }
+
+    /// Returns active TCP/UDP/DNS NAT sessions on a `nat_gateway` appliance.
+    pub async fn get_nat_sessions(&self, device_id: &str) -> Result<Vec<NatSessionDto>, String> {
+        let dev_guard = self.inner.devices.read().await;
+        let dev_mutex = dev_guard
+            .get(device_id)
+            .ok_or_else(|| format!("NAT Gateway '{device_id}' not found"))?;
+        let dev = dev_mutex.lock().await;
+        match &*dev {
+            VirtualDevice::NatGateway(gw) => Ok(gw.snapshot_sessions(Instant::now())),
+            _ => Err(format!("Device '{device_id}' is not a NAT Gateway")),
+        }
+    }
+
+    /// Closes and flushes all active NAT sessions on a `nat_gateway` appliance.
+    pub async fn clear_nat_sessions(&self, device_id: &str) -> Result<(), String> {
+        let dev_guard = self.inner.devices.read().await;
+        let dev_mutex = dev_guard
+            .get(device_id)
+            .ok_or_else(|| format!("NAT Gateway '{device_id}' not found"))?;
+        let mut dev = dev_mutex.lock().await;
+        match &mut *dev {
+            VirtualDevice::NatGateway(gw) => {
+                gw.clear_sessions();
+                Ok(())
+            }
+            _ => Err(format!("Device '{device_id}' is not a NAT Gateway")),
         }
     }
 
@@ -1345,22 +1628,39 @@ impl PacketFabric {
                     let _ = sock.send_to(&frame, peer_addr).await;
                 }
                 Some(PortDeliveryTarget::Virtual(device_id)) => {
-                    let egress_ports = {
+                    let egress_frames: Vec<(PortId, Bytes)> = {
                         let dev_guard = self.inner.devices.read().await;
                         let Some(dev_mutex) = dev_guard.get(&device_id) else {
                             return;
                         };
                         let mut dev = dev_mutex.lock().await;
+                        let now = Instant::now();
                         match &mut *dev {
-                            VirtualDevice::Switch(sw) => {
-                                sw.process_frame(dest_port, &frame, Instant::now())
-                            }
-                            VirtualDevice::Hub(hub) => hub.process_frame(dest_port, &frame),
+                            VirtualDevice::Switch(sw) => sw
+                                .process_frame(dest_port, &frame, now)
+                                .into_iter()
+                                .map(|p| (p, frame.clone()))
+                                .collect(),
+                            VirtualDevice::Hub(hub) => hub
+                                .process_frame(dest_port, &frame)
+                                .into_iter()
+                                .map(|p| (p, frame.clone()))
+                                .collect(),
+                            VirtualDevice::DhcpServer(srv) => srv
+                                .process_frame(dest_port, &frame, now)
+                                .into_iter()
+                                .map(|(p, bytes)| (p, Bytes::from(bytes)))
+                                .collect(),
+                            VirtualDevice::NatGateway(gw) => gw
+                                .process_frame(dest_port, &frame, now)
+                                .into_iter()
+                                .map(|(p, bytes)| (p, Bytes::from(bytes)))
+                                .collect(),
                         }
                     };
 
-                    for egress_port in egress_ports {
-                        self.handle_port_ingress(&egress_port, frame.clone(), hop + 1)
+                    for (egress_port, out_frame) in egress_frames {
+                        self.handle_port_ingress(&egress_port, out_frame, hop + 1)
                             .await;
                     }
                 }
@@ -1460,6 +1760,30 @@ mod tests {
             out_expired,
             vec!["sw-p1".to_string(), "sw-p2".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_vm_port_cannot_be_double_reserved() {
+        let fabric = PacketFabric::new();
+        let first = fabric
+            .create_udp_port(Some("vm-a-net0".into()), Some(29876))
+            .await
+            .unwrap();
+        assert_eq!(first.vm_port, 29876);
+
+        // A second port requesting the same explicit vm_port must be rejected
+        let dup = fabric
+            .create_udp_port(Some("vm-b-net0".into()), Some(29876))
+            .await;
+        assert!(dup.is_err(), "duplicate explicit vm_port must be rejected");
+
+        // After removing the first port, the explicit port becomes available again
+        fabric.remove_port("vm-a-net0").await.unwrap();
+        let again = fabric
+            .create_udp_port(Some("vm-b-net0".into()), Some(29876))
+            .await
+            .unwrap();
+        assert_eq!(again.vm_port, 29876);
     }
 
     #[test]

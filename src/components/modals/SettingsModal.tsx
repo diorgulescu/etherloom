@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -105,19 +105,40 @@ export function SettingsModal({
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
 
+  const lastSyncedStorageKeyRef = useRef<string | null>(null);
+  const lastSyncedRepoKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      lastSyncedStorageKeyRef.current = null;
+      lastSyncedRepoKeyRef.current = null;
+      return;
+    }
     setActiveSection(initialSection);
     setTcpflowyFeedback(null);
+    setFeedbackError(null);
+    setFeedbackSuccess(null);
   }, [initialSection, open]);
 
   useEffect(() => {
     if (!open || !tcpflowyStatus) return;
-    setLocalRepoDraft(tcpflowyStatus.localRepoPath ?? "");
+    const repoKey = tcpflowyStatus.localRepoPath ?? "";
+    if (lastSyncedRepoKeyRef.current === repoKey) return;
+    lastSyncedRepoKeyRef.current = repoKey;
+    setLocalRepoDraft(repoKey);
   }, [open, tcpflowyStatus]);
 
   useEffect(() => {
     if (!open || !storageState) return;
+    const configKey = [
+      storageState.config.storageRoot,
+      storageState.config.templatesDirOverride ?? "",
+      storageState.config.isosDirOverride ?? "",
+      storageState.config.workspacesDirOverride ?? "",
+    ].join("|");
+    if (lastSyncedStorageKeyRef.current === configKey) return;
+    lastSyncedStorageKeyRef.current = configKey;
+
     setStorageRoot(storageState.config.storageRoot);
     const tOv = storageState.config.templatesDirOverride ?? "";
     const iOv = storageState.config.isosDirOverride ?? "";
@@ -126,8 +147,6 @@ export function SettingsModal({
     setIsosOverride(iOv);
     setWorkspacesOverride(wOv);
     setShowAdvancedOverrides(Boolean(tOv || iOv || wOv));
-    setFeedbackError(null);
-    setFeedbackSuccess(null);
   }, [open, storageState]);
 
   const hasChanges = useMemo(() => {

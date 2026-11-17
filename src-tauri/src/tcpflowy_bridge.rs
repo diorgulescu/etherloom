@@ -493,6 +493,14 @@ impl Default for TcpflowyManager {
     }
 }
 
+struct InstallingResetGuard<'a>(&'a AtomicBool);
+
+impl Drop for InstallingResetGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 impl TcpflowyManager {
     pub fn new_with_app_dir(app_support_dir: PathBuf) -> Self {
         let cfg_path = app_support_dir.join(TCPFLOWY_CONFIG_FILENAME);
@@ -686,12 +694,22 @@ impl TcpflowyManager {
             return Err("A tcpflowy installation is already in progress.".to_string());
         }
 
-        let res = self.install_inner().await;
-        self.inner.installing.store(false, Ordering::Release);
-        res
+        {
+            let _guard = InstallingResetGuard(&self.inner.installing);
+            self.install_inner().await?;
+        }
+
+        let st = self.status().await;
+        if st.installed_version.is_none() {
+            return Err(
+                "pip completed, but `tcpflowy` could not be imported inside python-env. Check Python / PyPI connectivity in Settings."
+                    .to_string(),
+            );
+        }
+        Ok(st)
     }
 
-    async fn install_inner(&self) -> Result<TcpflowyEnvStatus, String> {
+    async fn install_inner(&self) -> Result<(), String> {
         let host_py = resolve_host_python3().ok_or_else(|| {
             "python3 was not found on this Mac. Install Python 3 (`brew install python`) first."
                 .to_string()
@@ -710,9 +728,12 @@ impl TcpflowyManager {
             )
             .await;
 
-            let out = Command::new(&host_py)
-                .arg("-m")
-                .arg("venv")
+            let mut venv_cmd = Command::new(&host_py);
+            venv_cmd.arg("-m").arg("venv");
+            if venv_dir.exists() {
+                venv_cmd.arg("--clear");
+            }
+            let out = venv_cmd
                 .arg(&venv_dir)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -759,7 +780,7 @@ impl TcpflowyManager {
         self.emit_progress("done", "tcpflowy environment ready!", 100)
             .await;
 
-        Ok(self.status().await)
+        Ok(())
     }
 
     fn ensure_bridge_script_written(&self) -> Result<PathBuf, String> {
@@ -800,13 +821,19 @@ impl TcpflowyManager {
             .filter(|p| is_valid_local_tcpflowy_repo(p));
 
         let venv_py = self.venv_python();
-        let python_bin = if is_executable_file(&venv_py) {
+        let python_bin = if local_repo.is_some() {
+            if is_executable_file(&venv_py) {
+                venv_py
+            } else {
+                // `tcpflowy` uses 100% Python stdlib, so a local repo checkout can run with host `python3` directly
+                resolve_host_python3().ok_or_else(|| "python3 not found on host".to_string())?
+            }
+        } else if is_executable_file(&venv_py)
+            && probe_tcpflowy_version(&venv_py, None).await.is_some()
+        {
             venv_py
-        } else if local_repo.is_some() {
-            // `tcpflowy` uses 100% Python stdlib, so a local repo checkout can run with host `python3` directly
-            resolve_host_python3().ok_or_else(|| "python3 not found on host".to_string())?
         } else {
-            // Automatically bootstrap `python-env` + `pip install --upgrade tcpflowy` on first use!
+            // Automatically bootstrap `python-env` + `pip install --upgrade tcpflowy` on first use (or heal partial venv)!
             let st = self.install_or_upgrade_tcpflowy().await?;
             if st.state != "ready" {
                 return Err(st.message);
@@ -939,24 +966,20 @@ impl TcpflowyManager {
 }
 
 async fn probe_tcpflowy_version(python_bin: &Path, local_repo: Option<&Path>) -> Option<String> {
-    let snippet = if let Some(repo) = local_repo {
-        format!(
-            "import sys; sys.path.insert(0, {:?}); import tcpflowy, include.TCPDataHoarder; print(getattr(tcpflowy, '__version__', 'dev'))",
-            repo.display().to_string()
-        )
+    // The repo path is passed via an environment variable (never interpolated into the Python
+    // source), so a path containing quotes/backslashes can never alter the executed code.
+    let snippet = if local_repo.is_some() {
+        "import os, sys; sys.path.insert(0, os.environ['ETHERLOOM_TCPFLOWY_REPO']); import tcpflowy, include.TCPDataHoarder; print(getattr(tcpflowy, '__version__', 'dev'))"
     } else {
         "import tcpflowy, include.TCPDataHoarder; print(getattr(tcpflowy, '__version__', 'installed'))"
-            .to_string()
     };
 
-    let out = Command::new(python_bin)
-        .arg("-c")
-        .arg(snippet)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .ok()?;
+    let mut cmd = Command::new(python_bin);
+    cmd.arg("-c").arg(snippet).stdout(Stdio::piped()).stderr(Stdio::null());
+    if let Some(repo) = local_repo {
+        cmd.env("ETHERLOOM_TCPFLOWY_REPO", repo);
+    }
+    let out = cmd.output().await.ok()?;
 
     if !out.status.success() {
         return None;
@@ -1096,5 +1119,38 @@ mod tests {
 
         assert_eq!(count_pcap_packets_fast(&tmp), Some(4));
         let _ = fs::remove_file(&tmp);
+    }
+
+    #[tokio::test]
+    async fn installing_guard_clears_before_post_install_status_probe() {
+        let tmp = std::env::temp_dir().join(format!("etherloom-tf-guard-{}", Uuid::new_v4()));
+        let app_dir = tmp.join("app-support");
+        let bin_dir = app_dir.join(PYTHON_VENV_DIRNAME).join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+
+        // Simulate a working python3 executable inside python-env that imports tcpflowy v1.2.3
+        let fake_py = bin_dir.join("python3");
+        fs::write(&fake_py, "#!/bin/sh\necho '1.2.3'\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&fake_py).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&fake_py, perms).unwrap();
+        }
+
+        let mgr = TcpflowyManager::new_with_app_dir(app_dir);
+        mgr.inner.installing.store(true, Ordering::Release);
+        {
+            let _guard = InstallingResetGuard(&mgr.inner.installing);
+            let during = mgr.status().await;
+            assert_eq!(during.state, "installing");
+        }
+
+        let after = mgr.status().await;
+        assert_ne!(after.state, "installing");
+        assert_eq!(after.installed_version.as_deref(), Some("1.2.3"));
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
