@@ -17,19 +17,29 @@
   </p>
 </div>
 
-**Etherloom** lets students, network engineers, security researchers, and educators design multi-OS virtual networks across **15 curated operating systems** (**Linux**, **BSDs**, **Enterprise Routers & Firewalls**, **Plan 9 / Illumos**, and **Retro FreeDOS + mTCP**) alongside built-in **IEEE 802.1D L2 Switches** and **L1 Hubs**, inject live link impairments, stream wiretaps directly into **Wireshark**, and visually dissect TCP flows inside the app using [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) — all in **100% unprivileged userspace** with zero kernel extensions, zero `vmnet` helper daemons, and zero `sudo` prompts.
+**Etherloom** lets students, network engineers, security researchers, and educators design multi-OS virtual networks across **15 curated operating systems** (**Linux**, **BSDs**, **Enterprise Routers & Firewalls**, **Plan 9 / Illumos**, and **Retro FreeDOS + mTCP**) alongside built-in **IEEE 802.1D L2 Switches**, **L1 Hubs**, **Dual-Stack DHCPv4/v6 + SLAAC Servers**, and **Zero-Root Host NAT Internet Gateways**, inject live link impairments, stream wiretaps directly into **Wireshark**, and visually dissect TCP flows inside the app using [**`tcpflowy`**](https://github.com/diorgulescu/tcpflowy) — all in **100% unprivileged userspace** with zero kernel extensions, zero `vmnet` helper daemons, and zero `sudo` prompts.
+
+<div align="center">
+  <img src="docs/screenshots/studio-patchbay-tcpflowy.png" alt="Etherloom Studio — Woven Patchbay topology canvas with Host NAT Gateway, OpenBSD, L2 Switch, Dual-Stack DHCPv4/v6 Server, Alpine Linux, FreeBSD, and integrated tcpflowy TCP Packet Ladder" width="100%" />
+  <p><em>Etherloom Studio in dark "Woven Patchbay" mode — orchestrating OpenBSD, FreeBSD, and Alpine Linux alongside zero-VM Host NAT &amp; Dual-Stack DHCPv4/v6 appliances with live in-app <code>tcpflowy</code> TCP packet dissection. <a href="https://diorgulescu.github.io/etherloom/">Explore more screenshots on the project site →</a></em></p>
+</div>
 
 ---
 
 ## Key Highlights
 
-- **Zero-Root Userspace Packet Fabric**: QEMU NICs connect via loopback UDP datagram sockets (`127.0.0.1`) to an async Rust `PacketFabric` that switches raw Ethernet II frames (with zero length prefix), maintains live inspectable 802.1D MAC learning tables on L2 Switches, floods frames on L1 Hubs, and enforces per-wire **Latency (ms)**, **Jitter (±ms)**, **Packet Loss (%)**, and **Cable Cut** impairments in real time.
+- **Zero-Root Userspace Packet Fabric & In-Process Network Appliances**:
+  - QEMU NICs connect via loopback UDP datagram sockets (`127.0.0.1`) to an async Rust `PacketFabric` that switches raw Ethernet II frames (including `802.1Q` VLAN tags & `9216`-byte jumbo frames), maintains live inspectable 802.1D MAC learning tables on L2 Switches, floods frames on L1 Hubs, and enforces per-wire **Latency (ms)**, **Jitter (±ms)**, **Packet Loss (%)**, and **Cable Cut** impairments in real time.
+  - **Zero-Root Host NAT Internet Gateway (`nat_gateway`)**: Outbound `NAT44` & `NAT66` TCP/UDP/DNS (`:53` resolver proxy) & ICMP/ICMPv6 ping translation over unprivileged macOS sockets — with built-in WAN DHCP auto-configuration, live NAT session tables, and 100% wiretappable WAN Ethernet frames.
+  - **Zero-VM Dual-Stack DHCPv4/v6 + SLAAC Server (`dhcp_server`)**: Instant `PacketFabric` appliance answering ARP, ICMPv4/v6 echo, DHCPv4 DORA (`UDP 67/68`), ICMPv6 Router Advertisements (`SLAAC A=1` + `RDNSS`), and stateful DHCPv6 `IA_NA` (`UDP 546/547`).
 - **Multi-Architecture QEMU Engine (`aarch64`, `x86_64`, `i386`, `riscv64`)**:
   - **Native Hardware Virtualization (`-accel hvf`)** for ARM64 guests on Apple Silicon (`M1/M2/M3/M4`) and `x86_64` guests on Intel Macs.
   - **Multi-Threaded TCG (`-accel tcg,thread=multi`)** for cross-architecture router/firewall appliances (`OPNsense`, `pfSense CE`, `VyOS`, `OmniOS`, `DragonFly BSD`, `Haiku`) and instant sub-second retro stacks (`FreeDOS + mTCP` in `32 MB` RAM).
   - **Selectable NIC Hardware (`virtio-net-pci`, `e1000`, `rtl8139`, `pcnet`, `ne2k_pci`)** with automatic canvas port relabeling (`vtnet0` ↔ `em0`, `vio0` ↔ `em0`, `vioif0` ↔ `wm0`, `ether1`, `/net/ether0`, `e1000g0`, `PCNTPK 0x60`).
-- **Unified Storage & 15-OS On-Demand Library Manager**: Download, verify, extract, convert, import, or delete OS images directly from the GUI onto your internal SSD or an external USB-C/Thunderbolt SSD (`/Volumes/...`), with **1-Click Guided Template Setup** that auto-promotes installed disks to read-only (`0444`) Copy-on-Write Golden Templates on shutdown.
-- **Dual-Console Multi-Tab Workspace**: Every VM simultaneously exposes a zero-buffered **Serial Terminal** (`@xterm/xterm` over Unix domain sockets for `tmux`, `vi`, `pfctl`, `vtysh`, and BSD installers) and an **Embedded UEFI / VGA Screen** (`@novnc/novnc` over a Rust VNC-to-WebSocket proxy, or native macOS Cocoa window).
+- **Unified Storage & 15-OS On-Demand Library Manager**: Download, SHA-256 verify, extract, convert, import, or delete OS images directly from the GUI onto your internal SSD or an external USB-C/Thunderbolt SSD (`/Volumes/...`), with HTTPS custom mirror overrides and **1-Click Guided Template Setup** that auto-promotes installed disks to read-only (`0444`) Copy-on-Write Golden Templates on shutdown.
+- **Detachable Dual-Console Workspace & Real-Time Node Activity Monitor (`⌘⇧M`)**:
+  - Every VM exposes a zero-buffered **Serial Terminal** (`@xterm/xterm`) and an **Embedded UEFI / VGA Screen** (`@novnc/novnc` over a Host/Origin-hardened loopback WebSocket bridge, or native macOS Cocoa window) inside a **pop-out, moveable, 8-way resizable floating dock**.
+  - Built-in **Activity Monitor (`⌘⇧M`)** samples `proc_pid_rusage` physical memory (`ri_phys_footprint`), RSS, guest CPU %, CoW `.qcow2` disk I/O, rolling sparklines, and expandable per-NIC `PacketFabric` RX/TX rates.
 - **One-Click Wiretaps, PCAP Export & Integrated `tcpflowy` Visual Flow Dissector**:
   - **Live Wireshark Stream**: Creates a `/tmp/etherloom/tap_<link>.pcap` named FIFO pipe (`mkfifo`) and launches `Wireshark.app` for live zero-root packet inspection alongside active `.pcap` recordings.
   - **Three Explicit 1-Click Capture Completion Actions**: Atomically flushes and `fsync`s `LINKTYPE_ETHERNET` `.pcap` captures (`<nodeA>-<nicA>__<nodeB>-<nicB>__<YYYYMMDD-HHMMSS>.pcap`) into `<project>.etherloom/captures/` with zero packet truncation, then lets you finish in one click via **Stop & Save PCAP...** (native macOS Save dialog + Finder reveal), **Stop & Open in Wireshark** (`Wireshark -r <pcap>`), or **Stop & Dissect with `tcpflowy`** (interactive **TCP Packet Ladder Diagrams**, **Reconstructed ASCII/Hex Streams**, **SPLT Timing & Entropy Profiles**, and **Auto-Synthesized Suricata / Wireshark / BPF Signatures**).
@@ -287,6 +297,7 @@ Etherloom tracks a single semantic version (`MAJOR.MINOR.PATCH`) in [`VERSION`](
 
 - **[Dragoş Iorgulescu (`@diorgulescu`)](https://github.com/diorgulescu)** — Creator, System Architecture, [`tcpflowy`](https://github.com/diorgulescu/tcpflowy) Author & Project Maintainer
 - **[Antigravity](https://antigravity.google/)** *(Google DeepMind Agentic AI)* — Co-Author & Engineering Contributor (Multi-Architecture Tauri/Rust Backend, Zero-Root `PacketFabric`, React Topology Studio, 15-OS Catalog & Guided Academy Labs)
+- **[Mistral Vibe](https://mistral.ai/products/vibe/code/)** *(Mistral AI)* — Engineering Contributor (Userspace DHCP/NAT Appliances, Floating Console Workspace & Security Hardening)
 
 ---
 

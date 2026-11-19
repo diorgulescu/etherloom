@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="./logo.png" />
     <title>Etherloom — Zero-Root macOS Network Orchestration &amp; Packet Studio</title>
     <meta
       name="description"
-      content="Open-source (GNU GPLv3) macOS network orchestration and packet-inspection studio powered by QEMU + Apple Hypervisor.framework, Wireshark FIFO wiretaps, and tcpflowy visual TCP flow dissection."
+      content="Open-source (GNU GPLv3) zero-root macOS network orchestration, packet-capture, and multi-OS studio for Apple Silicon &amp; Intel Macs — orchestrating 15 Linux, BSD, Router/Firewall &amp; Retro OSes, built-in Host NAT &amp; Dual-Stack DHCP appliances, Wireshark FIFO wiretaps, and tcpflowy TCP dissection."
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -15,19 +16,15 @@
       <div class="container nav-inner">
         <a href="#" class="brand">
           <span class="brand-mark" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="4.5" r="2.5" />
-              <circle cx="5" cy="19.5" r="2.5" />
-              <circle cx="19" cy="19.5" r="2.5" />
-              <path d="M10.8 6.7 6.2 17.3M13.2 6.7l4.6 10.6M7.5 19.5h9" />
-            </svg>
+            <img src="./logo.png" alt="" width="28" height="28" />
           </span>
           <span>Etherloom</span>
         </a>
 
         <nav class="nav-links" aria-label="Primary">
+          <a href="#screenshots">Interface</a>
           <a href="#architecture">Architecture</a>
-          <a href="#guests-scripts">BSD/Linux Library</a>
+          <a href="#guests-scripts">15-OS Catalog</a>
           <a href="#tcpflowy">Wiretaps &amp; tcpflowy</a>
           <a href="#academy">Guided Labs</a>
           <a href="#credits">Credits &amp; GPLv3</a>
@@ -49,139 +46,292 @@
       <section class="hero" style="border-top: none">
         <div class="badge-row">
           <span class="pill pill-emerald">100% Userspace • Zero Root / No sudo</span>
-          <span class="pill pill-sky">macOS Apple Silicon (aarch64) &amp; Intel • QEMU HVF</span>
-          <span class="pill pill-indigo">GNU GPLv3 Open Source</span>
+          <span class="pill pill-sky">Apple Silicon HVF + x86_64 / i386 / RISC-V TCG</span>
+          <span class="pill pill-indigo">15 Curated OSes + Host NAT &amp; Dual-Stack DHCP</span>
+          <span class="pill pill-amber">GNU GPLv3 Open Source</span>
         </div>
 
         <h1>
-          Real BSD &amp; Linux Networks on macOS.<br />
+          Multi-OS Virtual Networks on macOS.<br />
           <span class="gradient-text">Every Wire Tappable. Zero Root Required.</span>
         </h1>
 
         <p class="hero-lead">
-          <strong>Etherloom</strong> is a native macOS network orchestration and learning studio built with
-          <strong>Tauri v2 (Rust + Tokio)</strong> and <strong>React 19</strong>. Boot hardware-accelerated
-          <strong>Alpine Linux</strong>, <strong>OpenBSD</strong>, <strong>FreeBSD</strong>, and
-          <strong>NetBSD</strong> topologies via Apple’s <code>Hypervisor.framework</code>, inject live packet loss
-          and latency, stream virtual cables into <strong>Wireshark</strong>, and visually dissect TCP flows inside the
-          app with <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><code>tcpflowy</code></a>.
+          <strong>Etherloom</strong> is a native macOS network orchestration, packet-capture, and learning studio built with
+          <strong>Tauri v2 (Rust + Tokio)</strong> and <strong>React 19</strong>. Boot hardware-accelerated and multi-arch
+          topologies across <strong>15 curated Linux, BSD, Enterprise Router/Firewall, Plan 9, Illumos, and Retro DOS</strong>
+          operating systems alongside zero-VM <strong>Host NAT Internet Gateways</strong>, <strong>Dual-Stack DHCPv4/v6 Servers</strong>,
+          and <strong>802.1D L2 Switches</strong> — then stream virtual cables live into <strong>Wireshark</strong> or dissect TCP flows
+          visually inside the app with
+          <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><code>tcpflowy</code></a>.
         </p>
 
         <div class="hero-cta">
           <a class="btn btn-primary" href="https://github.com/diorgulescu/etherloom/releases" target="_blank" rel="noopener noreferrer">
             Download for macOS (.dmg)
           </a>
-          <a class="btn" href="#quickstart">Quickstart &amp; Image Scripts</a>
+          <a class="btn" href="#screenshots">Explore Studio Screenshots</a>
+          <a class="btn" href="#quickstart">Quickstart &amp; CLI Scripts</a>
           <a class="btn" href="https://github.com/diorgulescu/etherloom/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">
             Read ARCHITECTURE.md
           </a>
         </div>
 
-        <!-- Architecture & Live Canvas Diagram -->
-        <div class="studio-preview" role="img" aria-label="Etherloom Zero-Root Packet Fabric Diagram">
+        <!-- Real Live Studio Interface Screenshot -->
+        <div class="studio-preview">
           <div class="window-bar">
-            <div class="traffic-lights">
+            <div class="traffic-lights" aria-hidden="true">
               <span class="dot dot-red"></span>
               <span class="dot dot-amber"></span>
               <span class="dot dot-green"></span>
             </div>
-            <span>Etherloom Studio — Campus Dual-Stack Lab (Zero-Root UDP PacketFabric)</span>
-            <span>HVF • Ready</span>
+            <span>Etherloom Studio — Woven Patchbay Canvas, Zero-Root Host NAT &amp; Integrated tcpflowy Flow Dissector</span>
+            <span>Click image to zoom</span>
+          </div>
+          <button
+            type="button"
+            class="screenshot-trigger"
+            data-lightbox="./screenshots/studio-patchbay-tcpflowy.png"
+            data-caption="Woven Patchbay Studio: Host NAT WAN Gateway (wan1), OpenBSD Firewall (fw1), 802.1D L2 Switch (sw-core), Dual-Stack DHCPv4/v6 Appliance (dhcp1), Alpine Linux (srv1), and FreeBSD (bsd1) with live in-app tcpflowy TCP Packet Ladder."
+            aria-label="Enlarge Etherloom Studio main workspace screenshot"
+          >
+            <img
+              class="screenshot-img"
+              src="./screenshots/studio-patchbay-tcpflowy.png"
+              alt="Etherloom Studio dark-mode Woven Patchbay topology canvas showing Host NAT Gateway, OpenBSD, L2 Switch, Dual-Stack DHCPv4/v6 Server, Alpine Linux, FreeBSD, and the integrated tcpflowy TCP packet ladder"
+              width="1920"
+              height="1219"
+            />
+          </button>
+        </div>
+      </section>
+
+      <!-- STUDIO INTERFACE SCREENSHOT GALLERY -->
+      <section id="screenshots">
+        <div class="section-header">
+          <div class="section-eyebrow">Woven Patchbay Studio UI</div>
+          <h2>Inside the Native macOS Studio</h2>
+          <p>
+            Engineered with a high-contrast slate-navy <strong>Woven Patchbay</strong> dark theme (plus System &amp; Light modes),
+            hollow <strong>Ring-Jack</strong> interface ports, animated multi-layer <strong>Loom cables</strong>, a detachable
+            <strong>8-way resizable floating console dock</strong>, and real-time host/fabric telemetry. Click any screenshot to inspect at full Retina resolution.
+          </p>
+        </div>
+
+        <div class="screenshot-grid">
+          <article class="screenshot-card">
+            <button
+              type="button"
+              class="screenshot-trigger"
+              data-lightbox="./screenshots/os-library-catalog.png"
+              data-caption="Storage &amp; 15-OS Library Manager: On-demand SHA-256 verified downloads, .staging/ zero-/tmp-bloat extraction, custom HTTPS mirror overrides, 1-click Guided Template Setup, and live external USB-C/Thunderbolt SSD APFS/ExFAT telemetry."
+              aria-label="Enlarge Storage and 15-OS Library Manager screenshot"
+            >
+              <img
+                class="screenshot-img"
+                src="./screenshots/os-library-catalog.png"
+                alt="Etherloom Storage and 15-OS Library Manager modal showing external SSD APFS free space and multi-architecture OS cards"
+                loading="lazy"
+                width="1920"
+                height="1219"
+              />
+            </button>
+            <div class="screenshot-caption">
+              <h3>15-OS Library &amp; External SSD Manager</h3>
+              <p>
+                Download, SHA-256 verify, extract, convert, or import 15 curated ARM64 HVF and x86/i386 TCG images directly onto internal storage or an external <code>/Volumes/...</code> SSD with zero <code>/tmp</code> bloat.
+              </p>
+            </div>
+          </article>
+
+          <article class="screenshot-card">
+            <button
+              type="button"
+              class="screenshot-trigger"
+              data-lightbox="./screenshots/fabric-nat-gateway.png"
+              data-caption="Zero-Root Host NAT Internet Gateway: Outbound IPv4 NAT44 + IPv6 NAT66 + ICMP/ICMPv6 translation over unprivileged macOS sockets, built-in WAN DHCPv4/v6 server, and :53 DNS resolver proxy — with zero sudo."
+              aria-label="Enlarge Host NAT Internet Gateway configuration screenshot"
+            >
+              <img
+                class="screenshot-img"
+                src="./screenshots/fabric-nat-gateway.png"
+                alt="Configure Host NAT Internet Gateway modal showing zero-root IPv4 NAT44, built-in WAN DHCP pool, DNS resolver proxy, and IPv6 SLAAC/NAT66 settings"
+                loading="lazy"
+                width="1920"
+                height="1219"
+              />
+            </button>
+            <div class="screenshot-caption">
+              <h3>Zero-Root Host NAT &amp; Dual-Stack DHCP Appliances</h3>
+              <p>
+                Drop instant in-process <strong>Internet Gateways</strong> (<code>NAT44</code>/<code>NAT66</code> + DNS proxy + WAN DHCP) and <strong>Dual-Stack DHCPv4/v6 + SLAAC Servers</strong> onto any segment without booting an extra VM or running <code>sudo</code>.
+              </p>
+            </div>
+          </article>
+
+          <article class="screenshot-card">
+            <button
+              type="button"
+              class="screenshot-trigger"
+              data-lightbox="./screenshots/activity-monitor.png"
+              data-caption="Node Activity Monitor (⌘⇧M): Real-time macOS proc_pid_rusage physical memory footprint, RSS, guest CPU %, CoW overlay disk I/O, rolling sparklines, and expandable per-NIC PacketFabric RX/TX throughput."
+              aria-label="Enlarge Node Activity Monitor screenshot"
+            >
+              <img
+                class="screenshot-img"
+                src="./screenshots/activity-monitor.png"
+                alt="Etherloom Activity Monitor dialog displaying Guest VM CPU, physical memory footprint, Fabric throughput sparklines, and expanded per-NIC packet rates"
+                loading="lazy"
+                width="1920"
+                height="1219"
+              />
+            </button>
+            <div class="screenshot-caption">
+              <h3>Real-Time Node Activity Monitor (<kbd>⌘⇧M</kbd>)</h3>
+              <p>
+                Track per-VM CPU saturation, macOS <code>ri_phys_footprint</code> memory, thread counts, CoW <code>.qcow2</code> disk I/O, and expandable per-port <code>PacketFabric</code> RX/TX byte &amp; packet rates at a glance.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ARCHITECTURE & RECENT SUBSYSTEM ADDITIONS -->
+      <section id="architecture">
+        <div class="section-header">
+          <div class="section-eyebrow">System Design &amp; Recent Additions</div>
+          <h2>Zero-Root macOS Virtualization &amp; Userspace Packet Fabric</h2>
+          <p>
+            Every QEMU hypervisor instance, virtual switch, DHCP/NAT appliance, serial console, and wiretap runs strictly under your standard macOS user account — zero <code>sudo</code>, zero <code>chmod /dev/bpf*</code>, zero <code>vmnet</code> daemons, and zero kernel extensions.
+          </p>
+        </div>
+
+        <!-- Architectural Packet Path Diagram -->
+        <div class="studio-preview" role="img" aria-label="Etherloom Zero-Root Packet Fabric Architecture Diagram" style="margin-bottom: 1.5rem">
+          <div class="window-bar">
+            <div class="traffic-lights" aria-hidden="true">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-amber"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <span>Zero-Root Data Plane — Raw Ethernet II over Loopback UDP + In-Process Appliances + Atomic Wiretaps</span>
+            <span>802.1Q • 9216B Jumbo Ready</span>
           </div>
           <div class="diagram-wrap">
-            <svg viewBox="0 0 980 310" width="100%" style="min-width: 720px; display: block">
+            <svg viewBox="0 0 980 320" width="100%" style="min-width: 740px; display: block">
               <defs>
                 <linearGradient id="wireGrad" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stop-color="#38bdf8" />
+                  <stop offset="0%" stop-color="#22d3ee" />
                   <stop offset="100%" stop-color="#818cf8" />
                 </linearGradient>
               </defs>
 
               <!-- Wires -->
-              <path d="M 235 120 C 300 120, 315 120, 370 120" stroke="url(#wireGrad)" stroke-width="3" fill="none" stroke-dasharray="7 5" />
-              <path d="M 575 95 C 650 95, 665 65, 735 65" stroke="#34d399" stroke-width="2.5" fill="none" />
-              <path d="M 575 145 C 650 145, 665 175, 735 175" stroke="#38bdf8" stroke-width="2.5" fill="none" />
+              <path d="M 245 78 C 305 78, 315 102, 365 102" stroke="#34d399" stroke-width="2.5" fill="none" />
+              <path d="M 245 182 C 305 182, 315 142, 365 142" stroke="url(#wireGrad)" stroke-width="3" fill="none" stroke-dasharray="7 5" />
+              <path d="M 605 95 C 670 95, 680 65, 735 65" stroke="#34d399" stroke-width="2.5" fill="none" />
+              <path d="M 605 145 C 670 145, 680 175, 735 175" stroke="#22d3ee" stroke-width="2.5" fill="none" />
 
               <!-- Tap drop line -->
-              <path d="M 302 120 L 302 232 L 370 232" stroke="#f59e0b" stroke-width="2" fill="none" stroke-dasharray="4 4" />
-              <circle cx="302" cy="120" r="5" fill="#f59e0b" />
+              <path d="M 308 164 L 308 246 L 365 246" stroke="#f59e0b" stroke-width="2" fill="none" stroke-dasharray="4 4" />
+              <circle cx="308" cy="164" r="5" fill="#f59e0b" />
 
-              <!-- Node 1: OpenBSD fw1 -->
-              <rect x="35" y="72" width="200" height="96" rx="12" fill="#131c2e" stroke="#38bdf8" stroke-width="1.5" />
-              <circle cx="56" cy="96" r="5" fill="#34d399" />
-              <text x="70" y="100" fill="#f1f5f9" font-size="13" font-weight="700" font-family="SF Mono, monospace">fw1 • OpenBSD</text>
-              <text x="52" y="124" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">pf + CARP • 512 MB HVF</text>
-              <text x="52" y="146" fill="#38bdf8" font-size="11" font-family="SF Mono, monospace">vio0: 10.0.1.1/24</text>
+              <!-- Left Top: Host NAT + Dual-Stack DHCP Appliances -->
+              <rect x="28" y="28" width="217" height="94" rx="12" fill="#111827" stroke="#34d399" stroke-width="1.5" />
+              <text x="44" y="53" fill="#34d399" font-size="12" font-weight="700" font-family="SF Mono, monospace">wan1 + dhcp1 (Zero-VM)</text>
+              <text x="44" y="74" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">• Host NAT44/66 + DNS :53</text>
+              <text x="44" y="93" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• DHCPv4 DORA + DHCPv6 IA_NA</text>
+              <text x="44" y="111" fill="#818cf8" font-size="10.5" font-family="SF Mono, monospace">• ICMPv6 SLAAC + RDNSS</text>
 
-              <!-- Center: PacketFabric + L2 Switch -->
-              <rect x="370" y="56" width="205" height="126" rx="14" fill="#152238" stroke="#818cf8" stroke-width="1.6" />
-              <text x="390" y="83" fill="#c7d2fe" font-size="12" font-weight="700" font-family="SF Mono, monospace">Rust PacketFabric (UDP)</text>
-              <text x="390" y="106" fill="#f1f5f9" font-size="12" font-family="SF Mono, monospace">sw-core (802.1D L2)</text>
-              <text x="390" y="128" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• MAC Table Aging (300s)</text>
-              <text x="390" y="147" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• Loss / RTT / Jitter</text>
-              <text x="390" y="166" fill="#34d399" font-size="11" font-family="SF Mono, monospace">• Raw Ethernet II Frames</text>
+              <!-- Left Bottom: OpenBSD fw1 -->
+              <rect x="28" y="138" width="217" height="90" rx="12" fill="#111827" stroke="#22d3ee" stroke-width="1.5" />
+              <circle cx="47" cy="161" r="4.5" fill="#10b981" />
+              <text x="60" y="165" fill="#f1f5f9" font-size="12.5" font-weight="700" font-family="SF Mono, monospace">fw1 • OpenBSD / RouterOS</text>
+              <text x="44" y="187" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">ARM64 HVF • pf / eBGP / CARP</text>
+              <text x="44" y="208" fill="#22d3ee" font-size="11" font-family="SF Mono, monospace">vio0..1 • UDP 127.0.0.1</text>
 
-              <!-- Node 2: Alpine srv1 -->
-              <rect x="735" y="24" width="210" height="82" rx="12" fill="#131c2e" stroke="#34d399" stroke-width="1.4" />
-              <text x="753" y="50" fill="#f1f5f9" font-size="13" font-weight="700" font-family="SF Mono, monospace">srv1 • Alpine Linux</text>
-              <text x="753" y="71" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">256 MB HVF • CoW qcow2</text>
-              <text x="753" y="91" fill="#34d399" font-size="11" font-family="SF Mono, monospace">eth0: 10.0.1.10/24</text>
+              <!-- Center: PacketFabric -->
+              <rect x="365" y="46" width="240" height="142" rx="14" fill="#162032" stroke="#818cf8" stroke-width="1.6" />
+              <text x="383" y="72" fill="#c7d2fe" font-size="12" font-weight="700" font-family="SF Mono, monospace">Tokio PacketFabric (Rust)</text>
+              <text x="383" y="95" fill="#f1f5f9" font-size="11.5" font-family="SF Mono, monospace">• 802.1D L2 Switch &amp; L1 Hub</text>
+              <text x="383" y="115" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• 802.1Q VLANs &amp; 9216B Jumbo</text>
+              <text x="383" y="135" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">• RTT / Jitter / Loss / Cut</text>
+              <text x="383" y="155" fill="#34d399" font-size="11" font-family="SF Mono, monospace">• Live MAC, Lease &amp; NAT Tables</text>
+              <text x="383" y="175" fill="#22d3ee" font-size="10.5" font-family="SF Mono, monospace">• Per-Port Activity Telemetry</text>
 
-              <!-- Node 3: FreeBSD bsd1 -->
-              <rect x="735" y="132" width="210" height="82" rx="12" fill="#131c2e" stroke="#38bdf8" stroke-width="1.4" />
-              <text x="753" y="158" fill="#f1f5f9" font-size="13" font-weight="700" font-family="SF Mono, monospace">bsd1 • FreeBSD</text>
-              <text x="753" y="179" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">512 MB HVF • UFS CoW</text>
-              <text x="753" y="199" fill="#38bdf8" font-size="11" font-family="SF Mono, monospace">vtnet0: 10.0.1.20/24</text>
+              <!-- Right Top: Multi-Arch Guests -->
+              <rect x="735" y="24" width="218" height="84" rx="12" fill="#111827" stroke="#34d399" stroke-width="1.4" />
+              <text x="751" y="49" fill="#f1f5f9" font-size="12.5" font-weight="700" font-family="SF Mono, monospace">Linux / BSD / OpenWrt</text>
+              <text x="751" y="70" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">aarch64 HVF • CoW qcow2</text>
+              <text x="751" y="90" fill="#34d399" font-size="11" font-family="SF Mono, monospace">virtio-net • eth0 / vtnet0</text>
 
-              <!-- Wiretap + tcpflowy + Wireshark -->
-              <rect x="370" y="204" width="575" height="82" rx="12" fill="#1b1829" stroke="#f59e0b" stroke-width="1.4" />
-              <text x="390" y="230" fill="#fbbf24" font-size="12" font-weight="700" font-family="SF Mono, monospace">Zero-Copy Wiretap Engine (pcap_tap.rs + tcpflowy_bridge.rs)</text>
-              <text x="390" y="252" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">1) Live FIFO -&gt; Wireshark.app (-k -i /tmp/etherloom/tap_link.pcap)</text>
-              <text x="390" y="271" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">2) .pcap Recorder -&gt; In-App tcpflowy Packet Ladder, Stream Hex/ASCII &amp; Suricata Rules</text>
+              <!-- Right Bottom: Cross-Arch Appliances -->
+              <rect x="735" y="128" width="218" height="84" rx="12" fill="#111827" stroke="#818cf8" stroke-width="1.4" />
+              <text x="751" y="153" fill="#f1f5f9" font-size="12.5" font-weight="700" font-family="SF Mono, monospace">OPNsense / VyOS / FreeDOS</text>
+              <text x="751" y="174" fill="#94a3b8" font-size="11" font-family="SF Mono, monospace">x86_64 MTTCG &amp; i386 Fast TCG</text>
+              <text x="751" y="194" fill="#818cf8" font-size="11" font-family="SF Mono, monospace">e1000 / pcnet • em0 / 0x60</text>
+
+              <!-- Bottom: Wiretap + tcpflowy + Wireshark -->
+              <rect x="365" y="210" width="588" height="88" rx="12" fill="#171426" stroke="#f59e0b" stroke-width="1.4" />
+              <text x="383" y="235" fill="#fbbf24" font-size="12" font-weight="700" font-family="SF Mono, monospace">Atomic Wiretap &amp; Dissection Engine (pcap_tap.rs + tcpflowy_bridge.rs)</text>
+              <text x="383" y="257" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">1) Live Named FIFO -&gt; Wireshark.app (-k -i /tmp/etherloom/tap_link.pcap)</text>
+              <text x="383" y="277" fill="#e2e8f0" font-size="11" font-family="SF Mono, monospace">2) Zero-Truncation fsync .pcap -&gt; Save Copy / Finder / In-App tcpflowy Ladder &amp; Rules</text>
             </svg>
           </div>
-        </div>
-      </section>
-
-      <!-- ARCHITECTURE -->
-      <section id="architecture">
-        <div class="section-header">
-          <div class="section-eyebrow">System Design</div>
-          <h2>Zero-Root macOS Virtualization Architecture</h2>
-          <p>
-            Every QEMU process, virtual switch, serial console, and packet capture runs strictly under your unprivileged macOS user account — no <code>sudo</code>, no <code>chmod /dev/bpf*</code>, and no kernel extensions.
-          </p>
         </div>
 
         <div class="grid-3">
           <div class="card">
-            <h3>UDP Datagram PacketFabric</h3>
+            <h3>UDP <code>PacketFabric</code> <span class="tag">802.1Q + Jumbo</span></h3>
             <p>
-              QEMU NICs attach via <code>-netdev socket,udp=127.0.0.1:...</code> transmitting raw IEEE 802.3 Ethernet II frames per UDP datagram (no 4-byte TCP length prefix). Tokio routes frames across point-to-point wires, IEEE 802.1D learning L2 Switches, and L1 Hubs while enforcing live latency, jitter, loss, and cable-cut impairments.
+              QEMU NICs attach via <code>-netdev socket,udp=127.0.0.1:...</code> exchanging raw Ethernet II frames (up to 9,216-byte jumbo &amp; double-tagged <code>0x8100</code> VLAN frames) across point-to-point wires, inspectable 802.1D L2 Switches, and L1 Hubs with live RTT, jitter, loss, and cable-cut controls.
             </p>
           </div>
+
           <div class="card">
-            <h3>Dual Serial + UEFI VNC Consoles</h3>
+            <h3>Host NAT Gateway <span class="tag tag-emerald">Zero-Root WAN</span></h3>
             <p>
-              Every ARM64 VM boots with Homebrew’s <code>edk2-aarch64-code.fd</code> UEFI firmware and exposes both an unbuffered PL011 Unix serial console (rendered in <code>@xterm/xterm</code> for <code>pfctl</code>, <code>tmux</code>, and <code>vi</code>) and an embedded <code>ramfb</code> graphical screen via <code>@novnc/novnc</code>.
+              Built-in Rust <code>nat_gateway</code> appliance translates guest IPv4 (<code>NAT44</code>), IPv6 (<code>NAT66</code>), TCP, UDP, DNS (<code>:53</code> proxy), and ICMP/ICMPv6 ping flows over unprivileged macOS sockets — with WAN DHCP auto-config, live NAT session tables, and full packet capture on the WAN wire.
             </p>
           </div>
+
           <div class="card">
-            <h3>External SSD Resilience (<code>/Volumes</code>)</h3>
+            <h3>Dual-Stack DHCP Appliance <span class="tag tag-indigo">v4 + v6 + RA</span></h3>
             <p>
-              Keep multi-gigabyte ISOs, read-only Golden Templates, and project overlays on Thunderbolt/USB-C drives (APFS or ExFAT) while sockets, FIFOs, and Python symlinks stay safely on local storage. Includes a <code>st_dev</code> mount guard and automatic <code>qemu-img rebase -u</code> portability.
+              Zero-VM <code>dhcp_server</code> appliance directly on <code>PacketFabric</code> answering ARP, ICMPv4/v6 echo, DHCPv4 DORA (<code>UDP 67/68</code>), ICMPv6 Router Solicitations (SLAAC <code>A=1</code> + RDNSS Option 25), and stateful DHCPv6 <code>IA_NA</code> (<code>UDP 546/547</code>) with live lease inspection.
+            </p>
+          </div>
+
+          <div class="card">
+            <h3>Multi-Arch QEMU &amp; Floating Dock <span class="tag">4 Archs</span></h3>
+            <p>
+              Runs native <code>-accel hvf</code> plus multi-threaded <code>TCG</code> across <code>aarch64</code>, <code>x86_64</code>, <code>i386</code>, and <code>riscv64</code> with 5 NIC models (<code>virtio-net</code>, <code>e1000</code>, <code>rtl8139</code>, <code>pcnet</code>, <code>ne2k_pci</code>), paired with a detachable, moveable, 8-way resizable <code>xterm.js</code> + <code>noVNC</code> console dock.
+            </p>
+          </div>
+
+          <div class="card">
+            <h3>Node Activity Monitor <span class="tag tag-emerald">⌘⇧M</span></h3>
+            <p>
+              Native macOS telemetry dialog sampling <code>proc_pid_rusage</code> physical memory footprint (<code>ri_phys_footprint</code>), RSS, guest CPU %, thread counts, CoW <code>.qcow2</code> disk read/write bytes, rolling sparklines, and expandable per-NIC RX/TX packet &amp; byte rates.
+            </p>
+          </div>
+
+          <div class="card">
+            <h3>External SSD &amp; Security Hardening <span class="tag tag-amber">Hardened</span></h3>
+            <p>
+              Streams downloads in <code>.staging/</code> on APFS/ExFAT <code>/Volumes</code> SSDs with fail-closed SHA-256 &amp; zip-slip checks, confines shared <code>.etherloom</code> bundle paths, validates loopback WebSocket <code>Host</code>/<code>Origin</code> headers under a strict CSP, and guards QEMU kills via <code>KERN_PROCARGS2</code>.
             </p>
           </div>
         </div>
       </section>
 
-      <!-- SUPPORTED GUESTS & HELPER SCRIPTS -->
+      <!-- SUPPORTED 15-OS CATALOG & CLI SCRIPTS -->
       <section id="guests-scripts">
         <div class="section-header">
-          <div class="section-eyebrow">First-Class BSD &amp; Linux Citizens</div>
-          <h2>Supported Guest Families &amp; One-Command Library Provisioning</h2>
+          <div class="section-eyebrow">15 Curated Operating Systems • 4 CPU Architectures</div>
+          <h2>Supported 15-OS Catalog &amp; Multi-Architecture Matrix</h2>
           <p>
-            Accurate VirtIO interface naming across all four major open-source UNIX families, backed by instant Copy-on-Write <code>qcow2</code> overlays and standalone CLI automation scripts in <code>scripts/</code>.
+            Open <strong>OS Library</strong> in the top toolbar (or run <code>scripts/prepare-library.sh</code>) to download, verify, import, or launch <strong>1-Click Guided Template Setup</strong> (which auto-promotes installed disks to read-only <code>0444</code> Copy-on-Write Golden Templates on shutdown). Switching NIC hardware automatically relabels ports on the canvas.
           </p>
         </div>
 
@@ -189,36 +339,150 @@
           <table>
             <thead>
               <tr>
-                <th>Guest Family</th>
-                <th>VirtIO NIC Naming</th>
-                <th>Default Profile</th>
-                <th>Automated Base Image Provisioning (<code>scripts/prepare_library.sh</code>)</th>
+                <th>#</th>
+                <th>Operating System</th>
+                <th>Category</th>
+                <th>Arch &amp; Accel</th>
+                <th>Default NIC &amp; Guest Naming</th>
+                <th>RAM &amp; Boot</th>
+                <th>Networking &amp; Lab Highlights</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td><strong>Alpine / Generic Linux</strong></td>
-                <td><code>eth0</code>, <code>eth1</code>, …</td>
-                <td>1–2 vCPU • 256–512 MB</td>
-                <td>Downloads latest <code>nocloud_alpine-*-aarch64-uefi</code> <code>qcow2</code> + <code>alpine-virt</code> ISO</td>
+                <td><strong>01</strong></td>
+                <td><strong>Alpine Linux</strong></td>
+                <td>Linux</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>eth0</code>, <code>eth1</code>)</td>
+                <td>256 MB • UEFI</td>
+                <td>~58 MB download, boots in ~2s; <code>iproute2</code>, <code>nftables</code>, <code>tcpdump</code></td>
               </tr>
               <tr>
-                <td><strong>OpenBSD</strong></td>
-                <td><code>vio0</code>, <code>vio1</code>, …</td>
-                <td>2 vCPU • 512 MB</td>
-                <td>Downloads &amp; SHA-256 verifies <code>installXX.img</code> + interactive HVF builder (<code>--setup-openbsd</code>)</td>
+                <td><strong>02</strong></td>
+                <td><strong>Debian Cloud</strong></td>
+                <td>Linux</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>enp0s1</code> / <code>eth0</code>)</td>
+                <td>512 MB • UEFI</td>
+                <td>Full <code>systemd</code> + <code>glibc</code> stack for FRRouting, WireGuard, Python/Go</td>
               </tr>
               <tr>
+                <td><strong>03</strong></td>
                 <td><strong>FreeBSD</strong></td>
-                <td><code>vtnet0</code>, <code>vtnet1</code>, …</td>
-                <td>2 vCPU • 512 MB</td>
-                <td>Downloads latest official <code>aarch64-ufs.qcow2.xz</code> &amp; expands sparse disk to 16 GB</td>
+                <td>BSD Family</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>vtnet0</code> / <code>em0</code>)</td>
+                <td>512 MB • UEFI</td>
+                <td>VNET network jails, <code>pf</code>/<code>ipfw</code>, <code>dummynet</code>, <code>CARP</code>, ZFS</td>
               </tr>
               <tr>
+                <td><strong>04</strong></td>
+                <td><strong>OpenBSD</strong></td>
+                <td>BSD Family</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>vio0</code> / <code>em0</code>)</td>
+                <td>512 MB • UEFI</td>
+                <td>SHA-256 verified <code>installXX.img</code> + Guided Setup; <code>pf</code>, <code>CARP</code>, <code>pfsync</code>, <code>OpenBGPD</code></td>
+              </tr>
+              <tr>
+                <td><strong>05</strong></td>
                 <td><strong>NetBSD</strong></td>
-                <td><code>vioif0</code>, <code>vioif1</code>, …</td>
-                <td>1–2 vCPU • 256 MB</td>
-                <td>Downloads <code>evbarm-aarch64/arm64.img.gz</code> &amp; converts to thin-provisioned 8 GB <code>qcow2</code></td>
+                <td>BSD Family</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>vioif0</code> / <code>wm0</code>)</td>
+                <td>256 MB • UEFI</td>
+                <td>Pre-installed <code>evbarm-aarch64</code> image; <code>npf</code> firewall &amp; rump kernels</td>
+              </tr>
+              <tr>
+                <td><strong>06</strong></td>
+                <td><strong>OpenWrt</strong></td>
+                <td>Routers &amp; Firewalls</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>eth0</code>, <code>eth1</code>)</td>
+                <td>128 MB • UEFI</td>
+                <td>14 MB image! Instant <code>ash</code> shell, UCI <code>bridge-vlan</code>, <code>fw4</code>/<code>nftables</code>, 802.1Q</td>
+              </tr>
+              <tr>
+                <td><strong>07</strong></td>
+                <td><strong>MikroTik RouterOS CHR</strong></td>
+                <td>Routers &amp; Firewalls</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>ether1</code>, <code>ether2</code>)</td>
+                <td>256 MB • UEFI</td>
+                <td>Native ARM64 RouterOS v7 (1-indexed ports); BGP, OSPF, MPLS, VXLAN</td>
+              </tr>
+              <tr>
+                <td><strong>08</strong></td>
+                <td><strong>VyOS</strong></td>
+                <td>Routers &amp; Firewalls</td>
+                <td><span class="tag tag-indigo">x86_64 • MTTCG / HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>eth0</code>, <code>eth1</code>)</td>
+                <td>1024 MB • BIOS</td>
+                <td>Juniper-style <code>configure</code> / <code>set</code> / <code>commit</code> CLI + FRRouting</td>
+              </tr>
+              <tr>
+                <td><strong>09</strong></td>
+                <td><strong>OPNsense (<code>nano</code>)</strong></td>
+                <td>Routers &amp; Firewalls</td>
+                <td><span class="tag tag-indigo">x86_64 • MTTCG / HVF</span></td>
+                <td><code>e1000</code> (<code>em0</code>, <code>em1</code>)</td>
+                <td>2048 MB • BIOS</td>
+                <td>Pre-installed <code>nano</code> serial appliance — boots straight to console &amp; WebGUI</td>
+              </tr>
+              <tr>
+                <td><strong>10</strong></td>
+                <td><strong>pfSense CE</strong></td>
+                <td>Routers &amp; Firewalls</td>
+                <td><span class="tag tag-indigo">x86_64 • MTTCG / HVF</span></td>
+                <td><code>e1000</code> (<code>em0</code>, <code>em1</code>)</td>
+                <td>2048 MB • UEFI</td>
+                <td>Classic FreeBSD <code>pf</code> firewall appliance (Local File Import from Netgate)</td>
+              </tr>
+              <tr>
+                <td><strong>11</strong></td>
+                <td><strong>9front (Plan 9)</strong></td>
+                <td>Research, UNIX &amp; Retro</td>
+                <td><span class="tag tag-emerald">aarch64 • HVF</span></td>
+                <td><code>virtio-net-pci</code> (<code>/net/ether0</code>)</td>
+                <td>512 MB • UEFI</td>
+                <td>Bell Labs Plan 9 fork where the entire TCP/IP stack is a synthetic <code>/net</code> filesystem</td>
+              </tr>
+              <tr>
+                <td><strong>12</strong></td>
+                <td><strong>OmniOS (Illumos)</strong></td>
+                <td>Research, UNIX &amp; Retro</td>
+                <td><span class="tag tag-indigo">x86_64 • MTTCG / HVF</span></td>
+                <td><code>e1000</code> (<code>e1000g0</code>, <code>e1000g1</code>)</td>
+                <td>2048 MB • BIOS</td>
+                <td>Illumos Crossbow (<code>dladm</code> VNICs/etherstubs, <code>ipadm</code>), DTrace, ZFS, Zones</td>
+              </tr>
+              <tr>
+                <td><strong>13</strong></td>
+                <td><strong>DragonFly BSD</strong></td>
+                <td>BSD Family</td>
+                <td><span class="tag tag-indigo">x86_64 • MTTCG / HVF</span></td>
+                <td><code>e1000</code> (<code>em0</code>, <code>em1</code>)</td>
+                <td>1024 MB • BIOS / AHCI</td>
+                <td>Per-CPU lockless LWKT network protocol threads &amp; HAMMER2 filesystem</td>
+              </tr>
+              <tr>
+                <td><strong>14</strong></td>
+                <td><strong>Haiku OS</strong></td>
+                <td>Research, UNIX &amp; Retro</td>
+                <td><span class="tag tag-indigo">x86_64 • MTTCG / HVF</span></td>
+                <td><code>e1000</code> (<code>/dev/net/ipro1000/0</code>)</td>
+                <td>1024 MB • UEFI / AHCI</td>
+                <td>Ultra-responsive BeOS-inspired graphical desktop streamed over Embedded VNC</td>
+              </tr>
+              <tr>
+                <td><strong>15</strong></td>
+                <td><strong>FreeDOS + mTCP</strong></td>
+                <td>Research, UNIX &amp; Retro</td>
+                <td><span class="tag tag-amber">i386 • Fast TCG</span></td>
+                <td><code>pcnet</code> (<code>PCNTPK 0x60</code>)</td>
+                <td>32 MB • BIOS / IDE</td>
+                <td>Boots in &lt;1s! Crynwr packet drivers + <code>mTCP</code> with zero background OS chatter</td>
               </tr>
             </tbody>
           </table>
@@ -227,44 +491,84 @@
         <div id="quickstart" class="grid-2">
           <div class="code-card">
             <div class="code-header">
-              <span>1. Provision ARM64 Golden Templates (Local or External SSD)</span>
-              <button class="copy-btn" data-copy="brew install qemu xz&#10;brew install --cask wireshark&#10;./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom&#10;./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd">Copy</button>
+              <span>1. Install Host Packages &amp; Provision Golden Templates</span>
+              <button class="copy-btn" data-copy="brew install qemu xz python uv&#10;brew install --cask wireshark&#10;./scripts/prepare-library.sh /Volumes/Samsung_T7/Etherloom&#10;./scripts/prepare-library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd">Copy</button>
             </div>
-            <pre><code>brew install qemu xz
+            <pre><code>brew install qemu xz python uv
 brew install --cask wireshark
 
-# Download &amp; lock read-only Alpine, FreeBSD, NetBSD &amp; OpenBSD kit
-./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom
+# Provision Alpine, FreeBSD, NetBSD &amp; verified OpenBSD kit on SSD
+./scripts/prepare-library.sh /Volumes/Samsung_T7/Etherloom
 
 # Optional 2-minute HVF serial install for OpenBSD golden template
-./scripts/prepare_library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd</code></pre>
+./scripts/prepare-library.sh /Volumes/Samsung_T7/Etherloom --setup-openbsd</code></pre>
           </div>
 
           <div class="code-card">
             <div class="code-header">
-              <span>2. Run CLI Two-VM Wire Smoke Test or Launch Desktop Studio</span>
-              <button class="copy-btn" data-copy="./scripts/smoke-test-wire.sh /Volumes/Samsung_T7/Etherloom --node1 alpine --node2 freebsd&#10;npm install &amp;&amp; npm run tauri dev">Copy</button>
+              <span>2. Clear macOS Quarantine (DMG) or Build From Source</span>
+              <button class="copy-btn" data-copy="xattr -dr com.apple.quarantine /Applications/Etherloom.app&#10;./scripts/smoke-test-wire.sh /Volumes/Samsung_T7/Etherloom --node1 alpine --node2 freebsd&#10;npm install &amp;&amp; npm run tauri dev">Copy</button>
             </div>
-            <pre><code># Boot Alpine &lt;-&gt; FreeBSD over UDP wire + live Wireshark + .pcap
+            <pre><code># Clear Safari/Chrome quarantine once for ad-hoc signed .dmg builds:
+xattr -dr com.apple.quarantine /Applications/Etherloom.app
+
+# Run CLI 2-VM UDP wire smoke test or launch full Tauri Studio:
 ./scripts/smoke-test-wire.sh /Volumes/Samsung_T7/Etherloom \
   --node1 alpine --node2 freebsd
-
-# Or launch the full Etherloom GUI Studio
-npm install
-npm run tauri dev</code></pre>
+npm install &amp;&amp; npm run tauri dev</code></pre>
           </div>
         </div>
       </section>
 
-      <!-- TCPFLOWY SHOWCASE -->
+      <!-- WIRETAPS, PCAP EXPORT & TCPFLOWY SHOWCASE -->
       <section id="tcpflowy">
         <div class="section-header">
           <div class="section-eyebrow">Deep Packet &amp; Flow Visibility</div>
-          <h2>Live Wireshark Pipes &amp; Integrated <code>tcpflowy</code> Dissector</h2>
+          <h2>One-Click Wiretaps, Atomic PCAP Export &amp; Integrated <code>tcpflowy</code></h2>
           <p>
-            Stream live Ethernet II frames into <code>Wireshark.app</code> via named FIFOs, or click
-            <strong>Stop &amp; Dissect</strong> on any wire to inspect TCP handshakes, retransmissions, reconstructed streams, and behavioral SPLT telemetry powered by <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><code>tcpflowy</code></a>.
+            Click or right-click any virtual cable to start a live <code>REC MM:SS</code> capture alongside independent <code>mkfifo</code>
+            <strong>Live Wireshark</strong> streaming. Stopping a capture atomically drains queued frames, flushes buffers, and <code>fsync</code>s
+            <code>&lt;nodeA&gt;-&lt;nicA&gt;__&lt;nodeB&gt;-&lt;nicB&gt;__&lt;timestamp&gt;.pcap</code> with zero packet truncation.
           </p>
+        </div>
+
+        <div class="table-wrap" style="margin-bottom: 1.35rem">
+          <table>
+            <thead>
+              <tr>
+                <th>Capture Workflow</th>
+                <th>One-Click Action</th>
+                <th>Zero-Root Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Live Stream</strong></td>
+                <td><code>Live Wireshark (FIFO)</code></td>
+                <td>Streams real-time <code>LINKTYPE_ETHERNET</code> frames into <code>Wireshark.app</code> over <code>/tmp/etherloom/tap_&lt;link&gt;.pcap</code> while <code>.pcap</code> file recording continues uninterrupted.</td>
+              </tr>
+              <tr>
+                <td><strong>Stop &amp; Export</strong></td>
+                <td><code>Stop &amp; Save PCAP…</code></td>
+                <td>Atomically flushes &amp; <code>fsync</code>s the capture in <code>&lt;project&gt;.etherloom/captures/</code>, opens a native macOS Save dialog, and offers a 1-click <strong>Reveal in Finder</strong> action.</td>
+              </tr>
+              <tr>
+                <td><strong>Stop &amp; Inspect</strong></td>
+                <td><code>Stop &amp; Open in Wireshark</code></td>
+                <td>Finalizes the <code>.pcap</code> with zero truncation and opens <code>Wireshark.app</code> in static read mode (<code>-r &lt;pcap_path&gt;</code>).</td>
+              </tr>
+              <tr>
+                <td><strong>Stop &amp; Dissect</strong></td>
+                <td><code>Stop &amp; Dissect (tcpflowy)</code></td>
+                <td>Finalizes the <code>.pcap</code> and immediately dissects TCP conversations inside the Bottom Dock via <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><code>tcpflowy</code></a>.</td>
+              </tr>
+              <tr>
+                <td><strong>Captures History</strong></td>
+                <td><code>Dissect / Wireshark / Save Copy As… / Finder</code></td>
+                <td>Re-dissect any historical workspace capture, import external <code>.pcap</code>/<code>.pcapng</code> files, export copies anywhere on macOS, or reveal in Finder (<code>open -R</code>).</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="grid-2">
@@ -275,7 +579,7 @@ npm run tauri dev</code></pre>
             <div>
               <div class="ladder-row">
                 <span>+0.0 ms</span>
-                <span style="color: #38bdf8">10.0.0.1:51422 ──── [SYN] Seq=0 Win=64240 ───▶ 10.0.0.2:8080</span>
+                <span style="color: #22d3ee">10.0.0.1:51422 ──── [SYN] Seq=0 Win=64240 ───▶ 10.0.0.2:8080</span>
                 <span>74 B</span>
               </div>
               <div class="ladder-row">
@@ -285,7 +589,7 @@ npm run tauri dev</code></pre>
               </div>
               <div class="ladder-row">
                 <span>+80.9 ms</span>
-                <span style="color: #38bdf8">10.0.0.1:51422 ──── [ACK] Seq=1 Ack=1 ───────▶ 10.0.0.2:8080</span>
+                <span style="color: #22d3ee">10.0.0.1:51422 ──── [ACK] Seq=1 Ack=1 ───────▶ 10.0.0.2:8080</span>
                 <span>66 B</span>
               </div>
               <div class="ladder-row">
@@ -315,7 +619,7 @@ npm run tauri dev</code></pre>
               </p>
               <p>
                 Every dissected capture surfaces bidirectional <strong>ASCII &amp; Hex Stream Reconstruction</strong>,
-                <strong>SPLT burst-timing histograms</strong>, <strong>Shannon payload entropy</strong>, passive DNS maps, and copyable <strong>Suricata</strong>, <strong>Wireshark</strong>, and <strong>BPF</strong> detection rules.
+                <strong>SPLT burst-timing histograms</strong>, <strong>Shannon payload entropy</strong>, passive DNS maps, JA3 fingerprints, and copyable <strong>Suricata</strong>, <strong>Wireshark</strong>, and <strong>BPF</strong> detection rules.
               </p>
             </div>
             <div>
@@ -333,7 +637,7 @@ npm run tauri dev</code></pre>
           <div class="section-eyebrow">Interactive Networking Academy</div>
           <h2>Eight Built-in Multi-OS Guided Labs</h2>
           <p>
-            Each lab instantiates a clean sandbox workspace (<code>academy-&lt;id&gt;.etherloom</code>), checks OS Library prerequisites with 1-click download handoffs, highlights target wires on the canvas, and pairs Markdown protocol diagrams with <strong>Send to Serial</strong> commands.
+            Each lab instantiates a clean sandbox workspace (<code>academy-&lt;id&gt;.etherloom</code>), checks OS Library prerequisites with 1-click filtered download handoffs, illuminates target wires on the canvas, and pairs Markdown protocol diagrams with <strong>Send to Serial</strong> command blocks.
           </p>
         </div>
 
@@ -383,7 +687,7 @@ npm run tauri dev</code></pre>
           <div class="section-eyebrow">Host Specifications</div>
           <h2>System Requirements</h2>
           <p>
-            Designed for Apple Silicon and Intel Macs running unprivileged in standard userspace — with optional external SSD media offload.
+            Designed for Apple Silicon and Intel Macs running unprivileged in standard userspace — with first-class external USB-C / Thunderbolt SSD offload.
           </p>
         </div>
 
@@ -402,31 +706,31 @@ npm run tauri dev</code></pre>
                 <td><strong>macOS Version</strong></td>
                 <td>macOS 13 (Ventura)</td>
                 <td>macOS 14+ (Sonoma / Sequoia / Tahoe / 27+)</td>
-                <td>Unprivileged Apple <code>Hypervisor.framework</code> (<code>-accel hvf</code>) + multi-arch <code>TCG</code> (for browser-downloaded unsigned <code>.dmg</code> builds, clear Safari quarantine once via <code>xattr -dr com.apple.quarantine /Applications/Etherloom.app</code>)</td>
+                <td>Unprivileged Apple <code>Hypervisor.framework</code> (<code>-accel hvf</code>) + multi-arch <code>TCG</code> (for browser-downloaded ad-hoc signed <code>.dmg</code> builds, clear quarantine once via <code>xattr -dr com.apple.quarantine /Applications/Etherloom.app</code> or <code>./scripts/allow-macos-app.sh</code>)</td>
               </tr>
               <tr>
                 <td><strong>CPU</strong></td>
                 <td>Apple Silicon (<code>M1</code>+) or Intel <code>VT-x</code></td>
                 <td>Apple <code>M1 Pro</code> / <code>M2</code> / <code>M3</code> / <code>M4</code> (8+ cores)</td>
-                <td>Native ARM64 HVF on Apple Silicon; native <code>x86_64</code> HVF on Intel Macs</td>
+                <td>Native ARM64 HVF on Apple Silicon; native <code>x86_64</code> HVF on Intel Macs; multi-threaded TCG (<code>thread=multi</code>) for cross-arch guests</td>
               </tr>
               <tr>
                 <td><strong>Memory (RAM)</strong></td>
                 <td>8 GB</td>
                 <td>16 GB+</td>
-                <td>Guests range from 32 MB (FreeDOS) &amp; 128 MB (OpenWrt) up to 1.5 GB (OPNsense)</td>
+                <td>Guests range from 32 MB (FreeDOS) &amp; 128 MB (OpenWrt) up to 1–2 GB (VyOS / OPNsense); fabric appliances (Switch, Hub, DHCP, Host NAT) run in-process with ~0 MB VM overhead</td>
               </tr>
               <tr>
                 <td><strong>Disk Storage</strong></td>
                 <td>500 MB local + 4 GB library</td>
                 <td>20–40 GB+ (Internal or <code>/Volumes</code> SSD)</td>
-                <td>Supports APFS sparse <code>qcow2</code> overlays and ExFAT external USB-C/Thunderbolt drives</td>
+                <td>Supports APFS sparse <code>qcow2</code> overlays and ExFAT external USB-C/Thunderbolt drives with <code>.staging/</code> streaming</td>
               </tr>
               <tr>
                 <td><strong>Host Packages</strong></td>
                 <td><code>brew install qemu</code></td>
                 <td><code>qemu</code> + <code>wireshark</code> + <code>python uv</code></td>
-                <td>Zero <code>root</code> / <code>sudo</code>, zero kernel extensions, verified live via <strong>Env Doctor</strong></td>
+                <td>Zero <code>root</code> / <code>sudo</code>, zero kernel extensions, verified live via the toolbar <strong>Env Doctor</strong> badge</td>
               </tr>
             </tbody>
           </table>
@@ -447,18 +751,18 @@ npm run tauri dev</code></pre>
           <div class="card">
             <h3>Core Engines &amp; Packet Analysis</h3>
             <p>
-              • <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><strong>tcpflowy</strong></a> by Dragos Iorgulescu — TCP/UDP flow intelligence, SPLT signatures, entropy profiling, and rule synthesis.<br />
-              • <a href="https://www.qemu.org/" target="_blank" rel="noopener noreferrer"><strong>QEMU</strong></a> &amp; <strong>TianoCore EDK II</strong> — ARM64/x86_64 virtualization, <code>qemu-img</code> CoW overlays, and UEFI firmware.<br />
+              • <a href="https://github.com/diorgulescu/tcpflowy" target="_blank" rel="noopener noreferrer"><strong>tcpflowy</strong></a> by Dragoş Iorgulescu — TCP/UDP flow intelligence, SPLT signatures, entropy profiling, and rule synthesis.<br />
+              • <a href="https://www.qemu.org/" target="_blank" rel="noopener noreferrer"><strong>QEMU</strong></a> &amp; <strong>TianoCore EDK II</strong> — Multi-arch (<code>aarch64</code>, <code>x86_64</code>, <code>i386</code>, <code>riscv64</code>) virtualization, <code>qemu-img</code> CoW overlays, and UEFI/SeaBIOS firmware.<br />
               • <strong>Apple <code>Hypervisor.framework</code></strong> — Zero-root macOS hardware-accelerated VM execution.<br />
-              • <a href="https://www.wireshark.org/" target="_blank" rel="noopener noreferrer"><strong>Wireshark</strong></a> — Live named-pipe Ethernet frame inspection.
+              • <a href="https://www.wireshark.org/" target="_blank" rel="noopener noreferrer"><strong>Wireshark</strong></a> — Live named-pipe &amp; static <code>.pcap</code> Ethernet frame inspection.
             </p>
           </div>
 
           <div class="card">
-            <h3>Frameworks, UI Libraries &amp; Guest OSes</h3>
+            <h3>Frameworks, UI Libraries &amp; Guest OS Communities</h3>
             <p>
-              • <strong>Guest OS Projects</strong>: <a href="https://www.openbsd.org/" target="_blank" rel="noopener noreferrer">OpenBSD</a>, <a href="https://www.freebsd.org/" target="_blank" rel="noopener noreferrer">FreeBSD</a>, <a href="https://www.netbsd.org/" target="_blank" rel="noopener noreferrer">NetBSD</a>, and <a href="https://alpinelinux.org/" target="_blank" rel="noopener noreferrer">Alpine Linux</a>.<br />
-              • <strong>Rust &amp; Desktop Shell</strong>: <a href="https://tauri.app/" target="_blank" rel="noopener noreferrer">Tauri v2</a>, <a href="https://tokio.rs/" target="_blank" rel="noopener noreferrer">Tokio</a>, Serde, <code>toml</code>, <code>uuid</code>.<br />
+              • <strong>15 Curated Guest OSes</strong>: <a href="https://alpinelinux.org/" target="_blank" rel="noopener noreferrer">Alpine</a>, <a href="https://www.debian.org/" target="_blank" rel="noopener noreferrer">Debian</a>, <a href="https://www.openbsd.org/" target="_blank" rel="noopener noreferrer">OpenBSD</a>, <a href="https://www.freebsd.org/" target="_blank" rel="noopener noreferrer">FreeBSD</a>, <a href="https://www.netbsd.org/" target="_blank" rel="noopener noreferrer">NetBSD</a>, <a href="https://www.dragonflybsd.org/" target="_blank" rel="noopener noreferrer">DragonFly BSD</a>, <a href="https://openwrt.org/" target="_blank" rel="noopener noreferrer">OpenWrt</a>, <a href="https://mikrotik.com/download" target="_blank" rel="noopener noreferrer">MikroTik CHR</a>, <a href="https://vyos.io/" target="_blank" rel="noopener noreferrer">VyOS</a>, <a href="https://opnsense.org/" target="_blank" rel="noopener noreferrer">OPNsense</a>, <a href="https://www.pfsense.org/" target="_blank" rel="noopener noreferrer">pfSense CE</a>, <a href="https://9front.org/" target="_blank" rel="noopener noreferrer">9front</a>, <a href="https://omnios.org/" target="_blank" rel="noopener noreferrer">OmniOS</a>, <a href="https://www.haiku-os.org/" target="_blank" rel="noopener noreferrer">Haiku</a>, and <a href="https://www.freedos.org/" target="_blank" rel="noopener noreferrer">FreeDOS</a> + <a href="https://www.brutman.com/mTCP/" target="_blank" rel="noopener noreferrer">mTCP</a>.<br />
+              • <strong>Rust &amp; Desktop Shell</strong>: <a href="https://tauri.app/" target="_blank" rel="noopener noreferrer">Tauri v2</a>, <a href="https://tokio.rs/" target="_blank" rel="noopener noreferrer">Tokio</a>, Serde, <code>toml</code>, <code>uuid</code>, <code>libc</code>.<br />
               • <strong>Frontend Studio</strong>: <a href="https://react.dev/" target="_blank" rel="noopener noreferrer">React 19</a>, <a href="https://reactflow.dev/" target="_blank" rel="noopener noreferrer"><code>@xyflow/react</code></a>, <a href="https://xtermjs.org/" target="_blank" rel="noopener noreferrer"><code>xterm.js</code></a>, <a href="https://novnc.com/" target="_blank" rel="noopener noreferrer"><code>noVNC</code></a> (MPL-2.0), Lucide, and TailwindCSS.<br />
               • Full license notices: see <a href="https://github.com/diorgulescu/etherloom/blob/main/CREDITS.md" target="_blank" rel="noopener noreferrer">CREDITS.md</a> and <a href="https://github.com/diorgulescu/etherloom/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">LICENSE</a>.
             </p>
@@ -467,14 +771,23 @@ npm run tauri dev</code></pre>
       </section>
     </main>
 
+    <!-- Full-Resolution Screenshot Lightbox -->
+    <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged Studio Screenshot">
+      <div class="lightbox-inner">
+        <img id="lightbox-img" src="" alt="" />
+        <div class="lightbox-caption" id="lightbox-caption"></div>
+      </div>
+    </div>
+
     <footer class="site-footer">
       <div class="container" style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem">
         <div>
           <strong>Etherloom</strong> — Zero-Root macOS Network Orchestration &amp; Learning Studio.<br />
           Licensed under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0 (or later)</a>.
         </div>
-        <div style="display: flex; gap: 1.25rem; align-items: center">
+        <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap">
           <a href="https://github.com/diorgulescu/etherloom">Source Code</a>
+          <a href="https://github.com/diorgulescu/etherloom/releases">Releases</a>
           <a href="https://github.com/diorgulescu/etherloom/blob/main/ARCHITECTURE.md">Architecture</a>
           <a href="https://github.com/diorgulescu/etherloom/blob/main/CREDITS.md">Credits</a>
           <a href="https://github.com/diorgulescu/tcpflowy">tcpflowy</a>
@@ -509,6 +822,35 @@ npm run tauri dev</code></pre>
               }, 1600);
             });
           });
+        });
+
+        var lightbox = document.getElementById("lightbox");
+        var lightboxImg = document.getElementById("lightbox-img");
+        var lightboxCap = document.getElementById("lightbox-caption");
+
+        function closeLightbox() {
+          if (!lightbox) return;
+          lightbox.classList.remove("open");
+          if (lightboxImg) lightboxImg.src = "";
+        }
+
+        document.querySelectorAll("[data-lightbox]").forEach(function (trigger) {
+          trigger.addEventListener("click", function () {
+            var src = trigger.getAttribute("data-lightbox");
+            var cap = trigger.getAttribute("data-caption") || "";
+            if (!lightbox || !lightboxImg || !src) return;
+            lightboxImg.src = src;
+            lightboxImg.alt = cap;
+            if (lightboxCap) lightboxCap.textContent = cap;
+            lightbox.classList.add("open");
+          });
+        });
+
+        if (lightbox) {
+          lightbox.addEventListener("click", closeLightbox);
+        }
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") closeLightbox();
         });
       })();
     </script>
